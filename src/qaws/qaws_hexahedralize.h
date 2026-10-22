@@ -44,14 +44,22 @@
  *                hexahedra are the unit cubes of the integer lattice in the
  *                map's image, their vertices mapped back. A rotated box comes
  *                out as a grid aligned with it, a bent bar as a bent grid.
- *                Fields with singular edges (a sphere, a round torus) or that
- *                turn round a hole: UNSUPPORTED_OPERATION for now.
+ *                With singular edges (a sphere, a cylinder's field) the
+ *                inside is tetrahedralized finer (0.28 of the cell), the
+ *                field relaxed by MBO so its singular curves come apart and
+ *                straight, the map fitted with transitions across a cut
+ *                (CubeCover: the transitions, the singular lines and the
+ *                border's planes rounded to whole numbers), its lattice read
+ *                off as HexEx does and the hexahedra relaxed (each vertex
+ *                kept where its worst scaled Jacobian rises);
+ *                QAWS_STATUS_UNSUPPORTED_OPERATION when more than one cell
+ *                in a hundred turns over in that map.
  *   POLYCUBE     hexahedra of a polycube map (Gregson, Sheffer, Zhang 2011):
  *                the inside tetrahedralized (half the cell size) and deformed
  *                until each border facet faces an axis: each pass labels the
- *                facets by their nearest axis (an old label kept unless
- *                another is clearly nearer, a facet unlike neighbours that
- *                agree taking theirs), turns each facet onto its axis,
+ *                facets by an alpha-expansion graph cut (their normals
+ *                against the axes, the old label favoured, the labels'
+ *                borders short), turns each facet onto its axis,
  *                spreads the turns inside (harmonic per vertex) and solves for
  *                the positions whose gradients are the cells' turned ones.
  *                The deformation's rotations (the polar parts of its

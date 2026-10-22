@@ -10,7 +10,11 @@
  *     frame the world's axes; of the torus's: orthonormal frames, the
  *     border's cells holding an axis along its normal;
  *   - FRAME_FIELD: a turned box in perfect cubes along it, its volume exact;
- *     a bent bar; a round torus (singular edges) refused;
+ *     a bent bar; a round torus at a cell as wide as half its tube: no cube
+ *     fits (INVALID_ARGUMENT);
+ *   - FRAME_FIELD through singular edges: a cylinder (its field's four
+ *     singular lines along its side) and a ball (its singular graph a
+ *     cube's), all hexahedra valid, positive, near the solid's volume;
  *   - refusals: an open surface, the reserved methods, a field on hexahedra.
  *
  * By default the surfaces and the cells are coarser (twice the sizes or
@@ -381,8 +385,8 @@ static void test_frame_field(void)
 		q2.hexahedra, v2 ? qaws_status_to_string(qaws_volume_mesh_validate(v2)) : "-", (double)q2.min_scaled_jacobian, (double)q2.volume);
 	TEST_ASSERT(s2 == QAWS_STATUS_OK && v2 && qaws_volume_mesh_validate(v2) == QAWS_STATUS_OK && (double)q2.min_scaled_jacobian > 0.9
 		&& fabs((double)q2.volume - 0.75 * M_PI) < (heavy ? 0.01 : 0.02) * 0.75 * M_PI, msg);   /* (by default 2%: 1.0% measured at 0.3) */
-	sprintf(msg, "round torus along its field (singular edges): %s", qaws_status_to_string(s3));
-	TEST_ASSERT(s3 == QAWS_STATUS_UNSUPPORTED_OPERATION && !v3, msg);
+	sprintf(msg, "round torus along its field (singular edges), a cell half its tube: %s", qaws_status_to_string(s3));
+	TEST_ASSERT(heavy || s3 == QAWS_STATUS_INVALID_ARGUMENT, msg);   /* (heavy: a finer torus, not checked) */
 	qaws_volume_mesh_destroy(v1);
 	qaws_volume_mesh_destroy(v2);
 	qaws_volume_mesh_destroy(v3);
@@ -390,6 +394,97 @@ static void test_frame_field(void)
 	qaws_mesh_3d_destroy(bent);
 	qaws_mesh_3d_destroy(ts);
 	qaws_surface_destroy(t);
+}
+
+/* a closed surface of revolution: rings of nu points at the heights and radii (z, r) given, a point closing each end that
+   has radius 0 (or a flat cap's centre) */
+static qaws_mesh_3d* th_revolve(unsigned int nu, double const* zr, unsigned int nr)
+{
+	unsigned int n = nu * nr + 2, i, j, k = 0;
+	double* x = (double*)malloc(sizeof(double) * 3 * n);
+	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 6 * nu * (nr + 1));
+	qaws_scalar* xs = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (j = 0; j < nr; j++)
+		for (i = 0; i < nu; i++)
+		{
+			double a = 2 * M_PI * i / nu;
+			x[3 * (j * nu + i)] = zr[2 * j + 1] * cos(a);
+			x[3 * (j * nu + i) + 1] = zr[2 * j + 1] * sin(a);
+			x[3 * (j * nu + i) + 2] = zr[2 * j];
+		}
+	x[3 * (n - 2)] = x[3 * (n - 2) + 1] = 0;
+	x[3 * (n - 2) + 2] = zr[0] - (zr[1] > 1e-9 ? 0 : 0);
+	x[3 * (n - 1)] = x[3 * (n - 1) + 1] = 0;
+	x[3 * (n - 1) + 2] = zr[2 * (nr - 1)];
+	for (i = 0; i < nu; i++)
+	{
+		f[k++] = n - 2; f[k++] = (i + 1) % nu; f[k++] = i;
+		f[k++] = n - 1; f[k++] = (nr - 1) * nu + i; f[k++] = (nr - 1) * nu + (i + 1) % nu;
+	}
+	for (j = 0; j + 1 < nr; j++)
+		for (i = 0; i < nu; i++)
+		{
+			unsigned int a = j * nu + i, b = j * nu + (i + 1) % nu;
+			f[k++] = a; f[k++] = b; f[k++] = b + nu;
+			f[k++] = a; f[k++] = b + nu; f[k++] = a + nu;
+		}
+	for (i = 0; i < 3 * n; i++)
+		xs[i] = (qaws_scalar)x[i];
+	memset(&d, 0, sizeof d);
+	d.positions = xs;
+	d.vertex_count = n;
+	d.face_vertices = f;
+	d.face_count = k / 3;
+	qaws_mesh_3d_create(&m, &d);
+	free(x);
+	free(f);
+	free(xs);
+	return m;
+}
+
+/* FRAME_FIELD through singular edges: a cylinder of radius 0.5 and height 1.5 at 0.4, a unit ball at 0.5 */
+static void test_frame_singular(void)
+{
+	double cyl[2 * 13], ball[2 * 15];
+	unsigned int k, j;
+	char msg[300];
+	for (j = 0; j < 13; j++)
+	{
+		cyl[2 * j] = 1.5 * j / 12;
+		cyl[2 * j + 1] = 0.5;
+	}
+	for (j = 0; j < 15; j++)
+	{
+		double th = M_PI * (j + 1) / 16;
+		ball[2 * j] = -cos(th);
+		ball[2 * j + 1] = sin(th);
+	}
+	for (k = 0; k < 2; k++)
+	{
+		qaws_mesh_3d* s = k ? th_revolve(32, ball, 15) : th_revolve(32, cyl, 13);
+		qaws_hexahedralize_desc d;
+		qaws_volume_mesh* v = NULL;
+		qaws_volume_quality q;
+		qaws_status st;
+		double vol = k ? 4.0 / 3 * M_PI : M_PI * 0.25 * 1.5;
+		memset(&d, 0, sizeof d);
+		memset(&q, 0, sizeof q);
+		d.method = QAWS_HEXES_FRAME_FIELD;
+		d.cell_size = (qaws_scalar)(k ? 0.5 : 0.4);
+		st = qaws_volume_mesh_hexahedralize(&v, NULL, s, &d);
+		if (v)
+			qaws_volume_mesh_measure_quality(&q, v);
+		sprintf(msg, "%s along its field (singular edges): %s, %u hexahedra, validate %s, scaled Jacobian from %.3f, volume %.3f (the solid %.3f)",
+			k ? "a ball" : "a cylinder", qaws_status_to_string(st), q.hexahedra, v ? qaws_status_to_string(qaws_volume_mesh_validate(v)) : "-",
+			(double)q.min_scaled_jacobian, (double)q.volume, vol);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && v && qaws_volume_mesh_validate(v) == QAWS_STATUS_OK && q.hexahedra >= (k ? 20u : 12u) &&
+			(double)q.min_scaled_jacobian > 0.1 && fabs((double)q.volume - vol) < 0.25 * vol, msg);
+		qaws_volume_mesh_destroy(v);
+		qaws_mesh_3d_destroy(s);
+	}
 }
 
 static void test_refusals(void)
@@ -440,6 +535,7 @@ int test_128_hexahedralize_main(void)
 	test_box();
 	test_torus();
 	test_frame_field();
+	test_frame_singular();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

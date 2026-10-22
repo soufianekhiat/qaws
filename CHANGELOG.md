@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- FRAME_FIELD hexahedra through singular edges: the field relaxed by MBO, an integer-grid map with
+  transitions across a reduced cut (CubeCover), its lattice read off as HexEx does, the hexahedra relaxed;
+  a can and a ball meshed. Test 128, figure 59 (key X).
 - GLOBAL quads quantize a torus's two periods together (tree-cotree cuts, the map's energy
   fitted over the four steps): tori whose flow's grid spiralled across a seam close once round
   each loop. Test 136, figure 58 (key W).

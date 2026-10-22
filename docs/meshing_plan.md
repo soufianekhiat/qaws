@@ -160,26 +160,7 @@ Hexahedra and quads (research-scale):
 
 20. **Polycube labels by graph cuts: landed** (`sm_label_cut`, alpha-expansion over a Dinic max-flow, test 176, figure 57 key V): data the facets' areas times 1 − their normals along the axes, smoothness the shared edges' lengths (twice between opposite sides). The L and the bent bar unchanged (valid, 0.98 and 0.26); a box with a bump of 0.3 / 0.4 at 0.68 / 0.67 (0.36 / 0.29 before); over bumps 0.25 to 0.65 the mean 0.48 (0.37). Next: spikes (bumps past half the height) given their own patches, the atlas groups by the same cut.
 21. **GLOBAL torus periods: landed** (`qg_periods`, test 136, figure 58 key W): tree-cotree cuts, a whole step along each changing one period; the map's energy over the four steps fitted from 15 solves on one factor, its least integer point kept. Spirals in 14 of 20 tori before, 2 after (radii 1 and 0.3 to 0.7, at 0.12 to 0.4), at the same time; those left follow a field that turns slowly round the tube (INSTANT keeps the smoothest on a tie; guided along the parallels 17 of 20 close). Next: higher genus (4 g steps), the curvature-aligned field preferred on closed tubes.
-22. **FRAME_FIELD through singular edges** (HexEx extraction, Lyon et al. 2016): hexahedra where the frame field has singular curves. Check: a cylinder's and a sphere's hexes all valid.
-    Tried 2026-10-22, not landed (work kept in `wip_frame_field_singular.patch` at the repository's root, not committed):
-    a seamless map with transitions (CubeCover: the frames combed along a spanning tree, the cut reduced to the sheets the
-    singular edges need, one unknown per vertex copy, the transitions and the singular lines and border planes rounded
-    greedily by kind) and its lattice read off as HexEx does (points registered per cell and merged across facets by the
-    whole transitions, each cube's corners found by walking the map from its centre). It reproduces a box exactly when
-    forced through it, frames scrambled or not. Blocked by the field: the singular curves of `ff_frames` zigzag across
-    the tetrahedra (on a cylinder 60 of 73 singular edges lie more than 30 degrees off the axis their frames turn about;
-    the sphere has edges turning by a third of a turn, which no hexahedra follow), and a seamless map must put each
-    singular edge on its axis's line, so the map collapses (every cell of the cylinder near flat). Straightening the
-    curves by moving their points (no cell below a tenth) aligns 43 of 73 but the map still collapses. Needed first:
-    a frame field whose singular graph is valid (Ray et al. 2016 or MBO with the graph repaired: quarter turns only, no
-    curve ending inside), tetrahedra split along the singular curves (their edges on the curves, aligned with the axes),
-    then this map and extraction.
-    Second look (same day): the cut constraints are right (a box with every facet cut and its frames scrambled keeps
-    every cell's volume), and the map follows the cylinder's axis exactly (rows' mean lengths 1.00) but its section
-    collapses (0.65, 0.21): `ff_frames` gives the cylinder one closed singular loop, two vertical lines within a quarter
-    of its radius of the axis joined near the caps, at every resolution tried (5k to 27k tetrahedra) and every number of
-    sweeps (60 to 1500). No map puts two lines a cell apart on the lattice. A field method whose singular graph is the
-    meshable one (a cylinder: four lines of valence 3, an O-grid; a ball: the cube's graph) comes first.
+22. **FRAME_FIELD through singular edges: landed** (`hs_hexes`, `ff_frames` with MBO, test 128, figure 59 key X): the field relaxed by MBO (20 rounds of 48 diffusion steps on cells at 0.28 of the cell size: a can's singular loop near its axis becomes four straight lines along its side, a ball's graph a cube's), a map with transitions across a reduced cut (CubeCover) rounded greedily (singular lines, border planes, transitions), its lattice read off as HexEx does (registrations merged by the transitions, cubes from their centres and, where flat cells hid them, from their corners), the hexahedra relaxed. A can at 0.4: 16 hexahedra, a ball at 0.5: 27, all valid. Tried first without MBO (kept in the plan's history): the sweeps' field collapses the map. Next: border pits (cubes whose corner cells squeezed flat), robustness across sizes (the rounding's choices), genus beyond zero, speed (the field's MBO and one factor per rounding round).
 
 Ideas noted (not ordered):
 

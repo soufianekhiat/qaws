@@ -317,8 +317,8 @@ static void ff_turn(double const* w, double* v)
 }
 
 /* the frame nearest coefficients q from R: gradient ascent of sum_i F_q(a_i) on the rotations (each axis turned by the
-   torque sum_i a_i x grad F_q(a_i)), steps grown while they gain, halved when they do not */
-static void ff_project(double Y[9][15], double const* q, double* R)
+   torque sum_i a_i x grad F_q(a_i)), steps grown while they gain, halved when they do not, down to tol */
+static void ff_project(double Y[9][15], double const* q, double* R, double tol)
 {
 	double F[15], step = 0.5, val = 0;
 	int i, k, it;
@@ -330,7 +330,7 @@ static void ff_project(double Y[9][15], double const* q, double* R)
 	}
 	for (k = 0; k < 3; k++)
 		val += ff_quartic(F, R + 3 * k, NULL);
-	for (it = 0; it < 200 && step > 1e-9; it++)
+	for (it = 0; it < 200 && step > tol; it++)
 	{
 		double w[3] = { 0, 0, 0 }, trial[9], tv = 0, wl;
 		for (k = 0; k < 3; k++)
@@ -499,7 +499,7 @@ qaws_status qaws_volume_mesh_frame_field(qaws_scalar* out_frames, unsigned char*
 	R = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (9 * (size_t)mesh->nc + 1)));
 	if (!R)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	st = ff_frames(mesh, desc && desc->sweeps ? desc->sweeps : 60, R, out_singular);
+	st = ff_frames(mesh, desc && desc->sweeps ? desc->sweeps : 60, 0, R, out_singular);
 	for (c = 0; st == QAWS_STATUS_OK && c < 9 * mesh->nc; c++)
 		out_frames[c] = (qaws_scalar)R[c];
 	qaws_internal_free(R);
@@ -558,7 +558,7 @@ int ff_comb(qaws_volume_mesh const* m, double* R)
 	return ok;
 }
 
-qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R, unsigned char* out_singular)
+qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, unsigned int mbo, double* R, unsigned char* out_singular)
 {
 	double* nrm = NULL;
 	unsigned char* ncon = NULL;
@@ -692,7 +692,7 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 				{
 					double q[9];
 					ff_q(&S, c, z, 1, q);
-					ff_project(Y, q, R + 9 * (size_t)c);
+					ff_project(Y, q, R + 9 * (size_t)c, 1e-9);
 				}
 				set[c] = 1;
 				queue[nq++] = c;
@@ -707,7 +707,7 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 				u = o / 4;
 				memcpy(R + 9 * (size_t)u, R + 9 * (size_t)from, sizeof(double) * 9);
 				ff_q(&S, u, z, 1, q);
-				ff_project(Y, q, R + 9 * (size_t)u);
+				ff_project(Y, q, R + 9 * (size_t)u, 1e-9);
 				set[u] = 1;
 				queue[nq++] = u;
 			}
@@ -737,6 +737,63 @@ qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R,
 			ff_constrain(acc, nrm + 6 * (size_t)cc, ncon[cc]);
 			memcpy(R + 9 * (size_t)cc, acc, sizeof acc);
 		}
+	/* MBO (Merriman, Bence, Osher; as Viertel and Osting 2019 do it for frames): 20 rounds of the functions diffused mbo steps
+	   (each cell to the mean of itself and its neighbours: a width of about sqrt(mbo) cells) then each cell projected back on
+	   the frames and bent to its normals; the singular curves pushed apart to that width, as the lattice needs them */
+	if (mbo)
+	{
+		double Y[9][15], *q = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 9, (size_t)m->nc + 1));
+		double* q2 = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 9, (size_t)m->nc + 1));
+		unsigned int r2, d2;
+		if (!q || !q2)
+		{
+			qaws_internal_free(q);
+			qaws_internal_free(q2);
+			goto done;
+		}
+		ff_basis(Y);
+		for (r2 = 0; r2 < 20; r2++)
+		{
+			for (i = 0; i < m->nc; i++)
+				ff_frame_sh(Y, R + 9 * (size_t)i, q + 9 * (size_t)i);
+			for (d2 = 0; d2 < mbo; d2++)
+			{
+				double* sw;
+				for (i = 0; i < m->nc; i++)
+				{
+					unsigned int f, n = 1;
+					double* o9 = q2 + 9 * (size_t)i;
+					memcpy(o9, q + 9 * (size_t)i, 9 * sizeof(double));
+					for (f = 0; f < 4; f++)
+					{
+						unsigned int o = m->fo[m->f0[i] + f];
+						if (o == HM_NONE)
+							continue;
+						for (k = 0; k < 9; k++)
+							o9[k] += q[9 * (size_t)(o / 4) + k];
+						n++;
+					}
+					for (k = 0; k < 9; k++)
+						o9[k] /= n;
+				}
+				sw = q;
+				q = q2;
+				q2 = sw;
+			}
+			for (i = 0; i < m->nc; i++)
+			{
+				double acc[9];
+				if (ncon[i] > 1)
+					continue;
+				memcpy(acc, R + 9 * (size_t)i, sizeof acc);
+				ff_project(Y, q + 9 * (size_t)i, acc, 1e-4);
+				ff_constrain(acc, nrm + 6 * (size_t)i, ncon[i]);
+				memcpy(R + 9 * (size_t)i, acc, sizeof acc);
+			}
+		}
+		qaws_internal_free(q);
+		qaws_internal_free(q2);
+	}
 	/* singular edges: round each inner edge, the matchings composed */
 	if (out_singular)
 	{

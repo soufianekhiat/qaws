@@ -11,8 +11,9 @@
  *     hexahedra there are poorer), the grid following it;
  *   - a box with a bump on its top: the labels by a graph cut keep the bump's
  *     steep sides in the top's patch, the hexahedra near cubes;
- *   - a sphere: deformed into a cube (its field's singular edges are why
- *     FRAME_FIELD refuses it), filled, valid, its volume near the ball's.
+ *   - a sphere: deformed into a cube, filled, valid, its volume near the
+ *     ball's (FRAME_FIELD follows its field's singular edges instead: test
+ *     128).
  */
 
 #include "test_common.h"
@@ -242,13 +243,12 @@ static void test_bump(void)
 static void test_sphere(void)
 {
 	qaws_mesh_3d* s = pc_sphere(16, 8);
-	pc_out a = pc_run(s, QAWS_HEXES_POLYCUBE, 0.3), f = pc_run(s, QAWS_HEXES_FRAME_FIELD, 0.3);
+	pc_out a = pc_run(s, QAWS_HEXES_POLYCUBE, 0.3);
 	char msg[300];
-	sprintf(msg, "a sphere into a cube: %s, %u hexahedra, scaled Jacobian from %.3f, volume %.4f (the ball 4.1888), valid %d; FRAME_FIELD %s",
-		qaws_status_to_string(a.st), a.q.hexahedra, (double)a.q.min_scaled_jacobian, (double)a.q.volume, a.valid, qaws_status_to_string(f.st));
+	sprintf(msg, "a sphere into a cube: %s, %u hexahedra, scaled Jacobian from %.3f, volume %.4f (the ball 4.1888), valid %d",
+		qaws_status_to_string(a.st), a.q.hexahedra, (double)a.q.min_scaled_jacobian, (double)a.q.volume, a.valid);
 	printf("  %s\n", msg);
-	TEST_ASSERT(a.st == QAWS_STATUS_OK && a.q.hexahedra > 50 && a.q.min_scaled_jacobian > 0 && fabs((double)a.q.volume - 4.18879) < 0.15 * 4.18879 && a.valid &&
-		f.st == QAWS_STATUS_UNSUPPORTED_OPERATION, msg);
+	TEST_ASSERT(a.st == QAWS_STATUS_OK && a.q.hexahedra > 50 && a.q.min_scaled_jacobian > 0 && fabs((double)a.q.volume - 4.18879) < 0.15 * 4.18879 && a.valid, msg);
 	qaws_mesh_3d_destroy(s);
 }
 

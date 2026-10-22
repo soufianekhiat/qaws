@@ -1571,9 +1571,40 @@ follows the frames at the cell size, each border patch (facets whose normal
 follows one axis) held on a whole-number plane of that axis. The hexahedra
 are the unit cubes of the integer lattice in the map's image, their
 vertices mapped back: a turned box comes out as a grid aligned with it, a
-bent or twisted bar as a bent or twisted grid. Fields with singular edges
-(a sphere, a round torus) or that turn round a hole give
-`QAWS_STATUS_UNSUPPORTED_OPERATION`. `POLYCUBE`: below.
+bent or twisted bar as a bent or twisted grid.
+
+With singular edges (a ball, a can) the map needs transitions (CubeCover, Nieser, Reitebuch, Polthier 2011) and a field
+whose singular curves a lattice can follow:
+- **Field**: the inside tetrahedralized at 0.28 of the cell; after the sweeps, 20 rounds of MBO (the frames' functions
+  diffused 48 steps, about two hexahedra wide, then projected back on the frames and bent to the border's normals). The
+  sweeps alone leave a can one tight loop of two singular lines near its axis; MBO gives it four straight lines along its
+  side (an O-grid's corners) and a ball the graph of a cube.
+- **Map**: the frames made right-handed and combed along a spanning tree of the cells; the cut (the other facets) reduced
+  until each edge left holds two of its facets or is singular; one unknown triple per vertex copy (the corners joined
+  across facets not cut); the energy sum V |grad u - R / h|^2 with the cut facets' transitions (u_c = Pi u_d + t),
+  each border facet on a plane of the axis its normal follows, by penalties (10^7 the median row, the factor's ordering
+  by each copy's cells' centres); rounded greedily as MIQ does: the singular edges' vertices onto whole lines across
+  their axis, then the border's planes, then the transitions, each with those within a fiftieth, solved again.
+- **Lattice**: as HexEx (Lyon, Bommes, Kobbelt 2016) reads it: each cell's lattice points (corners and cube centres, in
+  doubled coordinates) registered and merged across facets by the whole transitions; a cube round each centre, its
+  corners found by walking the map from it across the cells (breadth first when a flat cell is on the way); cells
+  squeezed flat or turned over by the map (beside a singular edge that crosses them) left out, the cubes they hide found
+  from their corners (a missing corner put by the box rule); each face held by two cubes at most, turned opposite ways
+  (the cubes taken best first). More than one cell in a hundred turned over: `QAWS_STATUS_UNSUPPORTED_OPERATION`.
+- **Relaxed**: each vertex toward its neighbours along the hexahedra's edges, the border's vertices put back on the
+  surface (those where it bends by more than 40 degrees held), each move kept when the worst scaled Jacobian round it
+  rises.
+
+| Check (test 128) | Result |
+|---|---|
+| A can (radius 0.5, height 1.5) at 0.4 | 16 hexahedra, valid, scaled Jacobian 0.17, volume 1.00 (the can 1.18) |
+| A ball at 0.5 | 27 hexahedra, valid, scaled Jacobian 0.18, volume 3.72 (4.19) |
+| A round torus at 0.6 (its tube 2.3 cells across) | INVALID_ARGUMENT: no cube fits |
+
+Figure 59 (key X) shows a can at 0.3 (45 hexahedra) and a ball at 0.4 (48), whole and halved. About a second for the can
+at 0.4 and 5 for the ball at 0.5, most of it the field. Limits: a border cube may be missing where the cells under it
+squeezed flat (a pit in the border); the result depends on the rounding and can be refused at one size and not the next;
+genus beyond zero is not checked. `POLYCUBE`: below.
 
 ### Polycube maps
 
@@ -1697,8 +1728,8 @@ those alone (1 to 9, then a to i for figures 10 to 18: `5c` draws 5 and
   cells with two border facets stay; no vertex insertion or sliver exudation; no protection of sharp angles between border
   triangles, where recovery may stop (`QAWS_STATUS_NOT_CONVERGED`).
 - Hexahedra: GRID is a uniform grid (no octree), features kept only where
-  the staircase turns near them; FRAME_FIELD needs a field without singular
-  edges.
+  the staircase turns near them; FRAME_FIELD through singular edges is
+  coarse and fragile (border pits, refusals at some sizes).
 - Frame fields: the singular edges are those of the smoothest field, not
   constrained to be meshable (Liu, Bommes 2023).
 - Repair: welding is transitive (a chain of points each within the

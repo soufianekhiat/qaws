@@ -4,8 +4,8 @@
  * lattice read off with the polycube's faces as its patches. Half of each
  * mesh is shown, the cut faces coloured by their cell's smallest scaled
  * Jacobian (blue at 0.2 to red at 1).
- *   - a sphere: its polycube a cube (FRAME_FIELD refuses it: its field has
- *     singular edges);
+ *   - a sphere: its polycube a cube (FRAME_FIELD follows its field's
+ *     singular edges instead: figure 59);
  *   - a box rounded by Catmull-Clark (its edges semi-sharp): a box again;
  *   - figure 40's ring smoothed by Catmull-Clark: a polycube of genus one;
  *   - figure 8's bent bar: labelled by nearest axes, its polycube turns a

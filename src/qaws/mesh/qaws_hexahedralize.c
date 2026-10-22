@@ -822,6 +822,149 @@ done:
 	return st;
 }
 
+/* A hexahedral mesh relaxed (as the grid's: each vertex halfway, or a quarter or all the way, to the centre of its neighbours
+   along the cells' edges, kept when the worst scaled Jacobian round it rises): its border vertices with their border
+   neighbours only, put back on the surface; those where the border bends (border faces round them more than 40 degrees
+   apart: a crease, a corner) held. */
+static qaws_status hx_relax(qaws_volume_mesh** io, qaws_mesh_3d const* boundary, unsigned int rounds)
+{
+	static unsigned char const nb3[8][3] = { { 1, 3, 4 }, { 2, 0, 5 }, { 3, 1, 6 }, { 0, 2, 7 }, { 7, 5, 0 }, { 4, 6, 1 }, { 5, 7, 2 }, { 6, 4, 3 } };
+	static unsigned char const F[6][4] = { { 0, 3, 2, 1 }, { 4, 5, 6, 7 }, { 0, 1, 5, 4 }, { 1, 2, 6, 5 }, { 2, 3, 7, 6 }, { 3, 0, 4, 7 } };
+	qaws_volume_mesh* m = *io;
+	qaws_mesh_reference* ref = NULL;
+	mr_scratch s;
+	hx_csr csr;
+	unsigned int nv = m->nv, nc = m->nc, i, k, r, c, f;
+	unsigned int* cells = NULL;
+	unsigned char* kind = NULL;   /* 0 inside, 1 on the border, 2 held */
+	double *x = NULL, *bn = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(&s, 0, sizeof s);
+	memset(&csr, 0, sizeof csr);
+	for (c = 0; c < nc; c++)
+		if (m->type[c] != QAWS_CELL_HEXAHEDRON)
+			return QAWS_STATUS_OK;
+	cells = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 8, (size_t)nc + 1));
+	kind = (unsigned char*)qaws_internal_zalloc((size_t)nv + 1, 1);
+	x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nv + 1));
+	bn = (double*)qaws_internal_zalloc(3 * (size_t)nv + 1, sizeof(double));
+	if (!cells || !kind || !x || !bn)
+		goto done;
+	memcpy(cells, m->cv, sizeof(unsigned int) * 8 * nc);
+	memcpy(x, m->x, sizeof(double) * 3 * nv);
+	/* the border's vertices, and those where its faces bend */
+	for (c = 0; c < nc; c++)
+		for (f = 0; f < 6; f++)
+		{
+			double const *a, *b, *d;
+			double n[3], l;
+			if (m->fo[m->f0[c] + f] != HM_NONE)
+				continue;
+			a = x + 3 * (size_t)cells[8 * c + F[f][0]];
+			b = x + 3 * (size_t)cells[8 * c + F[f][1]];
+			d = x + 3 * (size_t)cells[8 * c + F[f][2]];
+			n[0] = (b[1] - a[1]) * (d[2] - a[2]) - (b[2] - a[2]) * (d[1] - a[1]);
+			n[1] = (b[2] - a[2]) * (d[0] - a[0]) - (b[0] - a[0]) * (d[2] - a[2]);
+			n[2] = (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0]);
+			l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+			if (!(l > 0))
+				continue;
+			for (k = 0; k < 4; k++)
+			{
+				unsigned int v = cells[8 * c + F[f][k]];
+				double* q = bn + 3 * (size_t)v;
+				double ql = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
+				if (kind[v] && ql > 0 && (q[0] * n[0] + q[1] * n[1] + q[2] * n[2]) / (ql * l) < cos(40 * 3.14159265358979323846 / 180))
+					kind[v] = 2;
+				if (!kind[v])
+				{
+					q[0] = n[0] / l;
+					q[1] = n[1] / l;
+					q[2] = n[2] / l;
+					kind[v] = 1;
+				}
+			}
+		}
+	st = qaws_mesh_reference_create(&ref, boundary, NULL);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!mr_scratch_init(&s, ref->nt) || !hx_csr_build(&csr, nv, cells, nc))
+		goto done;
+	for (r = 0; r < rounds; r++)
+		for (i = 0; i < nv; i++)
+		{
+			double keep[3], cen[3] = { 0, 0, 0 }, q0, best, bx[3], fr;
+			unsigned int j, n = 0;
+			if (kind[i] == 2 || csr.v0[i] == csr.v0[i + 1])
+				continue;
+			q0 = hx_worst(x, cells, &csr, i);
+			if (q0 > 0.8)
+				continue;
+			for (j = csr.v0[i]; j < csr.v0[i + 1]; j++)
+			{
+				unsigned int const* cv = cells + 8 * (size_t)csr.cell[j];
+				unsigned int o;
+				for (o = 0; o < 8 && cv[o] != i; o++) {}
+				for (k = 0; k < 3 && o < 8; k++)
+				{
+					unsigned int w = cv[nb3[o][k]];
+					if (kind[i] && !kind[w])
+						continue;
+					cen[0] += x[3 * (size_t)w];
+					cen[1] += x[3 * (size_t)w + 1];
+					cen[2] += x[3 * (size_t)w + 2];
+					n++;
+				}
+			}
+			if (!n)
+				continue;
+			memcpy(keep, x + 3 * (size_t)i, sizeof keep);
+			memcpy(bx, keep, sizeof bx);
+			best = q0;
+			for (fr = 1; fr > 0.2; fr *= 0.5)
+			{
+				double y[3], q1;
+				for (k = 0; k < 3; k++)
+					y[k] = keep[k] + fr * (cen[k] / n - keep[k]);
+				if (kind[i])
+				{
+					qaws_mesh_location l;
+					mr_project(ref, y, HM_NONE, &s, &l);
+					mr_eval(ref, &l, y, NULL);
+				}
+				memcpy(x + 3 * (size_t)i, y, sizeof y);
+				q1 = hx_worst(x, cells, &csr, i);
+				if (q1 > best)
+				{
+					best = q1;
+					memcpy(bx, y, sizeof bx);
+				}
+			}
+			memcpy(x + 3 * (size_t)i, bx, sizeof bx);
+		}
+	{
+		qaws_volume_mesh* out = NULL;
+		unsigned char* types = (unsigned char*)qaws_internal_malloc((size_t)nc + 1);
+		if (!types)
+			goto done;
+		memset(types, QAWS_CELL_HEXAHEDRON, nc);
+		st = vm_create(x, nv, cells, types, nc, &out);
+		qaws_internal_free(types);
+		if (st == QAWS_STATUS_OK)
+		{
+			qaws_volume_mesh_destroy(*io);
+			*io = out;
+		}
+	}
+done:
+	qaws_internal_free(cells); qaws_internal_free(kind); qaws_internal_free(x); qaws_internal_free(bn);
+	qaws_internal_free(csr.v0); qaws_internal_free(csr.cell);
+	mr_scratch_free(&s);
+	qaws_mesh_reference_destroy(ref);
+	return st;
+}
+
 /* Hexahedra following a frame field without singular edges: the inside tetrahedralized, its frame field combed into one
    gauge, the integer-grid map's lattice (hx_map). */
 static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_volume_mesh** out_mesh, qaws_mesh_report* rep)
@@ -842,16 +985,38 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 	sing = (unsigned char*)qaws_internal_scratch_malloc((size_t)t->nc + 1);
 	if (!R || !sing)
 		goto done;
-	st = ff_frames(t, 60, R, sing);
+	st = ff_frames(t, 60, 0, R, sing);
 	if (st != QAWS_STATUS_OK)
 		goto done;
-	st = QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (a field with singular edges, or turning round a hole) */
-	for (c = 0; c < t->nc; c++)
-		if (sing[c])
+	/* without singular edges one gauge for all (hx_map); with them a map with transitions across a cut (hs_hexes) */
+	for (c = 0; c < t->nc && !sing[c]; c++)
+		;
+	if (c == t->nc && ff_comb(t, R))
+		st = hx_map(t, R, NULL, h, out_mesh, rep);
+	else
+	{
+		/* singular edges: cells finer (0.28 h) and the field by MBO over about two hexahedra (48 steps: its singular curves
+		   apart and straight, as a map with transitions needs them), the map with its cut (hs_hexes), the hexahedra relaxed */
+		qaws_volume_mesh_destroy(t);
+		t = NULL;
+		qaws_internal_free(R);
+		qaws_internal_free(sing);
+		R = NULL;
+		sing = NULL;
+		td.target_length = (qaws_scalar)(0.28 * h);
+		st = qaws_volume_mesh_tetrahedralize(&t, NULL, boundary, &td);
+		if (st != QAWS_STATUS_OK)
 			goto done;
-	if (!ff_comb(t, R))
-		goto done;
-	st = hx_map(t, R, NULL, h, out_mesh, rep);
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		R = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (9 * (size_t)t->nc + 1)));
+		if (!R)
+			goto done;
+		st = ff_frames(t, 60, 48, R, NULL);
+		if (st == QAWS_STATUS_OK)
+			st = hs_hexes(t, R, h, out_mesh, rep);
+		if (st == QAWS_STATUS_OK)
+			st = hx_relax(out_mesh, boundary, 20);
+	}
 done:
 	qaws_internal_free(R);
 	qaws_internal_free(sing);

@@ -211,11 +211,16 @@ qaws_status vim_unsplit_border(qaws_volume_mesh** out_mesh, unsigned int* out_mo
 double vm_hex_quality(double const* x, unsigned int const* v);
 
 /* frame fields on tetrahedra (qaws_frame_field.c): per cell its axes (9 doubles, R allocated by the caller), the
-   singular edges' masks (may be NULL) */
-qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, double* R, unsigned char* singular);
+   singular edges' masks (may be NULL); mbo: 0, or MBO rounds of that many diffusion steps after the sweeps (the singular
+   curves parted to about sqrt(mbo) cells) */
+qaws_status ff_frames(qaws_volume_mesh const* m, unsigned int sweeps, unsigned int mbo, double* R, unsigned char* singular);
 /* the frames combed into one gauge (each cell's axes permuted onto its neighbour's, breadth first); 1 when every facet
    then agrees without a permutation (no singular edge, no turn round a hole), 0 else or on allocation failure */
 int ff_comb(qaws_volume_mesh const* m, double* R);
+/* hexahedra of tetrahedra t's frames R (combed in place) with singular edges: an integer-grid map with transitions across a
+   cut (CubeCover), its lattice read off (as HexEx) (qaws_hex_seamless.c); UNSUPPORTED_OPERATION for a field no hexahedra
+   follow (an edge turning by other than a quarter turn, a cell turned over in the map) */
+qaws_status hs_hexes(qaws_volume_mesh const* t, double* R, double h, qaws_volume_mesh** out_mesh, qaws_mesh_report* rep);
 
 /* ---- sparse Laplacians (qaws_mesh_smooth.c), shared by smoothing, fairing, deformation and parameterization ---- */
 

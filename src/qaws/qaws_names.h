@@ -61,6 +61,7 @@
 #define hm_split_face QAWS_SFX(hm_split_face)
 #define hm_to QAWS_SFX(hm_to)
 #define hm_valence QAWS_SFX(hm_valence)
+#define hs_hexes QAWS_SFX(hs_hexes)
 #define mf_attract QAWS_SFX(mf_attract)
 #define mf_basis QAWS_SFX(mf_basis)
 #define mf_build QAWS_SFX(mf_build)

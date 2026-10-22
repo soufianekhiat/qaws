@@ -136,6 +136,7 @@ src/qaws/mesh/qaws_mesh_offset.c
 src/qaws/mesh/qaws_mesh_subdivide.c
 src/qaws/mesh/qaws_volume_improve.c
 src/qaws/mesh/qaws_volume_curve.c
+src/qaws/mesh/qaws_hex_seamless.c
 src/qaws/mesh/qaws_mesh_intersect.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
