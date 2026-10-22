@@ -82,6 +82,8 @@
  *                      its recovery's border points moved inside; a sphere's rings
  *   mesh44_polycube.png  hexahedra of polycube maps: a sphere, a blob, a ring of genus
  *                      one, a bent bar
+ *   mesh45_quads_pairing.png  quads from the input's faces: triangles paired, paired and
+ *                      split (pure), split
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -257,16 +259,17 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/42_volume_curve.c"
 #include "meshing_showcase/43_tetrahedra_border.c"
 #include "meshing_showcase/44_polycube.c"
+#include "meshing_showcase/45_quads_pairing.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 44 are A to I) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 45 are A to J) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
 		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2, demo_decimate, demo_decimate_views, demo_remesh_attributes, demo_connect, demo_connect_more,
-		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2, demo_offset, demo_subdivide, demo_volume_improve, demo_volume_curve, demo_tetrahedra_border, demo_polycube };
-	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHI";
+		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2, demo_offset, demo_subdivide, demo_volume_improve, demo_volume_curve, demo_tetrahedra_border, demo_polycube, demo_quads_pairing };
+	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJ";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

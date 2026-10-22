@@ -59,6 +59,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Quads from the input's own faces: `QAWS_QUADS_PAIRING` (triangles paired by a
+  matching with augmenting paths, `pure` splitting the result) and
+  `QAWS_QUADS_SPLIT` (every face split round its centre on the reference).
+  Test 177, figure 45 (key J).
 - Hexahedra of polycube maps (`QAWS_HEXES_POLYCUBE`): the inside deformed until
   its border faces the axes (Gregson et al.), the integer-grid map's lattice
   read off with the deformation's rotations as frames; spheres and rings of

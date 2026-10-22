@@ -190,6 +190,7 @@ extern int test_173_volume_improve_main(void);
 extern int test_174_volume_curve_main(void);
 extern int test_175_tetrahedra_border_main(void);
 extern int test_176_hexahedra_polycube_main(void);
+extern int test_177_quads_pairing_main(void);
 
 /* Test registry */
 typedef struct {
@@ -375,6 +376,7 @@ static test_suite const g_test_suites[] = {
 	{"174_volume_curve", test_174_volume_curve_main},
 	{"175_tetrahedra_border", test_175_tetrahedra_border_main},
 	{"176_hexahedra_polycube", test_176_hexahedra_polycube_main},
+	{"177_quads_pairing", test_177_quads_pairing_main},
 };
 
 int main(void) {

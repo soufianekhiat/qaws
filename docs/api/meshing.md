@@ -223,8 +223,19 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d** out, qaws_mesh_report* report
   are read, so quads follow sharp edges.
 - **GLOBAL** quads: an integer-grid map on INSTANT's dense mesh, read off
   as QEx does (below); all quads, the best layouts in the library, INSTANT's
-  mesh returned when no valid map comes out. `PAIRING`, `SPLIT` and
-  `LAYOUT` are reserved.
+  mesh returned when no valid map comes out.
+- **PAIRING** quads from the input's own triangles. They are paired across their shared sides (none across a feature line, none folding past 40 degrees or not convex) by a greedy matching on each quad's worth (its corners' smallest sine, times the fold's cosine). Augmenting paths then pair the rest (Edmonds' search, without shrinking blossoms). `pure` splits the result round each face's centre (Blossom-Quad's way: all quads at half the size).
+- **SPLIT** splits every face into quads round its centre, the new points on the reference.
+- PAIRING and SPLIT keep the input's vertices and ignore the target and the guidance. `LAYOUT` is reserved.
+
+| Check (test 177) | Result |
+|---|---|
+| A grid's 72 triangles (alternating diagonals), paired | 36 squares, none left |
+| A sphere's 224 triangles, paired; pure | 112 quads, none left; 448 quads |
+| A box of triangles with feature edges, paired | 6 flat quads |
+| A cube split; an octahedron split | 24 quads on 26 vertices, flat, 24 feature edges, corners kept; 24 quads on the reference |
+
+Figure 45 (key J) shows figure 2's blob as 320 triangles, paired into 160 quads, paired and split (640 quads), and split (960 quads).
 
 ### LOCAL: quality by default, bounded angles, a distance guard
 qaws_remesh_desc d;

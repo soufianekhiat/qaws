@@ -719,6 +719,262 @@ static qaws_status qd_pair_triangles(qd_out* o)
 	return QAWS_STATUS_OK;
 }
 
+/* the quad of triangles t (side k shared) and u (side j): its corners from t's far end of the side round to u's apex */
+static void qd_quad_of(unsigned int const* t, unsigned int k, unsigned int const* u, unsigned int j, unsigned int* q)
+{
+	q[0] = t[(k + 1) % 3];
+	q[1] = t[(k + 2) % 3];
+	q[2] = t[k];
+	q[3] = u[(j + 2) % 3];
+}
+
+/* a quad's worth: the smallest sine of its corners (0 when it is not convex in its mean plane), times the cosine of the
+   fold between its triangles (none past 40 degrees) */
+static double qd_quad_worth(double const* x, unsigned int const* q)
+{
+	double n[3] = { 0, 0, 0 }, w = HUGE_VAL, nl, f0[3], f1[3], c0, l0, l1;
+	unsigned int i, k;
+	for (i = 0; i < 4; i++)
+	{
+		double const *a = x + 3 * (size_t)q[i], *b = x + 3 * (size_t)q[(i + 1) % 4];
+		n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+		n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+		n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+	}
+	nl = sqrt(qd_dot(n, n));
+	if (!(nl > 0))
+		return 0;
+	for (i = 0; i < 4; i++)
+	{
+		double const *p0 = x + 3 * (size_t)q[i], *p1 = x + 3 * (size_t)q[(i + 1) % 4], *p3 = x + 3 * (size_t)q[(i + 3) % 4];
+		double e1[3], e2[3], cr[3], s;
+		for (k = 0; k < 3; k++) { e1[k] = p1[k] - p0[k]; e2[k] = p3[k] - p0[k]; }
+		cr[0] = e1[1] * e2[2] - e1[2] * e2[1];
+		cr[1] = e1[2] * e2[0] - e1[0] * e2[2];
+		cr[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		s = qd_dot(cr, n) / nl;
+		l0 = sqrt(qd_dot(e1, e1) * qd_dot(e2, e2));
+		if (!(s > 0) || !(l0 > 0))
+			return 0;
+		w = fmin(w, s / l0);
+	}
+	/* the fold: the normals of (q0 q1 q2) and (q0 q2 q3) */
+	{
+		double const *a = x + 3 * (size_t)q[0], *b = x + 3 * (size_t)q[1], *c = x + 3 * (size_t)q[2], *d = x + 3 * (size_t)q[3];
+		double u[3], v[3], ww[3];
+		for (k = 0; k < 3; k++) { u[k] = b[k] - a[k]; v[k] = c[k] - a[k]; ww[k] = d[k] - a[k]; }
+		f0[0] = u[1] * v[2] - u[2] * v[1]; f0[1] = u[2] * v[0] - u[0] * v[2]; f0[2] = u[0] * v[1] - u[1] * v[0];
+		f1[0] = v[1] * ww[2] - v[2] * ww[1]; f1[1] = v[2] * ww[0] - v[0] * ww[2]; f1[2] = v[0] * ww[1] - v[1] * ww[0];
+		l0 = sqrt(qd_dot(f0, f0));
+		l1 = sqrt(qd_dot(f1, f1));
+		c0 = l0 > 0 && l1 > 0 ? qd_dot(f0, f1) / (l0 * l1) : -1;
+	}
+	return c0 < 0.766 ? 0 : w * c0;
+}
+
+/* PAIRING and SPLIT: the input's own faces (no dense remesh, no fields). PAIRING pairs its triangles across their shared
+   sides (off feature lines) into quads: a greedy matching by the quads' worth, then augmenting paths (an unpaired triangle
+   takes a paired neighbour, whose old partner takes the next, until one takes an unpaired triangle); with pure,
+   the result split round each face's centre (all quads at half the size). SPLIT splits every face. The vertices are the
+   input's, on the reference; their kinds from its features and border. */
+static qaws_status qd_direct(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_reference const* r, mr_scratch* s, qd_out* o)
+{
+	qaws_hm const* m = &mesh->hm;
+	unsigned int v, f, k, nc = 0, *mate = NULL, *side = NULL, *nfv = NULL, *nfs = NULL, nf2 = 0, nc2 = 0;
+	double* wt = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(o, 0, sizeof *o);
+	for (f = 0; f < m->nf; f++) nc += m->fn[f];
+	o->x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)m->nv + 1));
+	o->foot = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (size_t)m->nv + 1));
+	o->kind = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
+	o->fv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nc + 1));
+	o->fs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)m->nf + 1));
+	if (!o->x || !o->foot || !o->kind || !o->fv || !o->fs)
+		goto done;
+	o->nv = m->nv;
+	memcpy(o->x, m->x, sizeof(double) * 3 * m->nv);
+	for (v = 0; v < m->nv; v++)
+	{
+		mr_project(r, o->x + 3 * (size_t)v, HM_NONE, s, &o->foot[v]);
+		o->kind[v] = (unsigned char)((m->vflag[v] & HM_CORNER) ? 2 : (hm_is_border_vertex(m, v) || hm_feature_degree(m, v)) ? 1 : 0);
+	}
+	for (f = 0; f < m->nf; f++)
+	{
+		for (k = 0; k < m->fn[f]; k++) o->fv[o->nc + k] = m->cv[m->fc[f] + k];
+		o->fs[o->nf++] = m->fn[f];
+		o->nc += m->fn[f];
+	}
+	if (desc->method == QAWS_QUADS_PAIRING)
+	{
+		/* the candidates: each triangle's sides shared with a triangle, off the features, with a quad worth having */
+		unsigned int changed = 1, pass;
+		mate = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)m->nf + 1));
+		side = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)m->nf + 1));
+		wt = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)m->nf + 1));
+		nfv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nc + 1));
+		nfs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)m->nf + 1));
+		if (!mate || !side || !wt || !nfv || !nfs)
+			goto done;
+		for (f = 0; f < m->nf; f++)
+		{
+			mate[f] = HM_NONE;
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int c = m->fc[f] + k, oc = m->co[c], g, q[4], j;
+				wt[3 * (size_t)f + k] = 0;
+				if (m->fn[f] != 3 || oc == HM_NONE || (m->cflag[c] & HM_FEATURE))
+					continue;
+				g = m->cf[oc];
+				if (m->fn[g] != 3)
+					continue;
+				j = oc - m->fc[g];
+				qd_quad_of(m->cv + m->fc[f], k, m->cv + m->fc[g], j, q);
+				wt[3 * (size_t)f + k] = qd_quad_worth(m->x, q);
+			}
+		}
+		/* greedy: the worthiest pairs first (a pass per tenth of worth, best sides first within it) */
+		for (pass = 10; pass-- > 0;)
+			for (f = 0; f < m->nf; f++)
+			{
+				unsigned int bk = 3;
+				double bw = 0.1 * pass;
+				if (mate[f] != HM_NONE)
+					continue;
+				for (k = 0; k < 3; k++)
+				{
+					unsigned int g;
+					if (!(wt[3 * (size_t)f + k] > bw) || wt[3 * (size_t)f + k] < 0.05)
+						continue;
+					g = m->cf[m->co[m->fc[f] + k]];
+					if (mate[g] != HM_NONE)
+						continue;
+					bw = wt[3 * (size_t)f + k];
+					bk = k;
+				}
+				if (bk < 3)
+				{
+					unsigned int oc = m->co[m->fc[f] + bk], g = m->cf[oc];
+					mate[f] = g;
+					mate[g] = f;
+					side[f] = bk;
+					side[g] = oc - m->fc[g];
+				}
+			}
+		/* augmenting paths (Edmonds' search, blossoms not shrunk): from each unpaired triangle, breadth first along unpaired
+		   sides to a neighbour and on along its pair; reaching an unpaired triangle, the pairs along the path are swapped,
+		   one triangle more paired */
+		{
+			unsigned int *par = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)m->nf + 1));
+			unsigned int *stamp = (unsigned int*)qaws_internal_scratch_zalloc((size_t)m->nf + 1, sizeof(unsigned int));
+			unsigned int *queue = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)m->nf + 1));
+			unsigned int round = 0;
+			if (!par || !stamp || !queue)
+			{
+				qaws_internal_free(par);
+				qaws_internal_free(stamp);
+				qaws_internal_free(queue);
+				goto done;
+			}
+			while (changed)
+			{
+				changed = 0;
+				for (f = 0; f < m->nf; f++)
+				{
+					unsigned int qh = 0, qt = 0, end = HM_NONE, endk = 0;
+					if (m->fn[f] != 3 || mate[f] != HM_NONE)
+						continue;
+					round++;
+					stamp[f] = round;
+					queue[qt++] = f;
+					while (qh < qt && end == HM_NONE && qt < 4096)
+					{
+						unsigned int e = queue[qh++], ka;
+						for (ka = 0; ka < 3 && end == HM_NONE; ka++)
+						{
+							unsigned int a2, b2;
+							if (wt[3 * (size_t)e + ka] < 0.05)
+								continue;
+							a2 = m->cf[m->co[m->fc[e] + ka]];
+							if (stamp[a2] == round || a2 == mate[e])
+								continue;
+							stamp[a2] = round;
+							par[a2] = e;   /* (a2 reached from e along an unpaired side) */
+							if (mate[a2] == HM_NONE)
+							{
+								end = a2;
+								endk = ka;
+								break;
+							}
+							b2 = mate[a2];
+							if (stamp[b2] == round)
+								continue;
+							stamp[b2] = round;
+							queue[qt++] = b2;
+						}
+					}
+					if (end == HM_NONE)
+						continue;
+					/* along the path back: each (par, node) paired, its node's old pair freed toward the start */
+					{
+						unsigned int node = end, from;
+						(void)endk;
+						for (;;)
+						{
+							unsigned int old, kk;
+							from = par[node];
+							old = mate[from];
+							for (kk = 0; kk < 3 && m->cf[m->co[m->fc[from] + kk]] != node; kk++) {}
+							mate[from] = node;
+							mate[node] = from;
+							side[from] = kk;
+							side[node] = m->co[m->fc[from] + kk] - m->fc[node];
+							if (old == HM_NONE)
+								break;
+							node = old;
+						}
+					}
+					changed = 1;
+				}
+			}
+			qaws_internal_free(par);
+			qaws_internal_free(stamp);
+			qaws_internal_free(queue);
+		}
+		for (f = 0; f < m->nf; f++)
+		{
+			unsigned int const* t = m->cv + m->fc[f];
+			if (mate[f] == HM_NONE)
+			{
+				memcpy(nfv + nc2, t, sizeof(unsigned int) * m->fn[f]);
+				nfs[nf2++] = m->fn[f];
+				nc2 += m->fn[f];
+			}
+			else if (f < mate[f])
+			{
+				qd_quad_of(t, side[f], m->cv + m->fc[mate[f]], side[mate[f]], nfv + nc2);
+				nfs[nf2++] = 4;
+				nc2 += 4;
+			}
+		}
+		qaws_internal_free(o->fv);
+		qaws_internal_free(o->fs);
+		o->fv = nfv;
+		o->fs = nfs;
+		o->nf = nf2;
+		o->nc = nc2;
+		nfv = nfs = NULL;
+	}
+	st = desc->method == QAWS_QUADS_SPLIT || desc->pure ? qd_split(o, r, s) : QAWS_STATUS_OK;
+done:
+	qaws_internal_free(mate);
+	qaws_internal_free(side);
+	qaws_internal_free(wt);
+	qaws_internal_free(nfv);
+	qaws_internal_free(nfs);
+	return st;
+}
+
 /* The quad mesh at lattice spacing rho from the fields of the dense mesh dm (level 0 of h): the steps rounded, made
    consistent (qaws_quad_flow.h), the positions refitted to them, the mesh read off, its holes filled (the cones on
    lattice points their centres). T and K: room per corner of dm. */
@@ -1080,13 +1336,14 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	int* T = NULL;
 	unsigned char* K = NULL;
 	unsigned int v, f, c, k;
+	int direct;
 	qaws_status st;
 	if (!out_mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_mesh = NULL;
 	if (!mesh || !desc || (unsigned int)desc->method > QAWS_QUADS_LAYOUT || desc->target_length < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method != QAWS_QUADS_INSTANT && desc->method != QAWS_QUADS_GLOBAL)
+	if (desc->method == QAWS_QUADS_LAYOUT)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	for (v = 0; v < desc->pinned_count; v++)
 		if (!desc->pinned || desc->pinned[v] >= mesh->hm.nv)
@@ -1124,6 +1381,20 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		rho = q.mean_edge > 0 ? 2 * (double)q.mean_edge : 1;
 	}
 	rf = rho;
+	direct = desc->method == QAWS_QUADS_PAIRING || desc->method == QAWS_QUADS_SPLIT;
+	if (direct)
+	{
+		/* PAIRING and SPLIT: the input's own faces */
+		if (!mr_scratch_init(&s, r->nt))
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		st = qd_direct(mesh, desc, r, &s, &o);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+		goto output;
+	}
 	/* 1. a dense sampling of the surface */
 	memset(&rd, 0, sizeof rd);
 	rd.reference = r;
@@ -1322,6 +1593,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	}
 	if (st != QAWS_STATUS_OK)
 		goto done;
+output:
 	st = hm_mesh_3d_create(o.x, o.nv, o.fv, o.fs, o.nf, &out);
 	if (st != QAWS_STATUS_OK)
 		goto done;
@@ -1348,7 +1620,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		}
 		/* each cone's quad vertex: the nearest within the spacing of its valence (4 - index), else the nearest; moved onto
 		   the cone's vertex and held there like a corner (not flagged one) by the relaxation and the finishing */
-		for (c = 0; c < desc->cone_count; c++)
+		for (c = 0; !direct && c < desc->cone_count; c++)
 		{
 			double const* p = mesh->hm.x + 3 * (size_t)desc->cone_vertices[c];
 			double best[2] = { HUGE_VAL, HUGE_VAL };
@@ -1416,7 +1688,16 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		}
 		for (v = 0; v < out->hm.nv; v++)
 			kind[v] = kind[v] == 3 ? 2 : kind[v];   /* (guide lines held by the relaxation and the finishing, not corners) */
-		qd_relax(&out->hm, r, &s, kind, 10); if (qi_improve(&out->hm, r, &s, kind, rho, 4) == HM_NONE) { qaws_internal_free(kind); st = QAWS_STATUS_ALLOCATION_FAILURE; goto done; }
+		if (!direct)
+		{
+			qd_relax(&out->hm, r, &s, kind, 10);
+			if (qi_improve(&out->hm, r, &s, kind, rho, 4) == HM_NONE)
+			{
+				qaws_internal_free(kind);
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				goto done;
+			}
+		}
 		qaws_internal_free(kind);
 	}
 	/* 4. attributes and the report */

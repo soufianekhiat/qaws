@@ -65,9 +65,22 @@
  *            isolines do not close into quads, INSTANT's mesh is returned:
  *            the report's `iterations` is 1 when the map made the mesh, 0
  *            when it fell back.
- *   PAIRING, SPLIT, LAYOUT  reserved (UNSUPPORTED_OPERATION today):
- *            triangles paired by matching, all-quad splitting, patch
- *            layouts.
+ *   PAIRING  the input's own triangles paired into quads across their
+ *            shared sides (none across a feature line, none folding past 40
+ *            degrees or not convex): a greedy matching by each quad's worth
+ *            (its corners' smallest sine, times the fold's cosine), then
+ *            augmenting paths, each pairing one triangle more (Edmonds'
+ *            search, blossoms not shrunk: a few may stay unpaired). Quad-dominant: the triangles no pair takes stay;
+ *            pure splits the result round each face's centre (all quads,
+ *            half the size; Blossom-Quad's way). No remesh, no fields: the
+ *            input's vertices stay.
+ *   SPLIT    every face split into quads round its centre through its
+ *            edges' midpoints (a triangle into three, a quad into four), the
+ *            new points on the reference (on a crease where the edge is
+ *            one). The input's vertices stay.
+ *            PAIRING and SPLIT ignore target_length, sweeps and the
+ *            guidance; no relaxation or finishing follows.
+ *   LAYOUT   reserved (UNSUPPORTED_OPERATION today): patch layouts.
  *
  * As remeshing: footpoints kept, the reference mesh's attributes
  * transferred, the input unchanged. The report counts the singularities
