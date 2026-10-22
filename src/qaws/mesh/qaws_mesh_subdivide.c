@@ -110,8 +110,8 @@ static void sdv_rules(double* row, double const* pick, sdv_cols const* k, unsign
 	}
 }
 
-/* one level of m into o */
-static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols const* k)
+/* one level of m into o; limit: o is m with its vertices moved onto the limit surface instead */
+static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols const* k, int limit)
 {
 	unsigned int nv = m->nv, nf = m->nf, nc = m->nc, kv = k->kv, kc = k->kc, kf = k->kf, ne = 0, i, j, f, e, t;
 	size_t nv2, nf2, nc2;
@@ -198,9 +198,9 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 		}
 	}
 
-	nv2 = (size_t)nv + ne + (loop ? 0 : nf);
-	nf2 = loop ? 4 * (size_t)nf : nc;
-	nc2 = loop ? 12 * (size_t)nf : 4 * (size_t)nc;
+	nv2 = limit ? nv : (size_t)nv + ne + (loop ? 0 : nf);
+	nf2 = limit ? nf : (loop ? 4 * (size_t)nf : nc);
+	nc2 = limit ? nc : (loop ? 12 * (size_t)nf : 4 * (size_t)nc);
 	if (nv2 > SDV_MAX || nf2 > SDV_MAX || nc2 > SDV_MAX)
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -209,11 +209,21 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 	o->nv = (unsigned int)nv2;
 	o->nf = (unsigned int)nf2;
 	o->nc = (unsigned int)nc2;
-	o->nfe = 2 * m->nfe;
+	o->nfe = limit ? m->nfe : 2 * m->nfe;
 	if (!sdv_alloc(o, k))
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
+	}
+	if (limit)
+	{
+		memcpy(o->fo, m->fo, sizeof(unsigned int) * ((size_t)nf + 1));
+		memcpy(o->fv, m->fv, sizeof(unsigned int) * nc);
+		memcpy(o->C, m->C, sizeof(double) * (size_t)nc * kc);
+		memcpy(o->F, m->F, sizeof(double) * (size_t)nf * kf);
+		memcpy(o->vk, m->vk, nv);
+		memcpy(o->fe, m->fe, sizeof(unsigned int) * 2 * (size_t)m->nfe);
+		memcpy(o->fs, m->fs, sizeof(double) * m->nfe);
 	}
 
 	/* the vertices' sums */
@@ -231,7 +241,15 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 				ssum[v] += es[e];
 			}
 		}
-	for (f = 0; f < nf; f++)
+	for (f = 0; limit && !loop && f < nf; f++)
+		for (j = m->fo[f]; m->fo[f + 1] - m->fo[f] == 4 && j < m->fo[f + 1]; j++)
+		{
+			/* the limit's diagonal neighbours (quads, as every face is after a level), summed in QS */
+			unsigned int opp = m->fv[m->fo[f] + (j - m->fo[f] + 2) % 4];
+			nfc[m->fv[j]]++;
+			for (i = 0; i < kv; i++) QS[(size_t)m->fv[j] * kv + i] += m->X[(size_t)opp * kv + i];
+		}
+	for (f = 0; !limit && f < nf; f++)
 	{
 		double* y = FP + (size_t)f * kv;
 		unsigned int n = m->fo[f + 1] - m->fo[f];
@@ -242,6 +260,43 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 			nfc[m->fv[j]]++;
 			for (i = 0; !loop && i < kv; i++) QS[(size_t)m->fv[j] * kv + i] += y[i];
 		}
+	}
+
+	if (limit)
+	{
+		/* the limit positions: Loop's (1 - n chi, chi each neighbour, chi = 1 / (3 / (8 beta) + n)), Catmull-Clark's
+		   ((n^2 V + 4 E + F) / (n (n + 5)), E and F the edge and diagonal neighbours summed), a crease's (1, 4, 1) / 6 */
+		if (loop)
+			for (f = 0; f < nf; f++)
+				for (j = m->fo[f]; j < m->fo[f + 1]; j++) nfc[m->fv[j]]++;
+		for (i = 0; i < nv; i++)
+		{
+			double const* x = m->X + (size_t)i * kv;
+			double* y = o->X + (size_t)i * kv;
+			double n = (double)val[i];
+			memcpy(y, x, sizeof(double) * kv);
+			if (val[i] > 0 && loop)
+			{
+				double c = 0.375 + 0.25 * cos(6.283185307179586 / n), beta = (0.625 - c * c) / n, chi = 1 / (0.375 / beta + n);
+				for (j = 0; j < kv; j++) y[j] = (1 - n * chi) * x[j] + chi * NS[(size_t)i * kv + j];
+			}
+			else if (val[i] > 0 && nfc[i] == val[i])
+				for (j = 0; j < kv; j++) y[j] = (n * n * x[j] + 4 * NS[(size_t)i * kv + j] + QS[(size_t)i * kv + j]) / (n * (n + 5));
+			if (nfc[i] == 1)
+				memcpy(y, x, sizeof(double) * kv);
+			else if (nsh[i] >= 2 || (m->vk[i] && nsh[i] >= 1))
+			{
+				double s = ssum[i] / nsh[i];
+				if (nsh[i] == 2 && !m->vk[i])
+					for (j = 0; j < kv; j++)
+						rr[j] = (m->X[(size_t)sh2[2 * i] * kv + j] + 4 * x[j] + m->X[(size_t)sh2[2 * i + 1] * kv + j]) / 6;
+				else
+					memcpy(rr, x, sizeof(double) * kv);
+				for (j = 0; j < kv; j++) y[j] = s >= 1 ? rr[j] : (1 - s) * y[j] + s * rr[j];
+			}
+			sdv_rules(y, x, k, QAWS_MESH_VERTEX);
+		}
+		goto done;
 	}
 
 	/* vertex points */
@@ -488,7 +543,16 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 
 	for (lv = 0; lv < levels; lv++)
 	{
-		st = sdv_step(&o, &m, loop, &k);
+		st = sdv_step(&o, &m, loop, &k, 0);
+		sdv_free(&m);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+		m = o;
+		memset(&o, 0, sizeof o);
+	}
+	if (desc->limit)
+	{
+		st = sdv_step(&o, &m, loop, &k, 1);
 		sdv_free(&m);
 		if (st != QAWS_STATUS_OK)
 			goto done;

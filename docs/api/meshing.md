@@ -1221,6 +1221,7 @@ Figure 39 (key D): a U offset outward by contouring (rounded, the slot narrowed)
   - per face, the parent's value is kept;
   - NEAREST takes its value from the first source.
 - **Features:** the crease halves are kept while they are sharp, and so are the corners. The result has no footpoints.
+- **Limit:** `limit` moves the last level's vertices (and their LINEAR and NORMALIZED attributes) onto the limit surface: Loop's limit mask, Catmull-Clark's (n^2 V + 4 sum E + sum F) / (n (n + 5)), a crease's (1, 4, 1) / 6. One level at the limit lies within 2e-4 of six levels, where without it the gap is 0.2 (test 172).
 - **Order:** old vertices keep their indices. Then comes one vertex per edge (ordered by its smaller vertex index, then the larger), then one per face (Catmull-Clark). Children follow their parent face.
 
 | Check (test 172) | Result |

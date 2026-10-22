@@ -36,6 +36,14 @@
  *     levels, then smooth; a fraction blends the sharp and smooth rules at
  *     the last level (a vertex by the mean sharpness of its creases).
  *
+ * limit moves the last level's vertices onto the limit surface (vertex
+ * attributes LINEAR and NORMALIZED with them): Loop's limit mask (the
+ * vertex 1 - n chi, each neighbour chi = 1 / (3 / (8 beta) + n)),
+ * Catmull-Clark's ((n^2 V + 4 sum E + sum F) / (n (n + 5)), E the edge
+ * neighbours, F the diagonal ones), a crease's cubic B-spline limit
+ * (1, 4, 1) / 6; corners stay. The vertices then lie on the surface the
+ * levels converge to (Halstead, Kass, DeRose 1993).
+ *
  * The result carries the features (each crease edge's halves, while sharp;
  * the corners) and every attribute by its rule:
  *   per vertex  LINEAR and NORMALIZED by the scheme's own rules, as the
@@ -69,6 +77,7 @@ typedef struct qaws_mesh_subdivide_desc
 	qaws_mesh_subdivide_scheme scheme;
 	unsigned int levels;                /* 0: 1 */
 	qaws_scalar const* sharpness;       /* per feature edge (qaws_mesh_3d_get_feature_edges order), >= 0; NULL: infinitely sharp */
+	int limit;                          /* 1: the last level's vertices moved onto the limit surface */
 } qaws_mesh_subdivide_desc;
 
 /* INVALID_ARGUMENT for a mesh without faces, an unknown scheme, Loop on a face

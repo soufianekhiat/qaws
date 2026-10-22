@@ -59,6 +59,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Subdivision's limit positions (`qaws_mesh_subdivide_desc.limit`): the last
+  level's vertices moved onto the Loop or Catmull-Clark limit surface, creases
+  by the cubic B-spline's limit. Test 172.
 - Quad layouts (`QAWS_QUADS_LAYOUT`): GLOBAL's quads parted into grid patches by
   their motorcycle graph, a face attribute "patch". Test 178, figure 46 (key K).
 - Quads from the input's own faces: `QAWS_QUADS_PAIRING` (triangles paired by a

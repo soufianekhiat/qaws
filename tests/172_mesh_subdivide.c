@@ -14,6 +14,8 @@
  *   - attributes: a vertex value linear in the position follows it exactly,
  *     a normalized one stays unit, corners' values linear in each face,
  *     faces' ids their parent's, a nearest vertex label kept;
+ *   - limit positions: one level at the limit within 2% of how far one
+ *     level is from six (cube, octahedron); the creased cube still the cube;
  *   - refusals: Loop on quads, a negative sharpness, an unknown scheme.
  */
 
@@ -376,6 +378,66 @@ static void test_refusals(void)
 	qaws_mesh_3d_destroy(c);
 }
 
+/* the largest distance between the first n vertices of two meshes */
+static double sd_apart(qaws_mesh_3d const* a, qaws_mesh_3d const* b, unsigned int n)
+{
+	unsigned int i;
+	double w = 0;
+	for (i = 0; i < n; i++)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(a, i), q = qaws_mesh_3d_get_vertex(b, i);
+		w = fmax(w, sqrt(((double)p.x - q.x) * ((double)p.x - q.x) + ((double)p.y - q.y) * ((double)p.y - q.y) + ((double)p.z - q.z) * ((double)p.z - q.z)));
+	}
+	return w;
+}
+
+static void test_limit(void)
+{
+	qaws_mesh_3d *c = sd_cube(), *oc = sd_octahedron(), *c1, *cl, *c6, *o1, *ol, *o6, *cc = NULL;
+	qaws_mesh_subdivide_desc d;
+	double vol = 0;
+	char msg[500];
+	memset(&d, 0, sizeof d);
+	d.scheme = QAWS_MESH_SUBDIVIDE_CATMULL_CLARK;
+	d.levels = 1;
+	d.limit = 1;
+	cl = NULL;
+	qaws_mesh_3d_subdivide(&cl, c, &d);
+	c1 = sd_run(c, QAWS_MESH_SUBDIVIDE_CATMULL_CLARK, 1, NULL);
+	c6 = sd_run(c, QAWS_MESH_SUBDIVIDE_CATMULL_CLARK, 6, NULL);
+	d.scheme = QAWS_MESH_SUBDIVIDE_LOOP;
+	ol = NULL;
+	qaws_mesh_3d_subdivide(&ol, oc, &d);
+	o1 = sd_run(oc, QAWS_MESH_SUBDIVIDE_LOOP, 1, NULL);
+	o6 = sd_run(oc, QAWS_MESH_SUBDIVIDE_LOOP, 6, NULL);
+	qaws_mesh_3d_detect_features(c, (qaws_scalar)0.5, 0, 0);
+	d.scheme = QAWS_MESH_SUBDIVIDE_CATMULL_CLARK;
+	d.levels = 2;
+	qaws_mesh_3d_subdivide(&cc, c, &d);
+	if (cc)
+		vol = sd_volume(cc);
+	if (cl && c1 && c6 && ol && o1 && o6)
+	{
+		/* (the first level's vertices keep their indices through every level after) */
+		double a1 = sd_apart(c1, c6, 26), al = sd_apart(cl, c6, 26), b1 = sd_apart(o1, o6, 18), bl = sd_apart(ol, o6, 18);
+		sprintf(msg, "limit positions: Catmull-Clark's cube after 1 level %.2e from 6 levels, at the limit %.2e; Loop's octahedron %.2e, at the limit %.2e; the creased cube at the limit: volume %.12f",
+			a1, al, b1, bl, vol);
+		printf("  %s\n", msg);
+		TEST_ASSERT(al < 0.02 * a1 && bl < 0.02 * b1 && fabs(vol - 8) < 1e-12, msg);
+	}
+	else
+		TEST_ASSERT(0, "limit positions");
+	qaws_mesh_3d_destroy(c);
+	qaws_mesh_3d_destroy(oc);
+	qaws_mesh_3d_destroy(c1);
+	qaws_mesh_3d_destroy(cl);
+	qaws_mesh_3d_destroy(c6);
+	qaws_mesh_3d_destroy(o1);
+	qaws_mesh_3d_destroy(ol);
+	qaws_mesh_3d_destroy(o6);
+	qaws_mesh_3d_destroy(cc);
+}
+
 int test_172_mesh_subdivide_main(void)
 {
 	g_pass = 0;
@@ -386,6 +448,7 @@ int test_172_mesh_subdivide_main(void)
 	test_creases();
 	test_sheet();
 	test_attributes();
+	test_limit();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
