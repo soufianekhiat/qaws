@@ -414,7 +414,8 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 		{
 			/* smooth: an extraordinary end's ring (Zorin, Schroeder and Sweldens 1996: 3/4 the end, s_j its j-th
 			   neighbour from the other end), both ends' averaged; between regular ends the ten points (1/2 the ends, 1/8
-			   the opposite vertices, -1/16 the wings across their edges; a wing across a border reflected) */
+			   the opposite vertices, -1/16 the wings across their edges; a wing beyond a border virtual, reflected across it, as
+			   Zorin, Schroeder and Sweldens do) */
 			unsigned int ends[2], ext = 0, s, r;
 			ends[0] = ev[2 * e];
 			ends[1] = ev[2 * e + 1];

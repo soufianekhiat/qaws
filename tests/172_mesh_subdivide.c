@@ -22,7 +22,10 @@
  *   - the modified butterfly: the octahedron's vertices kept through two
  *     levels, an edge's point between two valence 4 vertices at
  *     (5/8, 5/8, 0); a cubic height field on a regular grid reproduced
- *     exactly away from the border;
+ *     exactly away from the border; a sheet with diagonals alternating
+ *     (valences 4 and 8) stays in its plane up to the border through two
+ *     levels (Zorin's virtual vertices reflected across it), and a cubic
+ *     along its border follows the four-point curve;
  *   - refusals: Loop on quads, a negative sharpness, an unknown scheme, the
  *     butterfly on quads or with limit normals.
  */
@@ -516,6 +519,96 @@ static double sd_cubic(double x, double y)
 	return x * x * x - 2 * x * y * y + x * y - y + 0.5;
 }
 
+/* a sheet of N x N squares over [0, 1]^2, the diagonals alternating, z = sd_cubic(x, 0) + 0.3 x - 0.2 y */
+static qaws_mesh_3d* sd_sheet_alternating(unsigned int N)
+{
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (N + 1) * (N + 1));
+	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 6 * N * N), i, j, k = 0;
+	qaws_mesh_3d* m;
+	for (j = 0; j <= N; j++)
+		for (i = 0; i <= N; i++)
+		{
+			double u = (double)i / N, v = (double)j / N;
+			x[3 * (j * (N + 1) + i)] = (qaws_scalar)u;
+			x[3 * (j * (N + 1) + i) + 1] = (qaws_scalar)v;
+			x[3 * (j * (N + 1) + i) + 2] = (qaws_scalar)(sd_cubic(u, 0) + 0.3 * u - 0.2 * v);
+		}
+	for (j = 0; j < N; j++)
+		for (i = 0; i < N; i++)
+		{
+			unsigned int a = j * (N + 1) + i;
+			if ((i + j) & 1)
+			{
+				t[k++] = a; t[k++] = a + 1; t[k++] = a + N + 1;
+				t[k++] = a + 1; t[k++] = a + N + 2; t[k++] = a + N + 1;
+			}
+			else
+			{
+				t[k++] = a; t[k++] = a + 1; t[k++] = a + N + 2;
+				t[k++] = a; t[k++] = a + N + 2; t[k++] = a + N + 1;
+			}
+		}
+	m = sd_make(x, (N + 1) * (N + 1), t, NULL, 2 * N * N);
+	free(x);
+	free(t);
+	return m;
+}
+
+static void test_butterfly_border(void)
+{
+	qaws_mesh_3d *s = sd_sheet_alternating(6), *f = NULL, *o = NULL;
+	unsigned int nv, i, along = 0;
+	double plane = 0, curve = 0;
+	char msg[300];
+	if (s)
+	{
+		/* the plane: the same sheet with z linear */
+		unsigned int n0 = qaws_mesh_3d_get_vertex_count(s);
+		qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n0);
+		qaws_mesh_3d_get_positions(x, s);
+		for (i = 0; i < n0; i++) x[3 * i + 2] = (qaws_scalar)(0.3 * (double)x[3 * i] - 0.2 * (double)x[3 * i + 1] + 1);
+		{
+			unsigned int* fv = (unsigned int*)malloc(sizeof(unsigned int) * 3 * qaws_mesh_3d_get_triangle_count(s));
+			qaws_mesh_3d_get_triangles(fv, s);
+			f = sd_make(x, n0, fv, NULL, qaws_mesh_3d_get_triangle_count(s));
+			free(fv);
+		}
+		free(x);
+		o = sd_run(f, QAWS_MESH_SUBDIVIDE_BUTTERFLY, 2, NULL);
+		if (o)
+		{
+			nv = qaws_mesh_3d_get_vertex_count(o);
+			for (i = 0; i < nv; i++)
+			{
+				qaws_vec3 p = qaws_mesh_3d_get_vertex(o, i);
+				plane = fmax(plane, fabs((double)p.z - (0.3 * (double)p.x - 0.2 * (double)p.y + 1)));
+			}
+		}
+		qaws_mesh_3d_destroy(o);
+		o = sd_run(s, QAWS_MESH_SUBDIVIDE_BUTTERFLY, 1, NULL);
+		if (o)
+		{
+			/* the border y = 0 away from its corners: the four points reproduce the cubic */
+			nv = qaws_mesh_3d_get_vertex_count(o);
+			for (i = 0; i < nv; i++)
+			{
+				qaws_vec3 p = qaws_mesh_3d_get_vertex(o, i);
+				if ((double)p.y != 0 || (double)p.x < 1.4 / 6 || (double)p.x > 1 - 1.4 / 6)
+					continue;
+				along++;
+				curve = fmax(curve, fabs((double)p.z - (sd_cubic((double)p.x, 0) + 0.3 * (double)p.x)));
+			}
+		}
+	}
+	sprintf(msg, "butterfly border: a sheet of valences 4 and 8 off its plane %.1e through two levels; a cubic along its border on %u points within %.1e",
+		plane, along, curve);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && plane < 1e-14 && along >= 6 && curve < 1e-14, msg);
+	qaws_mesh_3d_destroy(s);
+	qaws_mesh_3d_destroy(f);
+	qaws_mesh_3d_destroy(o);
+}
+
 static void test_butterfly(void)
 {
 	enum { N = 8 };
@@ -583,6 +676,7 @@ int test_172_mesh_subdivide_main(void)
 	test_limit();
 	test_limit_normals();
 	test_butterfly();
+	test_butterfly_border();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

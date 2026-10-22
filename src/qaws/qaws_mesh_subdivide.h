@@ -66,8 +66,9 @@
  * edge takes the four points along it (-1/16, 9/16, 9/16, -1/16, an end
  * where the crease stops reflected). Cubic polynomials are reproduced on
  * regular parts. limit leaves the vertices (they are on the surface);
- * limit_normals is refused. Vertices next to a border or crease use the
- * regular and extraordinary rules above, not Zorin's border rules.
+ * limit_normals is refused. Next to a border the stencils' vertices beyond
+ * it are virtual, reflected across it (Zorin et al.'s rule): planes are
+ * kept up to the border, and the border is the four-point curve.
  *
  * The result carries the features (each crease edge's halves, while sharp;
  * the corners) and every attribute by its rule:
