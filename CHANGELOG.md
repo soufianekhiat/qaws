@@ -59,6 +59,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- The modified butterfly (`QAWS_MESH_SUBDIVIDE_BUTTERFLY`): interpolating
+  subdivision of triangles (Zorin, Schröder and Sweldens), the ten points,
+  extraordinary rings and crease four points; cubics reproduced. Test 172,
+  figure 50 (key O).
 - Subdivision's limit normals (`qaws_mesh_subdivide_desc.limit_normals`): the
   vertex attribute "limit_normal", exact at smooth vertices by the tangent
   masks (Loop's; Catmull-Clark's of Halstead, Kass and DeRose). Test 172.

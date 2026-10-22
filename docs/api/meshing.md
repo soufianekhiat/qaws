@@ -1240,6 +1240,7 @@ Figure 39 (key D): a U offset outward by contouring (rounded, the slot narrowed)
   - NEAREST takes its value from the first source.
 - **Features:** the crease halves are kept while they are sharp, and so are the corners. The result has no footpoints.
 - **Limit:** `limit` moves the last level's vertices (and their LINEAR and NORMALIZED attributes) onto the limit surface: Loop's limit mask, Catmull-Clark's (n^2 V + 4 sum E + sum F) / (n (n + 5)), a crease's (1, 4, 1) / 6. One level at the limit lies within 2e-4 of six levels, where without it the gap is 0.2 (test 172).
+- **Butterfly:** `QAWS_MESH_SUBDIVIDE_BUTTERFLY` is the modified butterfly (Zorin, Schröder and Sweldens 1996). It splits triangles as Loop does but keeps every vertex where it is, so the surface passes through the cage. An edge point between regular vertices takes the ten-point stencil; next to an extraordinary vertex it takes that vertex's ring stencil; along a crease or border it takes the four points (-1, 9, 9, -1) / 16. Cubic height fields are reproduced exactly on regular parts. `limit` changes nothing and `limit_normals` is refused. Near borders and creases the smooth edges use the same stencils with missing wings reflected, not Zorin's border rules.
 - **Limit normals:** `limit_normals` adds the vertex attribute "limit_normal", the limit surface's unit normals. At a smooth vertex it is the cross product of the scheme's two tangent masks over the ordered ring: Loop's cos and sin weights, and Catmull-Clark's of Halstead, Kass and DeRose (1993). These are exact: a vertex's normal after one level and after three agree to 1e-15. At a border, crease or corner vertex it is the sum of its faces' normals at the limit positions, an approximation.
 - **Order:** old vertices keep their indices. Then comes one vertex per edge (ordered by its smaller vertex index, then the larger), then one per face (Catmull-Clark). Children follow their parent face.
 
@@ -1253,7 +1254,10 @@ Figure 39 (key D): a U offset outward by contouring (rounded, the slot narrowed)
 | A sheet of 2 x 2 quads: corners and border | fixed; on the border |
 | Attributes: linear in the position, normalized, corner UVs, face ids, labels | 4e-16; unit; exact; kept; kept |
 | Limit normals: one level against three (cube, octahedron); the cube's corner against -(1, 1, 1) / sqrt 3; the creased cube unit | 1.1e-15, 6.7e-16; 3.3e-16; 1e-16 |
-| Refusals: Loop on quads, a negative sharpness, an unknown scheme | INVALID_ARGUMENT |
+| Butterfly: the octahedron's vertices through two levels; the edge point between valence 4 vertices; a cubic height field on 121 inner points | unmoved; (5/8, 5/8, 0); exact |
+| Refusals: Loop or the butterfly on quads, a negative sharpness, an unknown scheme, the butterfly with limit normals | INVALID_ARGUMENT |
+
+Figure 50 (key O) sets the butterfly beside Loop on the triangulated cage: the butterfly goes through every cage vertex, Loop stays inside the cage (0.43 off).
 
 Figure 40 (key E) shows a voxel cage (a ring with a post and a stub), its Catmull-Clark surface at the limit with the limit normals at the cage's vertices, the same with semi-sharp creases, and Loop on the triangulated cage with the base rim sharp and a colour carried.
 

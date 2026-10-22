@@ -17,8 +17,9 @@
 #include "qaws_mesh.h"
 
 /*
- * Subdivision of meshes: Loop (triangles) and Catmull-Clark (any polygons,
- * quads out) as operations on a qaws_mesh_3d, the result a mesh again.
+ * Subdivision of meshes: Loop (triangles), the modified butterfly
+ * (triangles, interpolating) and Catmull-Clark (any polygons, quads out) as
+ * operations on a qaws_mesh_3d, the result a mesh again.
  *
  * Each level splits every face (Loop: a triangle into four; Catmull-Clark: an
  * n-gon into n quads through its centroid) and places the vertices by the
@@ -53,6 +54,21 @@
  * vertex on a border, a crease or a corner its faces' normals at the limit
  * positions summed, approximate (the creases' tangent masks are not used).
  *
+ * The modified butterfly (Dyn, Levin and Gregory 1990; Zorin, Schroeder and
+ * Sweldens 1996) splits triangles as Loop does but keeps every vertex where
+ * it is, the surface through them. An edge's point between two regular
+ * (valence 6) vertices takes the ten points: 1/2 the ends, 1/8 the two
+ * opposite vertices, -1/16 the four wings (a wing across a border
+ * reflected); next to an extraordinary vertex of valence n its ring, 3/4
+ * the vertex and s_j its j-th neighbour from the edge (n = 3: 5/12, -1/12,
+ * -1/12; n = 4: 3/8, 0, -1/8, 0; else (1/4 + cos(2 pi j / n) +
+ * 1/2 cos(4 pi j / n)) / n), two such ends averaged. A crease or border
+ * edge takes the four points along it (-1/16, 9/16, 9/16, -1/16, an end
+ * where the crease stops reflected). Cubic polynomials are reproduced on
+ * regular parts. limit leaves the vertices (they are on the surface);
+ * limit_normals is refused. Vertices next to a border or crease use the
+ * regular and extraordinary rules above, not Zorin's border rules.
+ *
  * The result carries the features (each crease edge's halves, while sharp;
  * the corners) and every attribute by its rule:
  *   per vertex  LINEAR and NORMALIZED by the scheme's own rules, as the
@@ -77,7 +93,8 @@
 typedef enum qaws_mesh_subdivide_scheme
 {
 	QAWS_MESH_SUBDIVIDE_CATMULL_CLARK = 0,
-	QAWS_MESH_SUBDIVIDE_LOOP
+	QAWS_MESH_SUBDIVIDE_LOOP,
+	QAWS_MESH_SUBDIVIDE_BUTTERFLY
 } qaws_mesh_subdivide_scheme;
 #endif
 
@@ -90,8 +107,9 @@ typedef struct qaws_mesh_subdivide_desc
 	int limit_normals;                  /* 1: limit, and a vertex attribute "limit_normal" (NORMALIZED, 3): the limit surface's normals */
 } qaws_mesh_subdivide_desc;
 
-/* INVALID_ARGUMENT for a mesh without faces, an unknown scheme, Loop on a face
-   that is not a triangle, a negative sharpness; ALLOCATION_FAILURE when the
+/* INVALID_ARGUMENT for a mesh without faces, an unknown scheme, Loop or the
+   butterfly on a face that is not a triangle, limit_normals with the
+   butterfly, a negative sharpness; ALLOCATION_FAILURE when the
    result's size does not fit. */
 qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* mesh, qaws_mesh_subdivide_desc const* desc);
 

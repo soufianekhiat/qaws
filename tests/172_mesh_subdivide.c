@@ -19,7 +19,12 @@
  *   - limit normals: a vertex's after one level and after three agree (the
  *     same point of the same surface), the cube's corner outward along its
  *     diagonal, with the creased cube's faces' normals there;
- *   - refusals: Loop on quads, a negative sharpness, an unknown scheme.
+ *   - the modified butterfly: the octahedron's vertices kept through two
+ *     levels, an edge's point between two valence 4 vertices at
+ *     (5/8, 5/8, 0); a cubic height field on a regular grid reproduced
+ *     exactly away from the border;
+ *   - refusals: Loop on quads, a negative sharpness, an unknown scheme, the
+ *     butterfly on quads or with limit normals.
  */
 
 #include "test_common.h"
@@ -361,7 +366,7 @@ static void test_refusals(void)
 	qaws_mesh_3d *c = sd_cube(), *o = NULL;
 	qaws_mesh_subdivide_desc d;
 	qaws_scalar sh[12];
-	qaws_status s0, s1, s2;
+	qaws_status s0, s1, s2, s3, s4;
 	char msg[300];
 	unsigned int i;
 	memset(&d, 0, sizeof d);
@@ -375,9 +380,18 @@ static void test_refusals(void)
 	d.sharpness = NULL;
 	d.scheme = (qaws_mesh_subdivide_scheme)5;
 	s2 = qaws_mesh_3d_subdivide(&o, c, &d);
-	sprintf(msg, "refused: Loop on quads (%d), a negative sharpness (%d), an unknown scheme (%d)", (int)s0, (int)s1, (int)s2);
+	d.scheme = QAWS_MESH_SUBDIVIDE_BUTTERFLY;
+	s3 = qaws_mesh_3d_subdivide(&o, c, &d);
+	{
+		qaws_mesh_3d* oc = sd_octahedron();
+		d.limit_normals = 1;
+		s4 = qaws_mesh_3d_subdivide(&o, oc, &d);
+		qaws_mesh_3d_destroy(oc);
+	}
+	sprintf(msg, "refused: Loop on quads (%d), a negative sharpness (%d), an unknown scheme (%d), the butterfly on quads (%d) or with limit normals (%d)", (int)s0, (int)s1, (int)s2, (int)s3, (int)s4);
 	printf("  %s\n", msg);
-	TEST_ASSERT(s0 == QAWS_STATUS_INVALID_ARGUMENT && s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_INVALID_ARGUMENT && !o, msg);
+	TEST_ASSERT(s0 == QAWS_STATUS_INVALID_ARGUMENT && s1 == QAWS_STATUS_INVALID_ARGUMENT && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT &&
+		s4 == QAWS_STATUS_INVALID_ARGUMENT && !o, msg);
 	qaws_mesh_3d_destroy(c);
 }
 
@@ -497,6 +511,65 @@ static void test_limit_normals(void)
 	qaws_mesh_3d_destroy(oc);
 }
 
+static double sd_cubic(double x, double y)
+{
+	return x * x * x - 2 * x * y * y + x * y - y + 0.5;
+}
+
+static void test_butterfly(void)
+{
+	enum { N = 8 };
+	qaws_mesh_3d *oc = sd_octahedron(), *o1 = sd_run(oc, QAWS_MESH_SUBDIVIDE_BUTTERFLY, 1, NULL), *o2 = sd_run(oc, QAWS_MESH_SUBDIVIDE_BUTTERFLY, 2, NULL), *g, *g1;
+	qaws_scalar x[3 * (N + 1) * (N + 1)];
+	unsigned int t[6 * N * N], i, j, k = 0, near = 0, inner = 0;
+	double kept = 1, cub = 0;
+	char msg[300];
+	for (j = 0; j <= N; j++)
+		for (i = 0; i <= N; i++)
+		{
+			x[3 * (j * (N + 1) + i)] = (qaws_scalar)((double)i / N);
+			x[3 * (j * (N + 1) + i) + 1] = (qaws_scalar)((double)j / N);
+			x[3 * (j * (N + 1) + i) + 2] = (qaws_scalar)sd_cubic((double)i / N, (double)j / N);
+		}
+	for (j = 0; j < N; j++)
+		for (i = 0; i < N; i++)
+		{
+			unsigned int a = j * (N + 1) + i;
+			t[k++] = a; t[k++] = a + 1; t[k++] = a + N + 2;
+			t[k++] = a; t[k++] = a + N + 2; t[k++] = a + N + 1;
+		}
+	g = sd_make(x, (N + 1) * (N + 1), t, NULL, 2 * N * N);
+	g1 = sd_run(g, QAWS_MESH_SUBDIVIDE_BUTTERFLY, 1, NULL);
+	if (o1 && o2 && g1)
+	{
+		kept = sd_apart(oc, o2, 6);
+		for (i = 0; i < qaws_mesh_3d_get_vertex_count(o1); i++)
+		{
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(o1, i);
+			near += fabs((double)p.x - 0.625) < 1e-15 && fabs((double)p.y - 0.625) < 1e-15 && fabs((double)p.z) < 1e-15;
+		}
+		for (i = 0; i < qaws_mesh_3d_get_vertex_count(g1); i++)
+		{
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(g1, i);
+			if (fmin(fmin((double)p.x, 1 - (double)p.x), fmin((double)p.y, 1 - (double)p.y)) < 1.4 / N)
+				continue;
+			inner++;
+			cub = fmax(cub, fabs((double)p.z - sd_cubic((double)p.x, (double)p.y)));
+		}
+		sprintf(msg, "butterfly: the octahedron's vertices moved %.1e through two levels, %u edge point at (5/8, 5/8, 0); a cubic on %u inner points within %.1e",
+			kept, near, inner, cub);
+		printf("  %s\n", msg);
+		TEST_ASSERT(kept == 0 && near == 1 && inner > 50 && cub < 1e-14, msg);
+	}
+	else
+		TEST_ASSERT(0, "butterfly");
+	qaws_mesh_3d_destroy(oc);
+	qaws_mesh_3d_destroy(o1);
+	qaws_mesh_3d_destroy(o2);
+	qaws_mesh_3d_destroy(g);
+	qaws_mesh_3d_destroy(g1);
+}
+
 int test_172_mesh_subdivide_main(void)
 {
 	g_pass = 0;
@@ -509,6 +582,7 @@ int test_172_mesh_subdivide_main(void)
 	test_attributes();
 	test_limit();
 	test_limit_normals();
+	test_butterfly();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

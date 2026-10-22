@@ -110,7 +110,56 @@ static void sdv_rules(double* row, double const* pick, sdv_cols const* k, unsign
 	}
 }
 
-/* one level of m into o; limit: o is m with its vertices moved onto the limit surface instead */
+/* the edge (a, b) among the ne edges sorted by their two vertices (smaller first), HM_NONE if none */
+static unsigned int sdv_find_edge(unsigned int const* ev, unsigned int ne, unsigned int a, unsigned int b)
+{
+	unsigned int lo = 0, hi = ne;
+	if (a > b)
+	{
+		unsigned int s = a;
+		a = b;
+		b = s;
+	}
+	while (lo < hi)
+	{
+		unsigned int mid = lo + (hi - lo) / 2;
+		if (ev[2 * mid] < a || (ev[2 * mid] == a && ev[2 * mid + 1] < b)) lo = mid + 1;
+		else hi = mid;
+	}
+	return lo < ne && ev[2 * lo] == a && ev[2 * lo + 1] == b ? lo : HM_NONE;
+}
+
+/* the triangles' corner c's next vertex (d 1) or previous one (d 2) in its face */
+#define SDV_TRI(m, cf, c, d) ((m)->fv[(m)->fo[(cf)[c]] + ((c) - (m)->fo[(cf)[c]] + (d)) % 3])
+
+/* v's ring of neighbours in order from start into out (corners of v from co[v] in cv, their faces in cf); its size,
+   0 when the ring is not closed (a border, not a manifold) or has fewer than 3 */
+static unsigned int sdv_ring(unsigned int* out, sdv_mesh const* m, unsigned int const* co, unsigned int const* cv, unsigned int const* cf,
+	unsigned int v, unsigned int start)
+{
+	unsigned int n = co[v + 1] - co[v], c = HM_NONE, c0, q, i;
+	for (q = co[v]; q < co[v + 1]; q++)
+		if (SDV_TRI(m, cf, cv[q], 1) == start)
+			c = cv[q];
+	if (c == HM_NONE || n < 3)
+		return 0;
+	c0 = c;
+	for (i = 0; i < n; i++)
+	{
+		unsigned int pv = SDV_TRI(m, cf, c, 2), b = HM_NONE;
+		out[i] = SDV_TRI(m, cf, c, 1);
+		for (q = co[v]; q < co[v + 1]; q++)
+			if (SDV_TRI(m, cf, cv[q], 1) == pv)
+				b = cv[q];
+		if (b == HM_NONE)
+			return 0;
+		c = b;
+	}
+	return c == c0 ? n : 0;
+}
+
+/* one level of m into o (loop: 1 Loop, 2 the modified butterfly, 0 Catmull-Clark); limit: o is m with its vertices moved
+   onto the limit surface instead */
 static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols const* k, int limit)
 {
 	unsigned int nv = m->nv, nf = m->nf, nc = m->nc, kv = k->kv, kc = k->kc, kf = k->kf, ne = 0, i, j, f, e, t;
@@ -119,7 +168,7 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 	unsigned int* ui = (unsigned int*)qaws_internal_scratch_zalloc(9 * (size_t)nc + 6 * (size_t)nv + m->nfe + 1, sizeof(unsigned int));
 	double* dd = (double*)qaws_internal_scratch_zalloc((size_t)nc + (size_t)nv + 2 * (size_t)nv * kv + (loop ? 0 : (size_t)nf * kv) + 4 * (size_t)kv + 1,
 		sizeof(double));
-	unsigned int *ev, *ef, *eo, *en, *ce, *cf, *val, *nfc, *nsh, *sh2, *fidx;
+	unsigned int *ev, *ef, *eo, *en, *ce, *cf, *val, *nfc, *nsh, *sh2, *fidx, *co = NULL, *cv = NULL, *ring = NULL;
 	double *es, *ssum, *NS, *QS, *FP, *sm, *rr;
 	qaws_status st = QAWS_STATUS_OK;
 	memset(o, 0, sizeof *o);
@@ -181,21 +230,27 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 	for (e = 0; e < ne; e++) es[e] = en[e] < 2 ? SDV_INF : 0;
 	for (t = 0; t < m->nfe; t++)
 	{
-		unsigned int a = m->fe[2 * t], b = m->fe[2 * t + 1], lo = 0, hi = ne;
-		if (a > b) { unsigned int s = a; a = b; b = s; }
-		fidx[t] = HM_NONE;
-		while (lo < hi)
+		unsigned int lo = sdv_find_edge(ev, ne, m->fe[2 * t], m->fe[2 * t + 1]);
+		fidx[t] = lo;
+		if (lo != HM_NONE && es[lo] < SDV_INF)
+			es[lo] = m->fs[t];
+	}
+	if (loop == 2 && !limit)
+	{
+		/* the butterfly's rings: per vertex its corners */
+		unsigned int* fill;
+		co = (unsigned int*)qaws_internal_scratch_zalloc(2 * (size_t)nv + 2 * (size_t)nc + 2, sizeof(unsigned int));
+		if (!co)
 		{
-			unsigned int mid = lo + (hi - lo) / 2;
-			if (ev[2 * mid] < a || (ev[2 * mid] == a && ev[2 * mid + 1] < b)) lo = mid + 1;
-			else hi = mid;
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
 		}
-		if (lo < ne && ev[2 * lo] == a && ev[2 * lo + 1] == b)
-		{
-			fidx[t] = lo;
-			if (es[lo] < SDV_INF)
-				es[lo] = m->fs[t];
-		}
+		cv = co + nv + 1;
+		ring = cv + nc;
+		fill = ring + nc + 1;
+		for (j = 0; j < nc; j++) co[m->fv[j] + 1]++;
+		for (i = 0; i < nv; i++) co[i + 1] += co[i];
+		for (j = 0; j < nc; j++) cv[co[m->fv[j]] + fill[m->fv[j]]++] = j;
 	}
 
 	nv2 = limit ? nv : (size_t)nv + ne + (loop ? 0 : nf);
@@ -306,6 +361,9 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 		double* y = o->X + (size_t)i * kv;
 		double n = (double)val[i];
 		memcpy(y, x, sizeof(double) * kv);
+		o->vk[i] = m->vk[i];
+		if (loop == 2)
+			continue;   /* (the butterfly interpolates: the vertices stay) */
 		if (val[i] > 0 && loop)
 		{
 			double c = 0.375 + 0.25 * cos(6.283185307179586 / n), beta = (0.625 - c * c) / n;
@@ -342,7 +400,62 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 		double const* b = m->X + (size_t)ev[2 * e + 1] * kv;
 		double* y = o->X + ((size_t)nv + e) * kv;
 		for (j = 0; j < kv; j++) rr[j] = 0.5 * (a[j] + b[j]);
-		if (es[e] < 1)
+		if (loop == 2)
+		{
+			/* the butterfly: a crease's four points, -1/16, 9/16, 9/16, -1/16 (an end not inside a crease reflected, 2 a - b) */
+			unsigned int u = ev[2 * e], w = ev[2 * e + 1];
+			unsigned int pu = nsh[u] == 2 && !m->vk[u] ? (sh2[2 * u] == w ? sh2[2 * u + 1] : sh2[2 * u]) : HM_NONE;
+			unsigned int pw = nsh[w] == 2 && !m->vk[w] ? (sh2[2 * w] == u ? sh2[2 * w + 1] : sh2[2 * w]) : HM_NONE;
+			for (j = 0; j < kv; j++)
+				rr[j] = (9 * (a[j] + b[j]) - (pu != HM_NONE ? m->X[(size_t)pu * kv + j] : 2 * a[j] - b[j]) -
+					(pw != HM_NONE ? m->X[(size_t)pw * kv + j] : 2 * b[j] - a[j])) / 16;
+		}
+		if (loop == 2 && es[e] < 1)
+		{
+			/* smooth: an extraordinary end's ring (Zorin, Schroeder and Sweldens 1996: 3/4 the end, s_j its j-th
+			   neighbour from the other end), both ends' averaged; between regular ends the ten points (1/2 the ends, 1/8
+			   the opposite vertices, -1/16 the wings across their edges; a wing across a border reflected) */
+			unsigned int ends[2], ext = 0, s, r;
+			ends[0] = ev[2 * e];
+			ends[1] = ev[2 * e + 1];
+			for (j = 0; j < kv; j++) sm[j] = 0;
+			for (s = 0; s < 2; s++)
+			{
+				unsigned int nr = sdv_ring(ring, m, co, cv, cf, ends[s], ends[1 - s]);
+				double const* xv = m->X + (size_t)ends[s] * kv;
+				if (!nr || nr == 6)
+					continue;
+				for (j = 0; j < kv; j++) sm[j] += 0.75 * xv[j];
+				for (r = 0; r < nr; r++)
+				{
+					double sj = nr == 3 ? (r ? -1.0 / 12 : 5.0 / 12) : nr == 4 ? (r == 0 ? 0.375 : (r == 2 ? -0.125 : 0))
+						: (0.25 + cos(6.283185307179586 * r / nr) + 0.5 * cos(12.566370614359172 * r / nr)) / nr;
+					for (j = 0; j < kv; j++) sm[j] += sj * m->X[(size_t)ring[r] * kv + j];
+				}
+				ext++;
+			}
+			if (ext)
+				for (j = 0; j < kv; j++) sm[j] /= ext;
+			else
+			{
+				unsigned int cd[2];
+				cd[0] = eo[2 * e];
+				cd[1] = eo[2 * e + 1];
+				for (j = 0; j < kv; j++)
+					sm[j] = 0.5 * (a[j] + b[j]) + 0.125 * (m->X[(size_t)cd[0] * kv + j] + m->X[(size_t)cd[1] * kv + j]);
+				for (r = 0; r < 4; r++)
+				{
+					unsigned int p = ends[r & 1], q = cd[r >> 1], z = ends[1 - (r & 1)], e2 = sdv_find_edge(ev, ne, p, q);
+					unsigned int g = e2 != HM_NONE && en[e2] == 2 ? (eo[2 * e2] == z ? eo[2 * e2 + 1] : eo[2 * e2]) : HM_NONE;
+					for (j = 0; j < kv; j++)
+						sm[j] -= (g != HM_NONE ? m->X[(size_t)g * kv + j] : m->X[(size_t)p * kv + j] + m->X[(size_t)q * kv + j] - m->X[(size_t)z * kv + j]) / 16;
+				}
+			}
+			for (j = 0; j < kv; j++) y[j] = (1 - es[e]) * sm[j] + es[e] * rr[j];
+		}
+		else if (loop == 2)
+			memcpy(y, rr, sizeof(double) * kv);
+		else if (es[e] < 1)
 		{
 			double const* r4[4];
 			static double const wl[4] = { 0.375, 0.375, 0.125, 0.125 }, wc[4] = { 0.25, 0.25, 0.25, 0.25 };
@@ -436,6 +549,7 @@ done:
 	qaws_internal_free(key);
 	qaws_internal_free(ui);
 	qaws_internal_free(dd);
+	qaws_internal_free(co);
 	return st;
 }
 
@@ -534,7 +648,8 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 	if (!out_mesh)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_mesh = NULL;
-	if (!mesh || !desc || (desc->scheme != QAWS_MESH_SUBDIVIDE_CATMULL_CLARK && desc->scheme != QAWS_MESH_SUBDIVIDE_LOOP))
+	if (!mesh || !desc || (desc->scheme != QAWS_MESH_SUBDIVIDE_CATMULL_CLARK && desc->scheme != QAWS_MESH_SUBDIVIDE_LOOP &&
+		desc->scheme != QAWS_MESH_SUBDIVIDE_BUTTERFLY) || (desc->scheme == QAWS_MESH_SUBDIVIDE_BUTTERFLY && desc->limit_normals))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	nv = qaws_mesh_3d_get_vertex_count(mesh);
 	nf = qaws_mesh_3d_get_face_count(mesh);
@@ -542,7 +657,7 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 	na = qaws_mesh_3d_get_attribute_count(mesh);
 	if (nf == 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	loop = desc->scheme == QAWS_MESH_SUBDIVIDE_LOOP;
+	loop = desc->scheme == QAWS_MESH_SUBDIVIDE_LOOP ? 1 : (desc->scheme == QAWS_MESH_SUBDIVIDE_BUTTERFLY ? 2 : 0);
 	levels = desc->levels ? desc->levels : 1;
 	memset(&m, 0, sizeof m);
 	memset(&o, 0, sizeof o);
@@ -630,7 +745,7 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		m = o;
 		memset(&o, 0, sizeof o);
 	}
-	if (desc->limit || desc->limit_normals)
+	if ((desc->limit || desc->limit_normals) && loop != 2)
 	{
 		st = sdv_step(&o, &m, loop, &k, 1);
 		if (st == QAWS_STATUS_OK && desc->limit_normals)
