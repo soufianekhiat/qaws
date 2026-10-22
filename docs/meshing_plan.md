@@ -174,6 +174,12 @@ Hexahedra and quads (research-scale):
     a frame field whose singular graph is valid (Ray et al. 2016 or MBO with the graph repaired: quarter turns only, no
     curve ending inside), tetrahedra split along the singular curves (their edges on the curves, aligned with the axes),
     then this map and extraction.
+    Second look (same day): the cut constraints are right (a box with every facet cut and its frames scrambled keeps
+    every cell's volume), and the map follows the cylinder's axis exactly (rows' mean lengths 1.00) but its section
+    collapses (0.65, 0.21): `ff_frames` gives the cylinder one closed singular loop, two vertical lines within a quarter
+    of its radius of the axis joined near the caps, at every resolution tried (5k to 27k tetrahedra) and every number of
+    sweeps (60 to 1500). No map puts two lines a cell apart on the lattice. A field method whose singular graph is the
+    meshable one (a cylinder: four lines of valence 3, an O-grid; a ball: the cube's graph) comes first.
 
 Ideas noted (not ordered):
 
