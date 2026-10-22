@@ -91,7 +91,7 @@ Landed (quality and reach): curved elements for surfaces (`qaws_mesh_generate_no
 
 ### Roadmap (2026-10-21)
 
-In order of work. Each item says what it unblocks; the order follows those dependencies first, then what users ask for first.
+All 19 items landed or started by 2026-10-22; what is left of them moved to the enrichments roadmap below. In order of work. Each item says what it unblocks; the order follows those dependencies first, then what users ask for first.
 
 Foundations:
 
@@ -123,6 +123,44 @@ Volumes and reserved methods:
 17. **Volume improvement: landed.** Border kept: `keep_border` in `qaws_tetrahedralize_desc` (test 175, figure 43 key H), the recovery's border points moved inside (Steiner point suppression rather than Diazzi et al.'s CDT; the CDT itself stays a next step for points no inside point frees). Landed: `qaws_volume_mesh_improve` (test 173, figure 41 key F): smoothing, edge removal (rings of 3 to 10) and face removal, the border kept; a shaken grid from 0.8 to 40 degrees. Landed: `qaws_volume_mesh_quadratic_nodes` (test 174, figure 42 key G): P2 tetrahedra and Q2 hexahedra on a mesh reference, Jacobians sampled and relaxed. Tetrahedra's and hexahedra's Jacobians bounded (Bernstein). Next: cubic nodes. Planned as: Sliver removal, tetrahedral smoothing and flips (Klingner-Shewchuk), CDT boundary recovery (Diazzi et al. 2023); curved tetrahedra and hexahedra at the border with a Jacobian check, nodes on a mesh reference.
 18. **Hexahedra: started.** Landed: POLYCUBE (test 176, figure 44 key I): a polycube deformation (Gregson et al. 2011) feeding FRAME_FIELD's integer-grid map; spheres, rounded boxes, rings of genus one. Next: labels by graph cuts (no corner across a bent bar), FRAME_FIELD through singular edges (HexEx extraction), meshable frame fields.
 19. **Quads: started.** Landed: PAIRING and SPLIT (test 177, figure 45 key J); LAYOUT as GLOBAL's quads parted by their motorcycle graph (test 178, figure 46 key K; QuadWild's own patch tracing and quantization stay next). Planned as: GLOBAL's quantization of crease isovalues and torus periods, LAYOUT (QuadWild), the cone budget and other guidance follow-ups of the table above.
+
+### Roadmap (2026-10-22): enrichments
+
+The features above, deepened. In order of work: bounded items with an exact check first, then larger ones, research-scale last. Each says what it adds and how it is checked.
+
+Subdivision, geodesics, decimation, offsets (bounded, exact checks):
+
+1. **Butterfly border rules.** Zorin, Schröder and Sweldens' rules for edges next to a border or crease vertex, in place of the reflected wings. Check: a flat sheet stays flat, linear fields reproduced up to the border, the sheet's border curve the 4-point curve.
+2. **Geodesics up to a radius.** `qaws_mesh_3d_geodesic_exact` stopping once every window left is farther than R; the rest HUGE_VAL. Check: inside R, identical to the full run; the cost falls with R on a large grid.
+3. **Nearest sources.** Per vertex, the source whose distance it took (geodesic Voronoi regions), for the heat method and the exact one. Check: two sources on a flat grid part it along their bisector.
+4. **Distances anywhere.** The windows kept so any surface point (a location) gets its exact distance, not only the vertices. Check: points inside the flat grid's and the cube's triangles against the unfoldings.
+5. **Exact geodesics measured.** Time and windows at about 100k vertices (a hill, a bumpy sphere), stated in the docs; the window cost bound if one shows.
+6. **Attributes in the quadric** (Hoppe 1999). Decimation's quadric extended by the vertex attributes (UVs, colours), collapses placing them by the same solve. Check: a linear attribute stays exact; a textured sheet keeps its UV error below the geometric-only run's.
+7. **Rounded joins for MOVE offsets.** Convex corners and edges joined by arcs and sphere caps at the offset distance, not mitres. Check: the offset cube's every point at the distance from the cube.
+8. **Exact limit normals on creases and borders** (Biermann et al. 2000): the crease's tangent along it and across, so `limit_normals` is exact everywhere. Check: a crease vertex's normal after one level and after three agree.
+9. **The sqrt(3) scheme** (Kobbelt 2000): three triangles per level, the edges flipped every level, borders by every other level. Check: counts, the valence 6 limit, a vertex rule's fixed point.
+10. **Limit normals for the butterfly.** Its tangent masks (Zorin's), now refused. Check: one level against three, as for Loop.
+
+Volumes, points, smoothing (larger):
+
+11. **Cubic nodes.** P3 tetrahedra and Q3 hexahedra, the border's nodes on the surface, Jacobians certified by their Bernstein coefficients. Check: an exact cubic geometry reproduced; the bound below every sample.
+12. **Untangling curved elements.** Where the bound is not positive, the interior nodes moved up the bound's gradient until it is. Check: a bent tetrahedron made valid with its border nodes kept.
+13. **Points without normals.** Normals estimated (PCA of the nearest points) and oriented (a minimum spanning tree, then winding numbers) before the watertight surface. Check: a sphere's and a ring's points give the same surfaces as with true normals.
+14. **Denoised corners.** BILATERAL keeping the corners where three or more features meet (the normals' filter split by feature). Check: a noisy cube's corners within the noise's tenth.
+15. **Memoryless simplification** (Lindstrom and Turk 1998): the volume and area preserving collapse with no stored quadrics. Check: volume kept to round-off on a closed mesh; the error near the quadrics'.
+16. **Adaptive subdivision levels.** Only faces near features, or where the limit surface's curvature exceeds a bound, split; the transitions stitched without T-junctions. Check: a watertight result, counts below uniform levels.
+17. **Adaptive offsets.** An octree grid for CONTOUR offsets, fine only near the surface. Check: the same surface as the uniform grid at its finest, a fraction of the cells.
+
+Parameterization:
+
+18. **BFF** (boundary first flattening, Sawhney and Crane 2017), reserved in the enum: conformal maps with the border's lengths or angles given. Check: a disc to a disc with its angles kept; the flattened lengths prescribed.
+19. **Seams and chart packing.** Seams cut automatically where the distortion is high (or along features), the charts packed into the unit square. Check: every chart flat within its bound, no overlap, the fill ratio stated.
+
+Hexahedra and quads (research-scale):
+
+20. **Polycube labels by graph cuts.** The face labels optimized (a graph cut on normals with smoothness), so no corner crosses a bent bar. Check: an L-bar and a bent bar labelled to valid polycubes.
+21. **GLOBAL torus periods.** The integer-grid map's periods on a torus quantized together, so the quads close around both loops. Check: a torus with uneven radii meshed with no seam defects.
+22. **FRAME_FIELD through singular edges** (HexEx extraction, Lyon et al. 2016): hexahedra where the frame field has singular curves. Check: a cylinder's and a sphere's hexes all valid.
 
 ## 0. Scope
 
