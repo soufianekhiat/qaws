@@ -804,6 +804,233 @@ done:
 	return st;
 }
 
+/* one adaptive level of Loop or the butterfly on triangles m into o: the faces at a turn (a neighbour's normal more than
+   angle away, or a feature edge on them) split, and every edge of theirs; a face with one or two split edges cut into two
+   or three (no T-junction), with three into four. The positions are the uniform level's (full, the rules all in one
+   place): a split edge's point, and an old vertex's moved by its rule where it touches a split edge, kept elsewhere. */
+static qaws_status sdv_adaptive(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols const* k, double angle)
+{
+	sdv_mesh full;
+	unsigned int nv = m->nv, nf = m->nf, nc = m->nc, kv = k->kv, kc = k->kc, kf = k->kf, ne = 0, i, j, e, f, t, ns = 0, nfo = 0, nco = 0, nfe2 = 0;
+	sdv_key* key = (sdv_key*)qaws_internal_scratch_malloc(sizeof(sdv_key) * ((size_t)nc + 1));
+	unsigned int* ui = (unsigned int*)qaws_internal_scratch_zalloc(8 * (size_t)nc + 2 * (size_t)nv + 2, sizeof(unsigned int));
+	unsigned char* mark = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nf + 1, 1);
+	double* nrm = (double*)qaws_internal_scratch_malloc(sizeof(double) * (3 * (size_t)nf + 1));
+	unsigned int *ev, *ef, *en, *ce, *eid, *touch;
+	double cosa = cos(angle);
+	qaws_status st;
+	memset(o, 0, sizeof *o);
+	memset(&full, 0, sizeof full);
+	if (!key || !ui || !mark || !nrm)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	st = sdv_step(&full, m, loop, k, 0);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	ev = ui;                    /* per edge its two vertices (smaller first) */
+	ef = ev + 2 * (size_t)nc;   /* its first two faces */
+	en = ef + 2 * (size_t)nc;   /* its faces' count */
+	ce = en + nc;               /* per corner its edge */
+	eid = ce + nc;              /* per edge its new vertex (HM_NONE: not split) */
+	touch = eid + nc;           /* per vertex: a split edge on it */
+	/* the edges, as the uniform level numbers them (sorted by their vertices) */
+	for (f = 0; f < nf; f++)
+		for (j = m->fo[f]; j < m->fo[f + 1]; j++)
+		{
+			unsigned int a = m->fv[j], b = m->fv[j + 1 == m->fo[f + 1] ? m->fo[f] : j + 1];
+			key[j].a = a < b ? a : b;
+			key[j].b = a < b ? b : a;
+			key[j].c = j;
+		}
+	qsort(key, nc, sizeof(sdv_key), sdv_key_cmp);
+	for (i = 0; i < nc; i++)
+	{
+		if (i == 0 || key[i].a != key[i - 1].a || key[i].b != key[i - 1].b)
+		{
+			e = ne++;
+			ev[2 * e] = key[i].a;
+			ev[2 * e + 1] = key[i].b;
+			ef[2 * e] = ef[2 * e + 1] = HM_NONE;
+		}
+		e = ne - 1;
+		ce[key[i].c] = e;
+		if (en[e] < 2)
+			ef[2 * e + en[e]] = key[i].c / 3;
+		en[e]++;
+	}
+	/* the faces at a turn */
+	for (f = 0; f < nf; f++)
+	{
+		double const *a = m->X + (size_t)m->fv[3 * f] * kv, *b = m->X + (size_t)m->fv[3 * f + 1] * kv, *c = m->X + (size_t)m->fv[3 * f + 2] * kv;
+		double u[3], w[3], *nn = nrm + 3 * (size_t)f, l;
+		for (j = 0; j < 3; j++) { u[j] = b[j] - a[j]; w[j] = c[j] - a[j]; }
+		nn[0] = u[1] * w[2] - u[2] * w[1];
+		nn[1] = u[2] * w[0] - u[0] * w[2];
+		nn[2] = u[0] * w[1] - u[1] * w[0];
+		l = sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+		for (j = 0; j < 3; j++) nn[j] = l > 0 ? nn[j] / l : 0;
+	}
+	for (e = 0; e < ne; e++)
+		if (en[e] == 2)
+		{
+			double const *n0 = nrm + 3 * (size_t)ef[2 * e], *n1 = nrm + 3 * (size_t)ef[2 * e + 1];
+			if (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2] < cosa)
+				mark[ef[2 * e]] = mark[ef[2 * e + 1]] = 1;
+		}
+	for (t = 0; t < m->nfe; t++)
+	{
+		unsigned int x = sdv_find_edge(ev, ne, m->fe[2 * t], m->fe[2 * t + 1]);
+		if (x != HM_NONE && m->fs[t] > 0)
+			for (j = 0; j < en[x] && j < 2; j++) mark[ef[2 * x + j]] = 1;
+	}
+	for (e = 0; e < ne; e++) eid[e] = HM_NONE;
+	for (f = 0; f < nf; f++)
+		if (mark[f])
+			for (j = 0; j < 3; j++) eid[ce[3 * f + j]] = 0;
+	for (e = 0; e < ne; e++)
+		if (eid[e] == 0)
+		{
+			eid[e] = nv + ns++;
+			touch[ev[2 * e]] = touch[ev[2 * e + 1]] = 1;
+		}
+	for (f = 0; f < nf; f++)
+	{
+		unsigned int s = (eid[ce[3 * f]] != HM_NONE) + (eid[ce[3 * f + 1]] != HM_NONE) + (eid[ce[3 * f + 2]] != HM_NONE);
+		nfo += s == 3 ? 4 : s + 1;
+	}
+	nco = 3 * nfo;
+	for (t = 0; t < m->nfe; t++)
+	{
+		unsigned int x = sdv_find_edge(ev, ne, m->fe[2 * t], m->fe[2 * t + 1]);
+		nfe2 += x != HM_NONE && eid[x] != HM_NONE ? 2 : 1;
+	}
+	o->nv = nv + ns;
+	o->nf = nfo;
+	o->nc = nco;
+	o->nfe = nfe2;
+	if (!sdv_alloc(o, k))
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	/* the positions: the uniform level's where the mesh is split, the old ones elsewhere */
+	for (i = 0; i < nv; i++)
+	{
+		memcpy(o->X + (size_t)i * kv, (touch[i] ? full.X : m->X) + (size_t)i * kv, sizeof(double) * kv);
+		o->vk[i] = m->vk[i];
+	}
+	for (e = 0; e < ne; e++)
+		if (eid[e] != HM_NONE)
+			memcpy(o->X + (size_t)eid[e] * kv, full.X + ((size_t)nv + e) * kv, sizeof(double) * kv);
+	/* the faces: by how many of their edges split (corner rows: an old corner's own, an edge point's the mean of its two) */
+	{
+		unsigned int g = 0, q = 0;
+		for (f = 0; f < nf; f++)
+		{
+			unsigned int c0 = 3 * f, v[3], mid[3], s = 0, tri[4][3], ntr = 0, r, z;
+			for (j = 0; j < 3; j++)
+			{
+				v[j] = m->fv[c0 + j];
+				mid[j] = eid[ce[c0 + j]];
+				s += mid[j] != HM_NONE;
+			}
+			if (s == 0)
+			{
+				tri[0][0] = 0; tri[0][1] = 1; tri[0][2] = 2;
+				ntr = 1;
+			}
+			else if (s == 3)
+			{
+				/* (Loop's four: the corners' then the middle one) */
+				static unsigned int const lv[4][3] = { { 0, 3, 5 }, { 1, 4, 3 }, { 2, 5, 4 }, { 3, 4, 5 } };
+				for (r = 0; r < 4; r++)
+					for (z = 0; z < 3; z++) tri[r][z] = lv[r][z];
+				ntr = 4;
+			}
+			else if (s == 1)
+			{
+				for (j = 0; mid[j] == HM_NONE; j++)
+					;
+				/* edge j (corner j to j + 1) split at 3 + j */
+				tri[0][0] = j; tri[0][1] = 3 + j; tri[0][2] = (j + 2) % 3;
+				tri[1][0] = 3 + j; tri[1][1] = (j + 1) % 3; tri[1][2] = (j + 2) % 3;
+				ntr = 2;
+			}
+			else
+			{
+				unsigned int a1, a2;
+				for (j = 0; mid[j] != HM_NONE; j++)
+					;
+				/* edge j kept, j + 1 and j + 2 split */
+				a1 = (j + 1) % 3;
+				a2 = (j + 2) % 3;
+				tri[0][0] = a2; tri[0][1] = 3 + a2; tri[0][2] = 3 + a1;
+				tri[1][0] = j; tri[1][1] = a1; tri[1][2] = 3 + a1;
+				tri[2][0] = j; tri[2][1] = 3 + a1; tri[2][2] = 3 + a2;
+				ntr = 3;
+			}
+			for (r = 0; r < ntr; r++, g++)
+			{
+				o->fo[g] = q;
+				memcpy(o->F + (size_t)g * kf, m->F + (size_t)f * kf, sizeof(double) * kf);
+				for (z = 0; z < 3; z++, q++)
+				{
+					unsigned int id = tri[r][z];
+					double* y = o->C + (size_t)q * kc;
+					if (id < 3)
+					{
+						o->fv[q] = v[id];
+						memcpy(y, m->C + ((size_t)c0 + id) * kc, sizeof(double) * kc);
+					}
+					else
+					{
+						unsigned int a = id - 3, b = (id - 2) % 3;
+						o->fv[q] = mid[a];
+						for (j = 0; j < kc; j++) y[j] = 0.5 * (m->C[((size_t)c0 + a) * kc + j] + m->C[((size_t)c0 + b) * kc + j]);
+						sdv_rules(y, m->C + ((size_t)c0 + a) * kc, k, QAWS_MESH_CORNER);
+					}
+				}
+			}
+		}
+		o->fo[g] = q;
+	}
+	/* the creases: a split one's halves (sharp one level less), the others as they were */
+	o->nfe = 0;
+	for (t = 0; t < m->nfe; t++)
+	{
+		unsigned int x = sdv_find_edge(ev, ne, m->fe[2 * t], m->fe[2 * t + 1]);
+		if (x != HM_NONE && eid[x] != HM_NONE)
+		{
+			double s = m->fs[t] >= SDV_INF ? SDV_INF : m->fs[t] - 1;
+			if (s <= 0)
+				continue;
+			o->fe[2 * o->nfe] = m->fe[2 * t];
+			o->fe[2 * o->nfe + 1] = eid[x];
+			o->fs[o->nfe++] = s;
+			o->fe[2 * o->nfe] = eid[x];
+			o->fe[2 * o->nfe + 1] = m->fe[2 * t + 1];
+			o->fs[o->nfe++] = s;
+		}
+		else
+		{
+			o->fe[2 * o->nfe] = m->fe[2 * t];
+			o->fe[2 * o->nfe + 1] = m->fe[2 * t + 1];
+			o->fs[o->nfe++] = m->fs[t];
+		}
+	}
+done:
+	if (st != QAWS_STATUS_OK)
+		sdv_free(o);
+	sdv_free(&full);
+	qaws_internal_free(key);
+	qaws_internal_free(ui);
+	qaws_internal_free(mark);
+	qaws_internal_free(nrm);
+	return st;
+}
+
 qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* mesh, qaws_mesh_subdivide_desc const* desc)
 {
 	sdv_mesh m, o;
@@ -822,7 +1049,8 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 	*out_mesh = NULL;
 	if (!mesh || !desc || (desc->scheme != QAWS_MESH_SUBDIVIDE_CATMULL_CLARK && desc->scheme != QAWS_MESH_SUBDIVIDE_LOOP &&
 		desc->scheme != QAWS_MESH_SUBDIVIDE_BUTTERFLY && desc->scheme != QAWS_MESH_SUBDIVIDE_SQRT3) ||
-		(desc->scheme == QAWS_MESH_SUBDIVIDE_BUTTERFLY && desc->limit_normals) || (desc->scheme == QAWS_MESH_SUBDIVIDE_SQRT3 && (desc->limit || desc->limit_normals)))
+		(desc->scheme == QAWS_MESH_SUBDIVIDE_BUTTERFLY && desc->limit_normals) || (desc->scheme == QAWS_MESH_SUBDIVIDE_SQRT3 && (desc->limit || desc->limit_normals)) ||
+		!(desc->adaptive_angle >= 0) || (desc->adaptive_angle > 0 && (desc->scheme == QAWS_MESH_SUBDIVIDE_CATMULL_CLARK || desc->scheme == QAWS_MESH_SUBDIVIDE_SQRT3)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	nv = qaws_mesh_3d_get_vertex_count(mesh);
 	nf = qaws_mesh_3d_get_face_count(mesh);
@@ -911,7 +1139,7 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 
 	for (lv = 0; lv < levels; lv++)
 	{
-		st = loop == 3 ? sdv_sqrt3(&o, &m, &k) : sdv_step(&o, &m, loop, &k, 0);
+		st = loop == 3 ? sdv_sqrt3(&o, &m, &k) : desc->adaptive_angle > 0 ? sdv_adaptive(&o, &m, loop, &k, (double)desc->adaptive_angle) : sdv_step(&o, &m, loop, &k, 0);
 		sdv_free(&m);
 		if (st != QAWS_STATUS_OK)
 			goto done;

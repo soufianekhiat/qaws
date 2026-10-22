@@ -30,6 +30,8 @@
  *     vertex at 5/9, a centroid at (1/3, 1/3, 1/3); two levels 38 and 72,
  *     Euler 2; a sheet with a colour linear in the position: flat, the
  *     colour exact, the border unmoved; limit refused;
+ *   - adaptive Loop on a cube of 4 x 4 a side: closed, fewer faces than
+ *     uniform, its faces' middles unmoved;
  *   - refusals: Loop on quads, a negative sharpness, an unknown scheme, the
  *     butterfly on quads or with limit normals.
  */
@@ -667,6 +669,101 @@ static void test_butterfly(void)
 	qaws_mesh_3d_destroy(g1);
 }
 
+/* the cube [0, 1]^3's surface in n x n squares a side, each cut in two */
+static qaws_mesh_3d* sd_grid_cube(unsigned int n)
+{
+	unsigned int N = n + 1, *id = (unsigned int*)malloc(sizeof(unsigned int) * N * N * N), nv = 0, nf = 0, a, s, u, v, k;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * N * N * N);
+	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 36 * n * n);
+	qaws_mesh_3d* m;
+	for (k = 0; k < N * N * N; k++)
+	{
+		unsigned int q[3];
+		q[0] = k % N;
+		q[1] = (k / N) % N;
+		q[2] = k / (N * N);
+		id[k] = 0xFFFFFFFFu;
+		if (q[0] % n && q[1] % n && q[2] % n)
+			continue;
+		id[k] = nv;
+		for (a = 0; a < 3; a++) x[3 * nv + a] = (qaws_scalar)((double)q[a] / n);
+		nv++;
+	}
+	for (a = 0; a < 3; a++)
+		for (s = 0; s < 2; s++)
+			for (u = 0; u < n; u++)
+				for (v = 0; v < n; v++)
+				{
+					unsigned int q4[4], c, b = (a + 1) % 3, e = (a + 2) % 3;
+					for (c = 0; c < 4; c++)
+					{
+						unsigned int q[3];
+						q[a] = s * n;
+						q[b] = u + (c == 1 || c == 2);
+						q[e] = v + (c >= 2);
+						q4[c] = id[q[0] + N * (q[1] + N * q[2])];
+					}
+					if (!s)
+					{
+						c = q4[1];
+						q4[1] = q4[3];
+						q4[3] = c;
+					}
+					f[3 * nf] = q4[0]; f[3 * nf + 1] = q4[1]; f[3 * nf + 2] = q4[2]; nf++;
+					f[3 * nf] = q4[0]; f[3 * nf + 1] = q4[2]; f[3 * nf + 2] = q4[3]; nf++;
+				}
+	m = sd_make(x, nv, f, NULL, nf);
+	free(id);
+	free(x);
+	free(f);
+	return m;
+}
+
+/* adaptive Loop on a cube of 4 x 4 squares a side, nothing marked: only near its edges, closed, fewer faces than uniform,
+   its faces' middles still flat */
+static void test_adaptive(void)
+{
+	qaws_mesh_3d *c = sd_grid_cube(4), *o = NULL, *u = sd_run(c, QAWS_MESH_SUBDIVIDE_LOOP, 2, NULL), *bad = NULL;
+	qaws_mesh_subdivide_desc d;
+	qaws_mesh_topology top;
+	qaws_status st, sb;
+	unsigned int flat = 0, i;
+	char msg[300];
+	memset(&d, 0, sizeof d);
+	d.scheme = QAWS_MESH_SUBDIVIDE_LOOP;
+	d.levels = 2;
+	d.adaptive_angle = (qaws_scalar)0.3;
+	st = qaws_mesh_3d_subdivide(&o, c, &d);
+	memset(&top, 0, sizeof top);
+	if (o)
+	{
+		qaws_mesh_3d_get_topology(&top, o);
+		for (i = 0; i < qaws_mesh_3d_get_vertex_count(o); i++)
+		{
+			/* (a face's middle point: on its plane at 1/2, 1/2) */
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(o, i);
+			double q[3] = { p.x, p.y, p.z };
+			unsigned int a, mids = 0, on = 0;
+			for (a = 0; a < 3; a++)
+			{
+				mids += fabs(q[a] - 0.5) < 1e-12;
+				on += q[a] == 0 || q[a] == 1;
+			}
+			flat += mids == 2 && on == 1;
+		}
+	}
+	d.scheme = QAWS_MESH_SUBDIVIDE_CATMULL_CLARK;
+	sb = qaws_mesh_3d_subdivide(&bad, c, &d);
+	sprintf(msg, "adaptive Loop on a cube of 4 x 4 a side, two levels at 0.3: %u faces (uniform %u), closed %d, genus %u, the faces' middles unmoved %u of 6; refused with Catmull-Clark (%d)",
+		o ? qaws_mesh_3d_get_face_count(o) : 0, u ? qaws_mesh_3d_get_face_count(u) : 0, top.closed, top.genus, flat, (int)sb);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && u && top.closed && top.genus == 0 && 4 * qaws_mesh_3d_get_face_count(o) < 3 * qaws_mesh_3d_get_face_count(u) &&
+		flat == 6 && sb == QAWS_STATUS_INVALID_ARGUMENT && !bad, msg);
+	qaws_mesh_3d_destroy(c);
+	qaws_mesh_3d_destroy(o);
+	qaws_mesh_3d_destroy(u);
+}
+
 static void test_sqrt3(void)
 {
 	qaws_mesh_3d *oc = sd_octahedron(), *o1 = sd_run(oc, QAWS_MESH_SUBDIVIDE_SQRT3, 1, NULL), *o2 = sd_run(oc, QAWS_MESH_SUBDIVIDE_SQRT3, 2, NULL), *s = NULL, *s2 = NULL, *bad = NULL;
@@ -762,6 +859,7 @@ int test_172_mesh_subdivide_main(void)
 	test_butterfly();
 	test_butterfly_border();
 	test_sqrt3();
+	test_adaptive();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

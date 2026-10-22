@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Adaptive subdivision (`adaptive_angle`, Loop and the butterfly): only where the
+  surface turns, transitions without T-junctions. Test 172, figure 54 (key S).
 - Memoryless decimation (`QAWS_DECIMATE_MEMORYLESS`, Lindstrom and Turk 1998): costs
   from the current faces, the volume kept to round-off. Test 167.
 - Watertight surfaces from points without normals (`normals` NULL): estimated by

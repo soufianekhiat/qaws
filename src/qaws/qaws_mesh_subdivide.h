@@ -80,6 +80,15 @@
  * (features stay sharp); limit and limit_normals are refused. The new
  * faces follow their parent, one per half-edge.
  *
+ * adaptive_angle (Loop and the butterfly) refines where the surface turns:
+ * each level splits the faces whose normal is more than the angle from a
+ * neighbour's, or that touch a feature edge, and all their edges; a face
+ * with one or two split edges is cut into two or three triangles, so there
+ * is no T-junction. Positions are the uniform level's: a split edge's point,
+ * an old vertex moved by its rule where a split edge touches it, kept
+ * elsewhere. Flat regions stay coarse. (New faces follow their parent; the
+ * numbering of the uniform levels does not hold.)
+ *
  * The result carries the features (each crease edge's halves, while sharp;
  * the corners) and every attribute by its rule:
  *   per vertex  LINEAR and NORMALIZED by the scheme's own rules, as the
@@ -117,11 +126,13 @@ typedef struct qaws_mesh_subdivide_desc
 	qaws_scalar const* sharpness;       /* per feature edge (qaws_mesh_3d_get_feature_edges order), >= 0; NULL: infinitely sharp */
 	int limit;                          /* 1: the last level's vertices moved onto the limit surface */
 	int limit_normals;                  /* 1: limit, and a vertex attribute "limit_normal" (NORMALIZED, 3): the limit surface's normals */
+	qaws_scalar adaptive_angle;         /* Loop and the butterfly: > 0, each level splits only the faces at a turn (radians); 0: all */
 } qaws_mesh_subdivide_desc;
 
 /* INVALID_ARGUMENT for a mesh without faces, an unknown scheme, Loop, the
    butterfly or sqrt(3) on a face that is not a triangle, limit_normals with
-   the butterfly, limit or limit_normals with sqrt(3), a negative sharpness; ALLOCATION_FAILURE when the
+   the butterfly, limit or limit_normals with sqrt(3), adaptive_angle
+   negative or with Catmull-Clark or sqrt(3), a negative sharpness; ALLOCATION_FAILURE when the
    result's size does not fit. */
 qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* mesh, qaws_mesh_subdivide_desc const* desc);
 
