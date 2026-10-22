@@ -211,6 +211,17 @@ Larger:
    and in the crossings and junctions (Newton on the weighted equalities). Check: a rectangle with one side at weight 2
    (the roof's known faces); a square's weighted medial axis against the weighted bisectors; a planar surface region
    equal to the 2D skeleton with the same weights.
+   Done (2026-10-22): circles carry a speed (|p - m| = r0 - s w t); three supports with cones of different speeds meet
+   by a quartic (x, y quadratic in t; roots by bisection between the derivative's), the parallel-rows case by a
+   quadratic in t; splice circles at the faster edge's speed, a slower neighbour a conic corner; a smooth joint whose
+   edges part opens a circle at once; corners born touching between different speeds take the crossing where the
+   edge coming in enters the other's swept side. Fixed on the way: the united region's edges named the wrong input
+   curve (polylines joined, a vertex naming the curve ending there), now the candidate nearest the edge's middle.
+   Checks: the rectangle (top 2/3), the disc at 2 (1/2), the stadium with arcs at 2 and 0.5 (1, symmetric), the L's
+   and the bump's weighted medial axes against the weighted distance (vertices at the larger weight). Surfaces:
+   `weight_fn` in `qaws_surface_medial_desc` (region path, curve, knot span), corners at the larger weight; a flat
+   rectangle with its bottom at 2: radii the weighted distances to 1e-7, the largest 1.6 / 3, both the medial axis and
+   the mitered skeleton. Not done: a weight per vertex given (the default rule only).
 
 Smaller (each with its check): Zorin's refined butterfly border rules; Kobbelt's ternary sqrt(3) border; Catmull-Clark
 adaptive levels; geodesic regions' borders inside triangles; fewer saddle windows; corner attributes in decimation (UV

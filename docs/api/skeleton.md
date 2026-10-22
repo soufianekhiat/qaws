@@ -16,7 +16,7 @@ is swept is the roof's height there.
 
 ```c
 qaws_skeleton_desc d = { paths, path_count, QAWS_FILL_NON_ZERO };
-d.weight_fn = speed; d.weight_user = user;   /* optional: weighted (lines) */
+d.weight_fn = speed; d.weight_user = user;   /* optional: weighted (lines and arcs) */
 d.splice_angle = 3.14159265358979;           /* optional: the medial axis */
 qaws_skeleton* s;
 qaws_skeleton_create(&s, &d);
@@ -52,13 +52,15 @@ qaws_skeleton_destroy(s);
 2. **Supports in space-time.** Each edge's carrier is a surface over
    (x, y, t):
    - a line n · p = d at time t is on n · p = d + w t: a plane;
-   - an arc |p − m| = r is on |p − m| = r − s t (s = +1 when the region is
-     inside its circle, so it shrinks; −1 when outside, so it grows): a
+   - an arc |p − m| = r is on |p − m| = r − s w t (s = +1 when the region
+     is inside its circle, so it shrinks; −1 when outside, so it grows): a
      cone.
 
    Every event is three supports meeting at a point. The difference of two
-   cones is a plane, so each event is a linear system and at most one
-   quadratic.
+   cones of one speed is a plane, so each event is a linear system and at
+   most one quadratic. Cones of different speeds differ by a quadric: x
+   and y are then quadratic in t and the event is a quartic, its real
+   roots by bisection between its derivative's.
 3. **Corners.** A corner between two lines, or between two supports that
    stay tangent (a smooth joint), moves at a constant velocity. Any other
    corner is one of the two crossings of its supports (its branch), moving
@@ -156,7 +158,26 @@ The arcs with neither flag are the pure skeleton, clear of the boundary.
 
   The meetings at the vertices are then exact. Near tangencies resolve on
   the double's scale, whatever the float tolerance.
-- **Weights.** Weights apply to lines and must be > 0; arcs move at speed 1.
+- **Weights.** Weights apply to lines and arcs and must be > 0. A circle
+  opened at a reflex vertex moves at the faster of its two edges' speeds,
+  so at sigma = pi the result is the weighted medial axis: each edge's
+  distance divided by its weight, a vertex's by the larger of its two.
+  - The opened circle stays tangent to the edge of its own speed; a slower
+    edge crosses it (a conic corner, the crossing behind the vertex along
+    the edge coming in, ahead along the one going out).
+  - A smooth joint whose edges part (a line next to a faster arc) leaves a
+    gap: it opens a circle at once.
+  - Supports of different speeds born touching take the crossing where the
+    edge coming in passes from the unswept side of the one going out to
+    its swept side.
+  - Arcs between circles of different speeds are Cartesian ovals, not
+    conics: `qaws_skeleton_get_arc_curve` fits them with rational
+    quadratics (16 pieces at most).
+  - `weight_fn` is called with the input's path and curve (an edge of the
+    united region is matched back to the input curve nearest its middle)
+    and the span: a Bézier's whole curve, a B-spline's knot span, an arc
+    curve's segment.
+
   Consecutive collinear lines with different weights are ambiguous
   (Biedl, Held, Huber, Kaaser and Palfrader, CGTA 2015), and their vertex
   moves at the average speed.
@@ -251,7 +272,13 @@ Curved shapes:
 - a square with a round bite;
 - a square with a round bump, mitered (it pinches off as a bubble) and at
   sigma = pi;
-- the medial axes of an L, a comb and a star.
+- the medial axes of an L, a comb and a star;
+- weighted: a rectangle of four lines, its bottom at weight 2 (the top at
+  2/3), a disc at weight 2 (the top at 1/2), the L's weighted medial axis
+  (sides at 2 and 1.5: every point at the least of the edges' distances
+  over their weights, a vertex's over the larger of its two), a stadium
+  whose arcs move at 2 and 0.5 (the top at 1), the bump's weighted medial
+  axis (its arc at 0.5: a three-circle event with collinear centres).
 
 **Random curved regions** (double builds), at both sigma: 40 star-shaped
 regions of 5 to 18 sides, each a line or an arc bulging either way, two

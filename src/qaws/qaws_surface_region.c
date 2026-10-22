@@ -1111,6 +1111,27 @@ static void sr_piece_end(qaws_curve const* cv, double lo, double hi, qaws_eval_r
 	r->d1 = d.d1;
 }
 
+/* the knot span of a B-spline at t (0 for other curves): the distinct interior knots up to t */
+static unsigned int sr_span(qaws_curve const* cv, double t)
+{
+	qaws_scalar probe[2], *kn;
+	unsigned int nk = 0, i, span = 0, deg;
+	qaws_curve_kind kind = qaws_curve_get_kind(cv);
+	if (kind != QAWS_CURVE_KIND_BSPLINE && kind != QAWS_CURVE_KIND_NURBS)
+		return 0;
+	deg = qaws_curve_get_degree(cv);
+	qaws_bspline_get_knots(probe, &nk, cv, 0);
+	kn = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_scalar), nk + 1));
+	if (!kn)
+		return 0;
+	if (qaws_bspline_get_knots(kn, &nk, cv, nk) == QAWS_STATUS_OK)
+		for (i = deg + 1; i + 1 + deg < nk; i++)
+			if ((double)kn[i] > (double)kn[i - 1] && (double)kn[i] <= t)
+				span++;
+	qaws_internal_free(kn);
+	return span;
+}
+
 /* the parameters splitting the curve into smooth pieces: its ends and the
    knots of a B-spline where it turns a corner (malloc'ed) */
 static qaws_status sr_breaks(qaws_curve const* cv, double** out, unsigned int* out_n)
@@ -1801,6 +1822,7 @@ typedef struct sm_feature
 	qaws_curve const* cv;
 	double lo, hi;
 	double p[2];
+	double w;                       /* weight: its distances divided by it */
 } sm_feature;
 
 /* a traced point: on the geodesic from feature f leaving at s (a piece's
@@ -1902,7 +1924,7 @@ static qaws_status sm_trace_ray(sm_ctx* m, double* y, unsigned int f, double s, 
 	return st;
 }
 
-/* the traced point minimising t + |x - p| among those near x */
+/* the traced point minimising (t + |x - p|) / w among those near x (out->t the distance) */
 static int sm_nearest(sm_ctx const* m, double const* x, sm_label* out)
 {
 	long long c0[3];
@@ -1927,9 +1949,9 @@ static int sm_nearest(sm_ctx const* m, double const* x, sm_label* out)
 					for (; lo < m->ntr && sm_trace_cmp(&m->tr[lo], &key) == 0; lo++)
 					{
 						double d = m->tr[lo].t + sm_d3(x, m->tr[lo].x);
-						if (d < best)
+						if (d / m->f[m->tr[lo].f].w < best)
 						{
-							best = d;
+							best = d / m->f[m->tr[lo].f].w;
 							out->f = m->tr[lo].f;
 							out->s = m->tr[lo].s;
 							out->t = d;
@@ -1944,7 +1966,7 @@ static int sm_nearest(sm_ctx const* m, double const* x, sm_label* out)
 /* the distance from x (u, v) to feature f, refined from (s, t): a piece by
    its foot (Newton on the conormal geodesic), a corner by the geodesic to
    it; 1e300 when it does not land */
-static double sm_dist(sm_ctx const* m, unsigned int f, double const* x, double* s, double* t)
+static double sm_dist_raw(sm_ctx const* m, unsigned int f, double const* x, double* s, double* t)
 {
 	sm_feature const* ft = &m->f[f];
 	double s0 = *s, t0 = *t, best = 1e300, bs = 0, bt = 0, x3[3], q3[3];
@@ -1990,6 +2012,13 @@ static double sm_dist(sm_ctx const* m, unsigned int f, double const* x, double* 
 		*s = bs; *t = bt;
 	}
 	return best;
+}
+
+/* the same over the feature's weight (*t the distance) */
+static double sm_dist(sm_ctx const* m, unsigned int f, double const* x, double* s, double* t)
+{
+	double d = sm_dist_raw(m, f, x, s, t);
+	return d < 1e299 ? d / m->f[f].w : d;
 }
 
 static qaws_status sm_add_seg(qaws_surface_medial_axis* a, double const* p, double rp, double const* q, double rq)
@@ -2074,6 +2103,9 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_medial_axis** out_axis,
 					break;
 				}
 				seq[ns].point = 0; seq[ns].cv = cut ? NULL : cv; seq[ns].lo = br[k]; seq[ns].hi = br[k + 1];
+				seq[ns].w = desc && desc->weight_fn ? (double)desc->weight_fn(desc->weight_user, i, j, sr_span(cv, br[k])) : 1;
+				if (!(seq[ns].w > 0))
+					st = QAWS_STATUS_INVALID_ARGUMENT;
 				ns++;
 			}
 			qaws_internal_free(br);
@@ -2106,6 +2138,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_medial_axis** out_axis,
 				{
 					m.f[m.nf].point = 1; m.f[m.nf].cv = NULL;
 					m.f[m.nf].p[0] = b.position.x; m.f[m.nf].p[1] = b.position.y;
+					m.f[m.nf].w = prev->w > cur->w ? prev->w : cur->w;   /* (the faster piece's) */
 					m.nf++;
 				}
 			}
@@ -2224,7 +2257,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_medial_axis** out_axis,
 					if (d1 < d0 - m.c->tol && d1 < 1e299)
 					{
 						sm_feature const* ft = &m.f[lab[o].f];
-						lab[p].f = lab[o].f; lab[p].s = s1; lab[p].t = d1;
+						lab[p].f = lab[o].f; lab[p].s = s1; lab[p].t = t1;
 						if (ft->point)
 							sm_point3(m.c, ft->p[0], ft->p[1], lab[p].foot);
 						else
@@ -2236,7 +2269,7 @@ qaws_status qaws_surface_region_medial_axis(qaws_surface_medial_axis** out_axis,
 					}
 					else if (d0 < 1e299)
 					{
-						lab[p].s = s0; lab[p].t = d0;
+						lab[p].s = s0; lab[p].t = t0;
 					}
 				}
 			}
@@ -2539,12 +2572,13 @@ typedef struct mk_edge
 	unsigned int prev, next;
 	int convex[2];                  /* the corners at its start and end */
 	double corner[5];               /* its start corner: (u, v), point */
+	double w;                       /* its speed */
 } mk_edge;
 
 /* the signed distance from x to edge e's line: a foot on its left (the
    region's side) from (s, t) or a fan of starts; -1e300 when none lands
    (x right of the line) */
-static double mk_dist(qaws_internal_sg_ctx const* c, mk_edge const* e, double const* x, double* s, double* t)
+static double mk_dist_raw(qaws_internal_sg_ctx const* c, mk_edge const* e, double const* x, double* s, double* t)
 {
 	double best = -1e300, x3[3], q3[3], side;
 	unsigned int k;
@@ -2587,6 +2621,13 @@ static double mk_dist(qaws_internal_sg_ctx const* c, mk_edge const* e, double co
 		}
 	}
 	return best;
+}
+
+/* the same over the edge's weight: the time its front sweeps x (*t the distance) */
+static double mk_dist(qaws_internal_sg_ctx const* c, mk_edge const* e, double const* x, double* s, double* t)
+{
+	double d = mk_dist_raw(c, e, x, s, t);
+	return d > -1e299 ? d / e->w : d;
 }
 
 /* the edge whose front sweeps x first, and when: the least distance among
@@ -2694,6 +2735,9 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_medial_axis** out_
 				else
 				{
 					seq[ns].point = 0; seq[ns].cv = cv; seq[ns].lo = br[k]; seq[ns].hi = br[k + 1];
+					seq[ns].w = desc && desc->weight_fn ? (double)desc->weight_fn(desc->weight_user, i, j, sr_span(cv, br[k])) : 1;
+					if (!(seq[ns].w > 0))
+						st = QAWS_STATUS_INVALID_ARGUMENT;
 					ns++;
 				}
 			}
@@ -2766,6 +2810,7 @@ qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_medial_axis** out_
 				E[ne].lo = rg.min_value; E[ne].hi = rg.max_value;
 				E[ne].corner[0] = r0.position.x; E[ne].corner[1] = r0.position.y;
 				sm_point3(c, E[ne].corner[0], E[ne].corner[1], E[ne].corner + 2);
+				E[ne].w = f0->w;
 				E[ne].convex[0] = turn[(c0 + j0) % ns] > 0;
 				E[ne].convex[1] = turn[(c0 + j) % ns] > 0;
 				ne++;

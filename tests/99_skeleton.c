@@ -426,7 +426,18 @@ typedef struct skt_cshape
 	int round;                  /* the wavefront is the round offset (no reflex vertex kept) */
 	double (*exact)(double t);  /* the wavefront's area in closed form, in place of the round offset */
 	double exact_until;         /* the closed form holds up to this time */
+	double const* w;            /* each segment's weight; NULL: 1 */
+	double tmax;                /* the max time expected; 0: not checked */
 } skt_cshape;
+
+static qaws_scalar skt_cweight(void* user, unsigned int path, unsigned int curve, unsigned int span)
+{
+	skt_cshape const* sh = (skt_cshape const*)user;
+	unsigned int l, off = 0;
+	(void)span;
+	for (l = 0; l < path; l++) off += sh->count[l];
+	return (qaws_scalar)sh->w[off + curve];
+}
 
 static void skt_cline(skt_cshape* sh, unsigned int* n, double x0, double y0, double x1, double y1)
 {
@@ -470,7 +481,7 @@ static qaws_curve* skt_seg_curve(skt_seg const* g)
 static double skt_face_resid(qaws_skeleton_face const* f, double x, double y, double t)
 {
 	if (f->circle)
-		return f->side * ((double)f->radius - hypot(x - f->center.x, y - f->center.y)) - t;
+		return f->side * ((double)f->radius - hypot(x - f->center.x, y - f->center.y)) - (double)f->weight * t;
 	return (double)f->normal.x * x + (double)f->normal.y * y - (double)f->offset - (double)f->weight * t;
 }
 
@@ -490,6 +501,29 @@ static double skt_boundary_dist(qaws_curve* const* cs, unsigned int n, double x,
 		qaws_curve_evaluate_2d(&e, cs[i], t, QAWS_EVAL_FLAG_POSITION);
 		dd = hypot((double)e.position.x - x, (double)e.position.y - y);
 		if (dd < best) best = dd;
+	}
+	return best;
+}
+
+/* the weighted distance from p: the least over the curves of the distance over their weight, and over the vertices
+   (each curve's start) of the distance over the larger weight of the two curves there */
+static double skt_weighted_dist(qaws_curve* const* cs, skt_cshape const* sh, double x, double y)
+{
+	double best = 1e300;
+	unsigned int l, i, off = 0;
+	for (l = 0; l < sh->nloops; l++)
+	{
+		for (i = 0; i < sh->count[l]; i++)
+		{
+			unsigned int k = off + i, pk = off + (i + sh->count[l] - 1) % sh->count[l];
+			skt_seg const* g = &sh->seg[k];
+			double sx = g->arc ? g->a[0] + g->a[2] * cos(g->a[3]) : g->a[0], sy = g->arc ? g->a[1] + g->a[2] * sin(g->a[3]) : g->a[1];
+			double d = skt_boundary_dist(cs + k, 1, x, y) / sh->w[k];
+			if (d < best) best = d;
+			d = hypot(x - sx, y - sy) / (sh->w[k] > sh->w[pk] ? sh->w[k] : sh->w[pk]);
+			if (d < best) best = d;
+		}
+		off += sh->count[l];
 	}
 	return best;
 }
@@ -595,6 +629,11 @@ static void skt_check_curved(skt_cshape const* sh)
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = sh->nloops; d.fill_rule = QAWS_FILL_NON_ZERO;
 	d.splice_angle = (qaws_scalar)sh->sigma;
+	if (sh->w)
+	{
+		d.weight_fn = skt_cweight;
+		d.weight_user = (void*)sh;
+	}
 	st = qaws_skeleton_create(&s, &d);
 	sprintf(msg, "%s: created (status %d)", sh->name, (int)st);
 	TEST_ASSERT(st == QAWS_STATUS_OK && s, msg);
@@ -625,7 +664,7 @@ static void skt_check_curved(skt_cshape const* sh)
 			if (e2 > worst_dist) worst_dist = e2;
 			if (sh->sigma == SKT_PI && !a.smooth)
 			{
-				double e = fabs(skt_boundary_dist(cs, ns, q.x, q.y) - (double)t);
+				double e = fabs((sh->w ? skt_weighted_dist(cs, sh, q.x, q.y) : skt_boundary_dist(cs, ns, q.x, q.y)) - (double)t);
 				if (e > worst_axis) worst_axis = e;
 			}
 		}
@@ -655,7 +694,8 @@ static void skt_check_curved(skt_cshape const* sh)
 	sprintf(msg, "%s (sigma %.3f): %u nodes, %u arcs, max time %.9f; supports' error %.2g, medial axis' distance error %.2g, faces %.9f (region %.9f, %u gaps), round offset area error %.2g",
 		sh->name, sh->sigma, qaws_skeleton_get_node_count(s), qaws_skeleton_get_arc_count(s), tmax, worst_dist, worst_axis, faces, area, missing, worst_round);
 	TEST_ASSERT(worst_dist <= (SKT_F32 ? 1e-4 : 1e-8) * size && worst_axis <= (SKT_F32 ? 1e-4 : 1e-7) * size &&
-		missing == 0 && fabs(faces - area) <= 2e-4 * area && worst_round <= (SKT_F32 ? 1e-3 : 1e-5) * area, msg);
+		missing == 0 && fabs(faces - area) <= 2e-4 * area && worst_round <= (SKT_F32 ? 1e-3 : 1e-5) * area &&
+		(sh->tmax == 0 || fabs(tmax - sh->tmax) <= 1e-9 * size), msg);
 	if (g_verbose_skt) printf("    %s\n", msg);
 	qaws_skeleton_destroy(s);
 	for (i = 0; i < ns; i++) qaws_curve_destroy(cs[i]);
@@ -741,6 +781,36 @@ static void test_curved(void)
 			double a0 = 2 * pi * i / 14, a1 = 2 * pi * (i + 1) / 14, r0 = (i & 1) ? 0.45 : 1.0, r1 = ((i + 1) & 1) ? 0.45 : 1.0;
 			skt_cline(&sh, &n, r0 * cos(a0), r0 * sin(a0), r1 * cos(a1), r1 * sin(a1));
 		}
+		sh.count[0] = n; sh.nloops = 1;
+		skt_check_curved(&sh);
+	}
+	/* weighted: arcs and the circles opened at reflex corners (the faster edge's speed) move at their weights; the
+	   medial axis is the weighted one (each feature's distance over its weight) */
+	{
+		static double const ell[12] = { 0, 0, 4, 0, 4, 1, 1, 1, 1, 3, 0, 3 };
+		static double const wl[6] = { 2, 1, 1, 1.5, 1, 1 }, wd[1] = { 2 }, ws[4] = { 1, 2, 1, 0.5 }, wb[6] = { 1, 1, 1, 0.5, 1, 1 };
+		unsigned int i;
+		static double const wr[4] = { 2, 1, 1, 1 };
+		/* a 4 x 2 rectangle of four lines, its bottom at weight 2: the bottom and top meet at 2 t = 2 - t */
+		memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "rectangle, its bottom at weight 2"; sh.w = wr; sh.tmax = 2.0 / 3;
+		skt_cline(&sh, &n, 0, 0, 4, 0); skt_cline(&sh, &n, 4, 0, 4, 2); skt_cline(&sh, &n, 4, 2, 0, 2); skt_cline(&sh, &n, 0, 2, 0, 0);
+		sh.count[0] = n; sh.nloops = 1;
+		skt_check_curved(&sh);
+		memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "disc at weight 2"; sh.w = wd; sh.tmax = 0.5;
+		skt_carc(&sh, &n, 0.2, -0.1, 1, 0, 2 * pi); sh.count[0] = n; sh.nloops = 1;
+		skt_check_curved(&sh);
+		memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "L, weighted medial axis"; sh.sigma = pi; sh.w = wl;
+		for (i = 0; i < 6; i++) skt_cline(&sh, &n, ell[2 * i], ell[2 * i + 1], ell[2 * ((i + 1) % 6)], ell[2 * ((i + 1) % 6) + 1]);
+		sh.count[0] = n; sh.nloops = 1;
+		skt_check_curved(&sh);
+		memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "stadium, weighted arcs"; sh.w = ws; sh.tmax = 1;
+		skt_cline(&sh, &n, -1, -1, 1, -1); skt_carc(&sh, &n, 1, 0, 1, -pi / 2, pi / 2);
+		skt_cline(&sh, &n, 1, 1, -1, 1); skt_carc(&sh, &n, -1, 0, 1, pi / 2, 3 * pi / 2);
+		sh.count[0] = n; sh.nloops = 1;
+		skt_check_curved(&sh);
+		memset(&sh, 0, sizeof(sh)); n = 0; sh.name = "square with a round bump, weighted medial axis"; sh.sigma = pi; sh.w = wb;
+		skt_cline(&sh, &n, 0, 0, 2, 0); skt_cline(&sh, &n, 2, 0, 2, 2); skt_cline(&sh, &n, 2, 2, 1.6, 2);
+		skt_carc(&sh, &n, 1, 2, 0.6, 0, pi); skt_cline(&sh, &n, 0.4, 2, 0, 2); skt_cline(&sh, &n, 0, 2, 0, 0);
 		sh.count[0] = n; sh.nloops = 1;
 		skt_check_curved(&sh);
 	}
@@ -1052,3 +1122,4 @@ int test_99_skeleton_main(void)
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
+

@@ -13,11 +13,16 @@
  *     r is inside the region shrunk by r - d and outside it shrunk by r + d;
  *     shrunk by the largest inscribed radius less d a part is left, by it
  *     plus d nothing
+ *   - weighted, on a flat patch: a rectangle with its bottom at weight 2;
+ *     the medial axis and the mitered skeleton against the plane's weighted
+ *     distance (each side's distance over its weight)
  */
 
 #include "test_common.h"
 #include "qaws_surface_region.h"
 #include "qaws_bezier.h"
+#include "qaws_bspline.h"
+#include "qaws_inspect.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -415,6 +420,106 @@ static void test_wavy(void)
 	qaws_surface_destroy(s);
 }
 
+/* the weight of the region's boundary piece: 2 along the bottom (v = 0.1), else 1; the piece found by its curve's knot
+   span (a polyline's segment) */
+static qaws_scalar smt_weight(void* user, unsigned int path, unsigned int curve, unsigned int span)
+{
+	qaws_path_2d p;
+	qaws_eval_result_2d e;
+	qaws_range rg;
+	double a, b;
+	if (qaws_surface_region_get_path(&p, (qaws_surface_region const*)user, path) != QAWS_STATUS_OK || curve >= p.curve_count)
+		return 1;
+	rg = qaws_curve_get_parameter_range(p.curves[curve]);
+	a = rg.min_value;
+	b = rg.max_value;
+	if (qaws_curve_get_kind(p.curves[curve]) == QAWS_CURVE_KIND_BSPLINE)
+	{
+		qaws_scalar kn[64];
+		unsigned int nk = 0, deg = qaws_curve_get_degree(p.curves[curve]), i, s = 0;
+		if (qaws_bspline_get_knots(kn, &nk, p.curves[curve], 64) == QAWS_STATUS_OK)
+			for (i = deg; i + deg + 1 < nk; i++)
+				if (kn[i + 1] > kn[i] && s++ == span)
+				{
+					a = kn[i];
+					b = kn[i + 1];
+					break;
+				}
+	}
+	qaws_curve_evaluate_2d(&e, p.curves[curve], (qaws_scalar)(0.5 * (a + b)), QAWS_EVAL_FLAG_POSITION);
+	return (qaws_scalar)(fabs((double)e.position.y - 0.1) < 1e-6 ? 2 : 1);
+}
+
+/* a flat patch x = 4 u, y = 2 v; the region [0.1, 0.9]^2 in (u, v), [0.4, 3.6] x [0.2, 1.8] in the plane, its bottom at
+   weight 2: every axis point's radius the least of the sides' distances over their weights, the two least equal; the
+   largest inscribed radius 1.6 / 3 (the bottom and top meet at 2 t = 1.6 - t); the same for the mitered skeleton */
+static void test_weighted(void)
+{
+	qaws_vec3 cp[4];
+	qaws_surface_bezier_desc bd;
+	qaws_surface* s = NULL;
+	qaws_curve* k[4];
+	qaws_surface_curve* e[4];
+	qaws_surface_curve const* pe[4];
+	qaws_surface_path Q;
+	qaws_surface_region* r = NULL;
+	static double const c[4][2] = { { 0.1, 0.1 }, { 0.9, 0.1 }, { 0.9, 0.9 }, { 0.1, 0.9 } };
+	double tol = SMT_F32 ? 2e-4 : 1e-7;
+	unsigned int i, pass;
+	char msg[300];
+	for (i = 0; i < 4; i++) { cp[i].x = (qaws_scalar)(4.0 * (i / 2)); cp[i].y = (qaws_scalar)(2.0 * (i % 2)); cp[i].z = 0; }
+	memset(&bd, 0, sizeof(bd));
+	bd.u_degree = 1; bd.v_degree = 1; bd.control_points = cp; bd.u_point_count = 2; bd.v_point_count = 2;
+	qaws_surface_create_bezier(&s, &bd);
+	for (i = 0; i < 4; i++) { e[i] = smt_line(s, c[i][0], c[i][1], c[(i + 1) % 4][0], c[(i + 1) % 4][1], &k[i]); pe[i] = e[i]; }
+	Q.curves = pe; Q.curve_count = 4; Q.closed = 1;
+	qaws_surface_clip(&r, s, &Q, NULL, 1, 0, QAWS_CLIP_NONE, QAWS_FILL_NON_ZERO);
+	for (pass = 0; pass < 2; pass++)
+	{
+		qaws_surface_medial_axis* m = NULL;
+		qaws_surface_medial_desc md;
+		qaws_vec2 bc;
+		qaws_scalar br = 0;
+		double worst = 0;
+		unsigned int n = 0;
+		qaws_status st;
+		memset(&md, 0, sizeof(md));
+		md.resolution = (qaws_scalar)0.1;
+		md.weight_fn = smt_weight;
+		md.weight_user = r;
+		st = pass ? qaws_surface_region_mitered_skeleton(&m, r, &md) : qaws_surface_region_medial_axis(&m, r, &md);
+		if (st == QAWS_STATUS_OK)
+		{
+			for (i = 0; i < (n = qaws_surface_medial_axis_get_segment_count(m)); i++)
+			{
+				qaws_vec2 p[2];
+				qaws_scalar rr[2];
+				unsigned int q;
+				qaws_surface_medial_axis_get_segment(p, rr, m, i);
+				for (q = 0; q < 2; q++)
+				{
+					double x = 4 * (double)p[q].x, y = 2 * (double)p[q].y, d[4], a = 1e300, b = 1e300;
+					unsigned int z;
+					d[0] = (y - 0.2) / 2; d[1] = 3.6 - x; d[2] = 1.8 - y; d[3] = x - 0.4;
+					for (z = 0; z < 4; z++)
+						if (d[z] < a) { b = a; a = d[z]; } else if (d[z] < b) b = d[z];
+					if ((double)rr[q] < 1e-4)
+						continue;      /* (an end at a corner) */
+					worst = fmax(worst, fmax(fabs((double)rr[q] - a), b - a));
+				}
+			}
+			qaws_surface_medial_axis_get_max_inscribed(&bc, &br, m);
+		}
+		sprintf(msg, "weighted %s: a rectangle on a flat patch, its bottom at weight 2 (%u segments, status %d): radii against the weighted distances within %.2g, the largest %.9f (1.6 / 3)",
+			pass ? "mitered skeleton" : "medial axis", n, (int)st, worst, (double)br);
+		TEST_ASSERT(st == QAWS_STATUS_OK && n > 10 && worst <= tol && fabs((double)br - 1.6 / 3) <= tol, msg);
+		qaws_surface_medial_axis_destroy(m);
+	}
+	qaws_surface_region_destroy(r);
+	for (i = 0; i < 4; i++) { qaws_surface_curve_destroy(e[i]); qaws_curve_destroy(k[i]); }
+	qaws_surface_destroy(s);
+}
+
 int test_106_surface_medial_main(void)
 {
 	g_pass = 0;
@@ -424,6 +529,7 @@ int test_106_surface_medial_main(void)
 	test_cylinder();
 	test_wavy();
 	test_mitered();
+	test_weighted();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

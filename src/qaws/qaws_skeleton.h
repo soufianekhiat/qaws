@@ -36,9 +36,10 @@
  * once: the medial axis and the classical offsets.
  *
  * Space-time form: over (x, y, t) a line is the plane n . p = d + w t (n its
- * inward normal) and an arc the cone |p - m| = r -+ t. Every event is three
- * of these meeting at a point; the difference of two cones is a plane, so
- * each is a linear system and at most one quadratic. Two supports touching
+ * inward normal) and an arc the cone |p - m| = r -+ w t. Every event is three
+ * of these meeting at a point; the difference of two cones of one speed is a
+ * plane, so each is a linear system and at most one quadratic (cones of
+ * different speeds: one quartic). Two supports touching
  * (squeeze), an arc whose ends meet round its circle (bubble) and a circle
  * shrinking to its centre are the other events.
  *
@@ -57,17 +58,23 @@
  * are taken exactly; any other curve (Beziers, NURBS, ellipses, ...) as a G1
  * arc spline: equal-tangent biarcs, halved until within the curve tolerance,
  * whose smooth joints carry no skeleton. The skeleton is then exact for
- * that spline. Line weights must be > 0 (arcs move at speed
- * 1); consecutive collinear lines with different weights are ambiguous
- * (Biedl et al., CGTA 2015), and their vertex moves at the average speed.
+ * that spline. Weights (lines and arcs) must be > 0. A circle opened at a
+ * reflex vertex moves at the faster of its two edges' speeds, so at sigma =
+ * pi the result is the weighted medial axis (each edge's distance over its
+ * weight); a smooth joint whose edges part (the faster drawing away) opens
+ * one at once. Consecutive collinear lines with different weights are
+ * ambiguous (Biedl et al., CGTA 2015), and their vertex moves at the
+ * average speed. Arcs between circles of different speeds are Cartesian
+ * ovals: qaws_skeleton_get_arc_curve fits them with rational quadratics.
  *
  * Thread-safe on an immutable skeleton.
  */
 
 typedef struct qaws_skeleton qaws_skeleton;
 
-/* The weight (speed) of the input line on span `span` of curve `curve` of
-   path `path`; a span is a Bezier's whole curve or a B-spline's knot span. */
+/* The weight (speed) of the input edge on span `span` of curve `curve` of
+   path `path`; a span is a Bezier's whole curve, a B-spline's knot span or an
+   arc curve's segment. */
 typedef qaws_scalar (*qaws_skeleton_weight_fn)(void* user, unsigned int path, unsigned int curve, unsigned int span);
 
 typedef struct qaws_skeleton_desc

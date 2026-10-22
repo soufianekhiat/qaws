@@ -19,6 +19,7 @@
 #include "qaws_surface_types.h"
 #include "qaws_path.h"
 #include "qaws_clip.h"
+#include "qaws_skeleton.h"
 
 /*
  * Curves and regions on a parametric surface, defined by the surface's own
@@ -423,12 +424,20 @@ qaws_status qaws_surface_region_triangulate(struct qaws_mesh_2d** out_mesh, qaws
      features meet, the junction (equally far from all three) by Newton.
    The axis is resolved to the resolution (the mesh's edge length on the
    surface) along it; its points are on the true axis within the
-   tolerance. */
+   tolerance.
+   With weight_fn, each feature's distance is divided by its weight (the
+   weighted medial axis: the time a front moving at that speed takes): a
+   piece's weight from weight_fn (path and curve as
+   qaws_surface_region_get_path gives them, span the knot span where the
+   piece starts, as qaws_skeleton's), a corner's the larger of its two
+   pieces'. The radii are then those times. */
 typedef struct qaws_surface_medial_axis qaws_surface_medial_axis;
 
 typedef struct qaws_surface_medial_desc
 {
 	qaws_scalar resolution;     /* edge length on the surface; 0 = 1/40 of sqrt(area) */
+	qaws_skeleton_weight_fn weight_fn;   /* optional: each boundary piece's weight (> 0); NULL = every weight 1 */
+	void* weight_user;
 } qaws_surface_medial_desc;
 
 qaws_status qaws_surface_region_medial_axis(qaws_surface_medial_axis** out_axis, qaws_surface_region const* region,
@@ -462,7 +471,9 @@ qaws_status qaws_surface_medial_axis_get_max_inscribed(qaws_vec2* out_centre, qa
    axis. Exact for convex regions and reflex corners whose fronts are not
    split (no split events: a front cut off by another counts on beyond the
    cut). UNSUPPORTED_OPERATION for a loop without a corner (its medial
-   axis is the answer) or one cut along a seam or a pole. */
+   axis is the answer) or one cut along a seam or a pole. With weight_fn
+   each edge moves at its weight (its first piece's), the times the
+   distances over it. */
 qaws_status qaws_surface_region_mitered_skeleton(qaws_surface_medial_axis** out_axis, qaws_surface_region const* region,
 	qaws_surface_medial_desc const* desc);
 

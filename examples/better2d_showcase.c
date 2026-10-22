@@ -96,47 +96,59 @@
 #include "better2d_showcase/35_repulsive_hsolve.c"
 #include "better2d_showcase/36_repulsive_surface.c"
 #include "better2d_showcase/37_repulsive_packing.c"
+#include "better2d_showcase/38_weighted_skeleton.c"
 
-int main(void)
+/* figure n wanted: every one with no arguments, else those listed */
+static int b2d_want(int argc, char** argv, int n)
+{
+	int i;
+	for (i = 1; i < argc; i++)
+		if (atoi(argv[i]) == n)
+			return 1;
+	return argc < 2;
+}
+
+int main(int argc, char** argv)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
-	demo_extract();
-	demo_boolean();
-	demo_clipper2();
-	demo_offset();
-	demo_stack();
-	demo_curve_offset();
-	demo_offset_extremes();
-	demo_triangulate();
-	demo_stack_mesh();
-	demo_clip_exact();
-	demo_region_sample();
-	demo_skeleton();
-	demo_curved_skeleton();
-	demo_freeform_skeleton();
-	demo_mean_value();
-	demo_surface_geodesic();
-	demo_surface_boolean();
-	demo_surface_seams();
-	demo_surface_offset();
-	demo_surface_sample();
-	demo_surface_exact();
-	demo_surface_medial();
-	demo_shell_region();
-	demo_shell_saddle();
-	demo_shell_trimmed();
-	demo_shell_paths();
-	demo_geodesic_enclosure();
-	demo_geodesic_query();
-	demo_shell_mesh();
-	demo_mitered_certified();
-	demo_repulsive_energy();
-	demo_repulsive_solve();
-	demo_repulsive_mesh();
-	demo_repulsive_bh();
-	demo_repulsive_hsolve();
-	demo_repulsive_surface();
-	demo_repulsive_packing();
+	if (b2d_want(argc, argv, 1)) demo_extract();
+	if (b2d_want(argc, argv, 2)) demo_boolean();
+	if (b2d_want(argc, argv, 3)) demo_clipper2();
+	if (b2d_want(argc, argv, 4)) demo_offset();
+	if (b2d_want(argc, argv, 5)) demo_stack();
+	if (b2d_want(argc, argv, 6)) demo_curve_offset();
+	if (b2d_want(argc, argv, 7)) demo_offset_extremes();
+	if (b2d_want(argc, argv, 8)) demo_triangulate();
+	if (b2d_want(argc, argv, 9)) demo_stack_mesh();
+	if (b2d_want(argc, argv, 10)) demo_clip_exact();
+	if (b2d_want(argc, argv, 11)) demo_region_sample();
+	if (b2d_want(argc, argv, 12)) demo_skeleton();
+	if (b2d_want(argc, argv, 13)) demo_curved_skeleton();
+	if (b2d_want(argc, argv, 14)) demo_freeform_skeleton();
+	if (b2d_want(argc, argv, 15)) demo_mean_value();
+	if (b2d_want(argc, argv, 16)) demo_surface_geodesic();
+	if (b2d_want(argc, argv, 17)) demo_surface_boolean();
+	if (b2d_want(argc, argv, 18)) demo_surface_seams();
+	if (b2d_want(argc, argv, 19)) demo_surface_offset();
+	if (b2d_want(argc, argv, 20)) demo_surface_sample();
+	if (b2d_want(argc, argv, 21)) demo_surface_exact();
+	if (b2d_want(argc, argv, 22)) demo_surface_medial();
+	if (b2d_want(argc, argv, 23)) demo_shell_region();
+	if (b2d_want(argc, argv, 24)) demo_shell_saddle();
+	if (b2d_want(argc, argv, 25)) demo_shell_trimmed();
+	if (b2d_want(argc, argv, 26)) demo_shell_paths();
+	if (b2d_want(argc, argv, 27)) demo_geodesic_enclosure();
+	if (b2d_want(argc, argv, 28)) demo_geodesic_query();
+	if (b2d_want(argc, argv, 29)) demo_shell_mesh();
+	if (b2d_want(argc, argv, 30)) demo_mitered_certified();
+	if (b2d_want(argc, argv, 31)) demo_repulsive_energy();
+	if (b2d_want(argc, argv, 32)) demo_repulsive_solve();
+	if (b2d_want(argc, argv, 33)) demo_repulsive_mesh();
+	if (b2d_want(argc, argv, 34)) demo_repulsive_bh();
+	if (b2d_want(argc, argv, 35)) demo_repulsive_hsolve();
+	if (b2d_want(argc, argv, 36)) demo_repulsive_surface();
+	if (b2d_want(argc, argv, 37)) demo_repulsive_packing();
+	if (b2d_want(argc, argv, 38)) demo_weighted_skeleton();
 	return 0;
 }

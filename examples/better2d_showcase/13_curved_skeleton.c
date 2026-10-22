@@ -90,7 +90,8 @@ static void csk_path_curves(svg* s, viewport const* v, qaws_path_2d const* p, un
 	fprintf(s->f, "\"/>\n");
 }
 
-static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigma)
+/* (weight_fn NULL: every weight 1) */
+static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigma, qaws_skeleton_weight_fn weight_fn, void* weight_user)
 {
 	qaws_curve* cs[48];
 	qaws_curve const* cv[48];
@@ -109,6 +110,7 @@ static void csk_draw(svg* s, viewport const* v, csk_shape const* sh, double sigm
 	csk_path_curves(s, v, p, sh->nloops, "none", 0, "#f6f8fa");
 	memset(&d, 0, sizeof(d));
 	d.paths = p; d.path_count = sh->nloops; d.fill_rule = QAWS_FILL_NON_ZERO; d.splice_angle = (qaws_scalar)sigma;
+	d.weight_fn = weight_fn; d.weight_user = weight_user;
 	if (qaws_skeleton_create(&sk, &d) != QAWS_STATUS_OK)
 	{
 		svg_text(s, v->x0 + v->w / 2, v->y0 + v->h / 2, 12, "#cf222e", "middle", "failed");
@@ -222,7 +224,7 @@ static void demo_curved_skeleton(void)
 			v.xmin = sh[i].box[0]; v.xmax = sh[i].box[1]; v.ymin = sh[i].box[2]; v.ymax = sh[i].box[3];
 			sprintf(label, "%s, %s", sh[i].name, c ? "medial axis (sigma = pi)" : "mitered (sigma = 2 pi)");
 			svg_text(&s, 24 + col * (pw + 12) + pw / 2, 104 + row * (ph + 44), 12, "#24292f", "middle", label);
-			csk_draw(&s, &v, &sh[i], c ? pi : 0);
+			csk_draw(&s, &v, &sh[i], c ? pi : 0, NULL, NULL);
 		}
 	}
 	svg_close(&s);

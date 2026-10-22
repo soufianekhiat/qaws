@@ -4,7 +4,7 @@
  *   1. region: the paths united under the fill rule (qaws_clip): outer loops
  *      counter-clockwise, holes clockwise, the interior on the left
  *   2. supports: every edge's moving carrier. A line is n . p = d + w t (n
- *      its inward normal); a circular arc is |p - m| = r0 - s t, s = +1
+ *      its inward normal); a circular arc is |p - m| = r0 - s w t, s = +1
  *      when the region is inside the circle (it shrinks), -1 outside (it
  *      grows). Over (x, y, t) a line is a plane and a circle a cone.
  *   3. corners: the wavefront's vertices in circular lists. Between two
@@ -14,7 +14,8 @@
  *   4. events, in a heap by time:
  *        - a corner meets a support (its neighbour's, or any, when reflex):
  *          three supports at one point. The differences of two cones are
- *          planes, so this is a linear system and one quadratic in t.
+ *          planes, so this is a linear system and one quadratic in t (cones
+ *          of different speeds: quadrics, one quartic).
  *        - two supports touch (a circle with a line or a circle): squeeze
  *        - a reflex corner's angle reaches sigma, or its supports turn
  *          tangent: it splices, opening a circle that grows from its point
@@ -57,9 +58,9 @@ typedef struct sk_sup
 {
 	int kind;
 	double n[2], d;             /* line: n . p = d + w t */
-	double m[2], r0;            /* circle: |p - m| = r0 - s t */
+	double m[2], r0;            /* circle: |p - m| = r0 - s w t */
 	int s;
-	double w;                   /* speed: 1 for circles */
+	double w;                   /* speed */
 	unsigned int na, nb;        /* the input edge's nodes; a splice circle: its centre's, twice */
 	double start[2];            /* the input edge's start, in full precision */
 	double a0, sweep;           /* an input arc: start angle and signed sweep */
@@ -233,7 +234,7 @@ static int sk_grow(void** p, unsigned int* cap, size_t need, size_t size)
 
 static double sk_rho(sk_sup const* e, double t)
 {
-	return e->r0 - e->s * t;
+	return e->r0 - e->s * e->w * t;
 }
 
 /* zero on the support at time t; > 0 on the unswept side */
@@ -241,7 +242,7 @@ static double sk_resid(sk_sup const* e, double const* p, double t)
 {
 	if (e->kind == SK_LINE)
 		return e->n[0] * p[0] + e->n[1] * p[1] - e->d - e->w * t;
-	return e->s * (e->r0 - hypot(p[0] - e->m[0], p[1] - e->m[1])) - t;
+	return e->s * (e->r0 - hypot(p[0] - e->m[0], p[1] - e->m[1])) - e->w * t;
 }
 
 static int sk_cmp_uint(void const* a, void const* b)
@@ -279,7 +280,7 @@ static void sk_grad(sk_sup const* e, double const* p, double t, double* g, doubl
 	else
 	{
 		g[0] = 2 * (p[0] - e->m[0]); g[1] = 2 * (p[1] - e->m[1]);
-		*gt = 2 * sk_rho(e, t) * e->s;
+		*gt = 2 * sk_rho(e, t) * e->s * e->w;
 	}
 }
 
@@ -351,18 +352,19 @@ static unsigned int sk_tangencies(sk_sup const* a, sk_sup const* b, double* out)
 		sk_sup const* l = a->kind == SK_LINE ? a : b;
 		sk_sup const* c = a->kind == SK_LINE ? b : a;
 		double h0 = l->n[0] * c->m[0] + l->n[1] * c->m[1] - l->d;
-		/* rho = r0 - s t against h = h0 - w t, and against -h */
-		if (fabs(c->s - l->w) > 1e-15) out[n++] = (c->r0 - h0) / (c->s - l->w);
-		if (fabs(c->s + l->w) > 1e-15) out[n++] = (c->r0 + h0) / (c->s + l->w);
+		double sc = c->s * c->w;
+		/* rho = r0 - s w t against h = h0 - w t, and against -h */
+		if (fabs(sc - l->w) > 1e-15) out[n++] = (c->r0 - h0) / (sc - l->w);
+		if (fabs(sc + l->w) > 1e-15) out[n++] = (c->r0 + h0) / (sc + l->w);
 		return n;
 	}
 	{
-		double dd = hypot(b->m[0] - a->m[0], b->m[1] - a->m[1]);
-		if (a->s + b->s != 0) out[n++] = (a->r0 + b->r0 - dd) / (a->s + b->s);
-		if (a->s - b->s != 0)
+		double dd = hypot(b->m[0] - a->m[0], b->m[1] - a->m[1]), sa = a->s * a->w, sb = b->s * b->w;
+		if (fabs(sa + sb) > 1e-15) out[n++] = (a->r0 + b->r0 - dd) / (sa + sb);
+		if (fabs(sa - sb) > 1e-15)
 		{
-			out[n++] = (a->r0 - b->r0 - dd) / (a->s - b->s);
-			out[n++] = (b->r0 - a->r0 - dd) / (b->s - a->s);
+			out[n++] = (a->r0 - b->r0 - dd) / (sa - sb);
+			out[n++] = (b->r0 - a->r0 - dd) / (sb - sa);
 		}
 		return n;
 	}
@@ -378,14 +380,14 @@ static int sk_persistent(sk_sup const* a, sk_sup const* b, double eps)
 		sk_sup const* l = a->kind == SK_LINE ? a : b;
 		sk_sup const* c = a->kind == SK_LINE ? b : a;
 		double h0 = l->n[0] * c->m[0] + l->n[1] * c->m[1] - l->d;
-		return (fabs(c->s - l->w) <= 1e-12 && fabs(c->r0 - h0) <= eps) || (fabs(c->s + l->w) <= 1e-12 && fabs(c->r0 + h0) <= eps);
+		return (fabs(c->s * c->w - l->w) <= 1e-12 && fabs(c->r0 - h0) <= eps) || (fabs(c->s * c->w + l->w) <= 1e-12 && fabs(c->r0 + h0) <= eps);
 	}
 	{
 		double dd = hypot(b->m[0] - a->m[0], b->m[1] - a->m[1]);
 		if (dd <= eps)
 			return 0;
-		if (a->s + b->s == 0 && fabs(a->r0 + b->r0 - dd) <= eps) return 1;
-		if (a->s == b->s && (fabs(a->r0 - b->r0 - dd) <= eps || fabs(b->r0 - a->r0 - dd) <= eps)) return 1;
+		if (fabs(a->s * a->w + b->s * b->w) <= 1e-12 && fabs(a->r0 + b->r0 - dd) <= eps) return 1;
+		if (fabs(a->s * a->w - b->s * b->w) <= 1e-12 && (fabs(a->r0 - b->r0 - dd) <= eps || fabs(b->r0 - a->r0 - dd) <= eps)) return 1;
 		return 0;
 	}
 }
@@ -397,7 +399,7 @@ static int sk_opposite(sk_sup const* a, sk_sup const* b, double t, double eps)
 		return 0;
 	if (a->kind == SK_LINE)
 		return fabs(a->n[0] * b->n[1] - a->n[1] * b->n[0]) <= 1e-12 && a->n[0] * b->n[0] + a->n[1] * b->n[1] < 0;
-	return a->s == -b->s && hypot(a->m[0] - b->m[0], a->m[1] - b->m[1]) <= eps && fabs(sk_rho(a, t) - sk_rho(b, t)) <= eps;
+	return a->s == -b->s && fabs(a->w - b->w) <= 1e-12 && hypot(a->m[0] - b->m[0], a->m[1] - b->m[1]) <= eps && fabs(sk_rho(a, t) - sk_rho(b, t)) <= eps;
 }
 
 static int sk_solve_quad(double a, double b, double c, double* x)
@@ -429,11 +431,69 @@ static int sk_solve_quad(double a, double b, double c, double* x)
 	return 2;
 }
 
-/* the points (x, y, t) where three supports meet: up to 2 */
+/* the real roots of c[0] + c[1] x + .. + c[n] x^n (n <= 4), ascending: between the derivative's (monotone stretches,
+   bisected), within Cauchy's bound */
+static unsigned int sk_poly_roots(double const* c, unsigned int n, double* out)
+{
+	double d[4], cr[4], br[6], bound = 0;
+	unsigned int nd, nb = 0, i, k, nr = 0;
+	while (n > 0 && c[n] == 0)
+		n--;
+	if (n == 0)
+		return 0;
+	if (n == 1)
+	{
+		out[0] = -c[0] / c[1];
+		return 1;
+	}
+	for (i = 0; i < n; i++)
+		bound = fmax(bound, fabs(c[i] / c[n]));
+	bound += 1;
+	for (i = 1; i <= n; i++)
+		d[i - 1] = i * c[i];
+	nd = sk_poly_roots(d, n - 1, cr);
+	br[nb++] = -bound;
+	for (i = 0; i < nd; i++)
+		if (cr[i] > -bound && cr[i] < bound)
+			br[nb++] = cr[i];
+	br[nb++] = bound;
+	for (i = 0; i + 1 < nb; i++)
+	{
+		double lo = br[i], hi = br[i + 1], flo = 0, fhi = 0;
+		for (k = n + 1; k-- > 0;)
+		{
+			flo = flo * lo + c[k];
+			fhi = fhi * hi + c[k];
+		}
+		if (flo == 0)
+		{
+			if (!nr || out[nr - 1] != lo)
+				out[nr++] = lo;
+			continue;
+		}
+		if ((flo > 0) == (fhi > 0))
+			continue;
+		for (k = 0; k < 200 && hi - lo > 1e-16 * (fabs(lo) + fabs(hi)); k++)
+		{
+			double mid = 0.5 * (lo + hi), fm = 0;
+			unsigned int j;
+			for (j = n + 1; j-- > 0;)
+				fm = fm * mid + c[j];
+			if ((fm > 0) == (flo > 0))
+				lo = mid;
+			else
+				hi = mid;
+		}
+		out[nr++] = 0.5 * (lo + hi);
+	}
+	return nr;
+}
+
+/* the points (x, y, t) where three supports meet: up to 2 (4 when the cones' speeds differ) */
 static unsigned int sk_meet3(sk_sup const* const* e, double* p, double* t)
 {
 	unsigned int i, nc = 0, k = 0, n;
-	double row[2][4], kq[5];
+	double row[2][5], kq[5];
 	sk_sup const* o[2];
 	for (i = 0; i < 3; i++) if (e[i]->kind == SK_CIRCLE) nc++;
 	if (nc == 0)
@@ -456,24 +516,26 @@ static unsigned int sk_meet3(sk_sup const* const* e, double* p, double* t)
 		p[0] = dx / det; p[1] = dy / det; t[0] = dt / det;
 		return 1;
 	}
-	/* K, a cone: x^2 + y^2 + B x + C y - t^2 + E t + F = 0 */
+	/* K, a cone: x^2 + y^2 + B x + C y - w^2 t^2 + E t + F = 0 */
 	for (i = 0; i < 3; i++) if (e[i]->kind == SK_CIRCLE) { k = i; break; }
-	kq[0] = -2 * e[k]->m[0]; kq[1] = -2 * e[k]->m[1]; kq[2] = 2 * e[k]->r0 * e[k]->s;
+	kq[0] = -2 * e[k]->m[0]; kq[1] = -2 * e[k]->m[1]; kq[2] = 2 * e[k]->r0 * e[k]->s * e[k]->w;
+	kq[4] = -e[k]->w * e[k]->w;
 	kq[3] = e[k]->m[0] * e[k]->m[0] + e[k]->m[1] * e[k]->m[1] - e[k]->r0 * e[k]->r0;
 	for (i = 0, n = 0; i < 3; i++)
 		if (i != k) o[n++] = e[i];
-	/* the others as planes a x + b y + c t + f = 0 (a cone minus K) */
+	/* the others as a x + b y + c t + f + q t^2 = 0 (a cone minus K: a plane when their speeds are equal) */
 	for (i = 0; i < 2; i++)
 	{
 		if (o[i]->kind == SK_LINE)
 		{
-			row[i][0] = o[i]->n[0]; row[i][1] = o[i]->n[1]; row[i][2] = -o[i]->w; row[i][3] = -o[i]->d;
+			row[i][0] = o[i]->n[0]; row[i][1] = o[i]->n[1]; row[i][2] = -o[i]->w; row[i][3] = -o[i]->d; row[i][4] = 0;
 		}
 		else
 		{
-			double ob = -2 * o[i]->m[0], oc = -2 * o[i]->m[1], oe = 2 * o[i]->r0 * o[i]->s;
+			double ob = -2 * o[i]->m[0], oc = -2 * o[i]->m[1], oe = 2 * o[i]->r0 * o[i]->s * o[i]->w;
 			double of = o[i]->m[0] * o[i]->m[0] + o[i]->m[1] * o[i]->m[1] - o[i]->r0 * o[i]->r0;
 			row[i][0] = kq[0] - ob; row[i][1] = kq[1] - oc; row[i][2] = kq[2] - oe; row[i][3] = kq[3] - of;
+			row[i][4] = kq[4] + o[i]->w * o[i]->w;
 		}
 	}
 	{
@@ -481,12 +543,39 @@ static unsigned int sk_meet3(sk_sup const* const* e, double* p, double* t)
 		double scale = fabs(row[0][0]) + fabs(row[0][1]) + fabs(row[1][0]) + fabs(row[1][1]);
 		if (fabs(det) > 1e-12 * scale * scale)
 		{
-			/* x = x0 + x1 t, y = y0 + y1 t */
+			/* x = x0 + x1 t + x2 t^2, y = y0 + y1 t + y2 t^2 */
 			double x0 = (-row[0][3] * row[1][1] + row[0][1] * row[1][3]) / det, x1 = (-row[0][2] * row[1][1] + row[0][1] * row[1][2]) / det;
 			double y0 = (-row[0][0] * row[1][3] + row[0][3] * row[1][0]) / det, y1 = (-row[0][0] * row[1][2] + row[0][2] * row[1][0]) / det;
-			double qa = x1 * x1 + y1 * y1 - 1, qb = 2 * (x0 * x1 + y0 * y1) + kq[0] * x1 + kq[1] * y1 + kq[2];
-			double qc = x0 * x0 + y0 * y0 + kq[0] * x0 + kq[1] * y0 + kq[3], r[2];
-			unsigned int nr = (unsigned int)sk_solve_quad(qa, qb, qc, r), j;
+			double x2 = (-row[0][4] * row[1][1] + row[0][1] * row[1][4]) / det, y2 = (-row[0][0] * row[1][4] + row[0][4] * row[1][0]) / det;
+			double qa = x1 * x1 + y1 * y1 + kq[4], qb = 2 * (x0 * x1 + y0 * y1) + kq[0] * x1 + kq[1] * y1 + kq[2];
+			double qc = x0 * x0 + y0 * y0 + kq[0] * x0 + kq[1] * y0 + kq[3], r[4];
+			unsigned int nr, j;
+			if (x2 != 0 || y2 != 0)
+			{
+				/* a quartic in t; its roots where every cone's radius is >= 0 (the squares admit the mirrored cones) */
+				double cf[5], r4[4];
+				unsigned int n4, z;
+				cf[4] = x2 * x2 + y2 * y2;
+				cf[3] = 2 * (x1 * x2 + y1 * y2);
+				cf[2] = qa + 2 * (x0 * x2 + y0 * y2) + kq[0] * x2 + kq[1] * y2;
+				cf[1] = qb;
+				cf[0] = qc;
+				n4 = sk_poly_roots(cf, 4, r4);
+				for (j = 0, nr = 0; j < n4; j++)
+				{
+					int ok = 1;
+					for (z = 0; z < 3; z++)
+						ok &= e[z]->kind == SK_LINE || sk_rho(e[z], r4[j]) >= -1e-9 * (1 + fabs(e[z]->r0));
+					if (!ok)
+						continue;
+					t[nr] = r4[j];
+					p[2 * nr] = x0 + (x1 + x2 * r4[j]) * r4[j];
+					p[2 * nr + 1] = y0 + (y1 + y2 * r4[j]) * r4[j];
+					nr++;
+				}
+				return nr;
+			}
+			nr = (unsigned int)sk_solve_quad(qa, qb, qc, r);
 			for (j = 0; j < nr; j++)
 			{
 				t[j] = r[j];
@@ -505,27 +594,35 @@ static unsigned int sk_meet3(sk_sup const* const* e, double* p, double* t)
 			mu = (row[bb][0] * row[a][0] + row[bb][1] * row[a][1]) / nn;
 			ct = row[bb][2] - mu * row[a][2];
 			cf = row[bb][3] - mu * row[a][3];
-			if (!(fabs(ct) > 1e-14))
-				return 0;
-			tt = -cf / ct;
-			/* the line la x + lb y + lc = 0 against the circle at tt */
-			la = row[a][0]; lb = row[a][1]; lc = row[a][2] * tt + row[a][3];
-			nn = sqrt(nn);
-			la /= nn; lb /= nn; lc /= nn;
-			rr = e[k]->r0 - e[k]->s * tt;
-			h = la * e[k]->m[0] + lb * e[k]->m[1] + lc;
-			k2 = rr * rr - h * h;
-			if (k2 < 0)
-				return 0;
-			kk = sqrt(k2);
-			f[0] = e[k]->m[0] - h * la; f[1] = e[k]->m[1] - h * lb;
-			for (j = 0; j < 2; j++)
 			{
-				double sg = j ? 1 : -1;
-				t[nr] = tt;
-				p[2 * nr] = f[0] + sg * kk * lb;
-				p[2 * nr + 1] = f[1] - sg * kk * la;
-				nr++;
+				double cq = row[bb][4] - mu * row[a][4], ts[2];
+				unsigned int nts = 0, z;
+				if (cq != 0)
+					nts = (unsigned int)sk_solve_quad(cq, ct, cf, ts);
+				else if (fabs(ct) > 1e-14)
+					ts[nts++] = -cf / ct;
+				/* the line la x + lb y + lc = 0 against the circle at each time */
+				nn = sqrt(nn);
+				for (z = 0; z < nts; z++)
+				{
+					tt = ts[z];
+					la = row[a][0] / nn; lb = row[a][1] / nn; lc = (row[a][2] * tt + row[a][3] + row[a][4] * tt * tt) / nn;
+					rr = sk_rho(e[k], tt);
+					h = la * e[k]->m[0] + lb * e[k]->m[1] + lc;
+					k2 = rr * rr - h * h;
+					if (k2 < 0)
+						continue;
+					kk = sqrt(k2);
+					f[0] = e[k]->m[0] - h * la; f[1] = e[k]->m[1] - h * lb;
+					for (j = 0; j < 2; j++)
+					{
+						double sg = j ? 1 : -1;
+						t[nr] = tt;
+						p[2 * nr] = f[0] + sg * kk * lb;
+						p[2 * nr + 1] = f[1] - sg * kk * la;
+						nr++;
+					}
+				}
 			}
 			return nr;
 		}
@@ -1103,7 +1200,7 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 			double x = p[0] - a->m[0], y = p[1] - a->m[1], l = hypot(x, y), rho = sk_rho(a, t);
 			if (l > 0)
 			{
-				c->v[0] = -a->s * x / l; c->v[1] = -a->s * y / l;
+				c->v[0] = -a->s * a->w * x / l; c->v[1] = -a->s * a->w * y / l;
 				/* on its circle (an event's point is good to its tolerance) */
 				c->p[0] = a->m[0] + rho * x / l;
 				c->p[1] = a->m[1] + rho * y / l;
@@ -1149,7 +1246,7 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 		/* one circle on both sides: a marker on it */
 		double x = p[0] - a->m[0], y = p[1] - a->m[1], l = hypot(x, y);
 		c->smooth = 1;
-		if (l > 0) { c->v[0] = -a->s * x / l; c->v[1] = -a->s * y / l; }
+		if (l > 0) { c->v[0] = -a->s * a->w * x / l; c->v[1] = -a->s * a->w * y / l; }
 	}
 	else if (sk_opposite(a, b, t, r->eps))
 		*spike = 1;
@@ -1168,7 +1265,7 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 			   here (a circle just opened at p has none yet) */
 			sk_sup const* e = hypot(p[0] - a->m[0], p[1] - a->m[1]) >= hypot(p[0] - b->m[0], p[1] - b->m[1]) ? a : b;
 			double x = p[0] - e->m[0], y = p[1] - e->m[1], l = hypot(x, y);
-			if (l > 0) { c->v[0] = -e->s * x / l; c->v[1] = -e->s * y / l; }
+			if (l > 0) { c->v[0] = -e->s * e->w * x / l; c->v[1] = -e->s * e->w * y / l; }
 		}
 	}
 	else
@@ -1221,6 +1318,29 @@ static unsigned int sk_corner_new(sk_run* r, double const* p, double t, unsigned
 			c->branch = 1;
 			a1 = sk_angle(r, c, t + dt);
 			c->branch = a1 < a0;
+		}
+		else if (touching && fabs(a->w - b->w) > 1e-12)
+		{
+			/* supports of different speeds born touching: a little later, the crossing where the edge coming in passes
+			   from the unswept side of the one going out to its swept side */
+			double dt = 1e3 * r->eps, q[4];
+			if (sk_cross(a, b, t + dt, r->eps, q) == 2)
+			{
+				double h = 0.25 * hypot(q[2] - q[0], q[3] - q[1]);
+				unsigned int k;
+				for (k = 0; k < 2; k++)
+				{
+					double d[2], x0[2], x1[2];
+					sk_dir_at(a, q + 2 * k, d);
+					x0[0] = q[2 * k] - h * d[0]; x0[1] = q[2 * k + 1] - h * d[1];
+					x1[0] = q[2 * k] + h * d[0]; x1[1] = q[2 * k + 1] + h * d[1];
+					if (sk_resid(b, x0, t + dt) > 0 && sk_resid(b, x1, t + dt) < 0)
+					{
+						c->branch = (int)k;
+						break;
+					}
+				}
+			}
 		}
 		else if (touching)
 		{
@@ -1291,7 +1411,7 @@ static void sk_hits(sk_run* r, unsigned int ci, unsigned int ei)
 {
 	sk_corner const* c = &r->c[ci];
 	sk_sup const* e = &r->sup[ei];
-	double tt[2], p[4], lo = r->now - r->eps_t;
+	double tt[4], p[8], lo = r->now - r->eps_t;
 	unsigned int n = 0, j;
 	if (c->kind == SK_LINEAR)
 	{
@@ -1309,7 +1429,7 @@ static void sk_hits(sk_run* r, unsigned int ci, unsigned int ei)
 		else
 		{
 			double ax = a[0] - e->m[0], ay = a[1] - e->m[1];
-			n = (unsigned int)sk_solve_quad(c->v[0] * c->v[0] + c->v[1] * c->v[1] - 1, 2 * (ax * c->v[0] + ay * c->v[1]) + 2 * e->r0 * e->s,
+			n = (unsigned int)sk_solve_quad(c->v[0] * c->v[0] + c->v[1] * c->v[1] - e->w * e->w, 2 * (ax * c->v[0] + ay * c->v[1]) + 2 * e->r0 * e->s * e->w,
 				ax * ax + ay * ay - e->r0 * e->r0, tt);
 		}
 		for (j = 0; j < n; j++)
@@ -1473,8 +1593,8 @@ static void sk_candidates(sk_run* r, unsigned int i)
 		/* a marker on a circle: it ends at the centre, or where the skeleton
 		   meets its ray (a neighbour's support) */
 		sk_sup const* a = &r->sup[c->in];
-		if (a->kind == SK_CIRCLE && a->s > 0 && a->r0 >= r->now)
-			sk_push(r, SK_EV_CORNER, a->r0, a->m, i, 0, 0);
+		if (a->kind == SK_CIRCLE && a->s > 0 && a->r0 / a->w >= r->now)
+			sk_push(r, SK_EV_CORNER, a->r0 / a->w, a->m, i, 0, 0);
 		if (j != i && r->c[j].out != c->in)
 			sk_hits(r, i, r->c[j].out);
 		if (k != i && r->c[k].in != c->in)
@@ -1495,8 +1615,8 @@ static void sk_candidates(sk_run* r, unsigned int i)
 	for (e = 0; e < 2; e++)
 	{
 		sk_sup const* a = &r->sup[e ? c->out : c->in];
-		if (a->kind == SK_CIRCLE && a->s > 0 && a->r0 >= r->now && a->r0 <= c->tend + r->eps_t)
-			sk_push(r, SK_EV_CORNER, a->r0, a->m, i, 0, 0);
+		if (a->kind == SK_CIRCLE && a->s > 0 && a->r0 / a->w >= r->now && a->r0 / a->w <= c->tend + r->eps_t)
+			sk_push(r, SK_EV_CORNER, a->r0 / a->w, a->m, i, 0, 0);
 	}
 	/* a conic corner born at its supports' tangency: its angle just after */
 	theta = c->smooth ? SK_PI : sk_angle(r, c, c->kind == SK_CONIC ? c->t0 + 1e3 * r->eps_t : c->t0);
@@ -1635,8 +1755,8 @@ static void sk_next_touch(sk_run* r, unsigned int a, unsigned int tag)
 static void sk_event_at(sk_run* r, double const* p, double t);
 static double sk_loop_area(sk_run const* r, unsigned int i, double t);
 
-/* a new support: a circle growing from p at time t */
-static unsigned int sk_support_circle(sk_run* r, double const* p, double t, unsigned int node)
+/* a new support: a circle growing from p at time t at speed w */
+static unsigned int sk_support_circle(sk_run* r, double const* p, double t, double w, unsigned int node)
 {
 	sk_sup* g;
 	if (!sk_grow((void**)&r->sup, &r->capsup, (size_t)r->nsup + 1, sizeof(sk_sup)) ||
@@ -1650,8 +1770,8 @@ static unsigned int sk_support_circle(sk_run* r, double const* p, double t, unsi
 	g->kind = SK_CIRCLE;
 	g->m[0] = p[0]; g->m[1] = p[1];
 	g->s = -1;
-	g->r0 = -t;
-	g->w = 1;
+	g->r0 = -w * t;
+	g->w = w;
 	g->na = g->nb = node;
 	g->path = g->curve = g->span = SK_NONE;
 	r->refs[r->nsup] = 0;
@@ -1669,7 +1789,7 @@ static int sk_curved(sk_run const* r, sk_corner const* c)
 static int sk_same_circle(sk_run const* r, sk_sup const* a, sk_sup const* b)
 {
 	double tol = r->eps_r + 1e-6 * (fabs(a->r0) + fabs(b->r0));
-	return a->kind == SK_CIRCLE && b->kind == SK_CIRCLE && a->s == b->s &&
+	return a->kind == SK_CIRCLE && b->kind == SK_CIRCLE && a->s == b->s && fabs(a->w - b->w) <= 1e-12 &&
 		hypot(a->m[0] - b->m[0], a->m[1] - b->m[1]) <= tol && fabs(a->r0 - b->r0) <= tol;
 }
 
@@ -1756,7 +1876,7 @@ static void sk_splice(sk_run* r, unsigned int i, double t)
 		sk_pos(r, c, t, p);
 	node = sk_node(r, p, t);
 	sk_kill(r, i, node, t);
-	g = sk_support_circle(r, p, t, node);
+	g = sk_support_circle(r, p, t, r->sup[in].w > r->sup[out].w ? r->sup[in].w : r->sup[out].w, node);   /* (the faster edge's speed) */
 	if (g == SK_NONE)
 		return;
 	sk_squeezes(r, g, 0);
@@ -1788,7 +1908,8 @@ static void sk_splice(sk_run* r, unsigned int i, double t)
 		return;
 	{
 		/* the opened circle is tangent to both neighbours by construction:
-		   smooth corners at the tangent points, whatever the rounding says */
+		   smooth corners at the tangent points, whatever the rounding says
+		   (a neighbour slower than the circle crosses it: a conic corner) */
 		unsigned int k;
 		for (k = 0; k < 2; k++)
 		{
@@ -1796,6 +1917,21 @@ static void sk_splice(sk_run* r, unsigned int i, double t)
 			sk_sup const* e = &r->sup[k ? out : in];
 			if (d->smooth)
 				continue;
+			if (fabs(e->w - r->sup[g].w) > 1e-12)
+			{
+				/* a slower neighbour: the crossing behind the point along it (where it enters the circle), or ahead (where
+				   it leaves it) */
+				double q[4], dir[2], dt = 1e3 * r->eps_t;
+				if (d->kind == SK_CONIC && sk_cross(&r->sup[d->in], &r->sup[d->out], t + dt, r->eps, q) == 2)
+				{
+					double u0, u1;
+					sk_dir_at(e, p, dir);
+					u0 = (q[0] - p[0]) * dir[0] + (q[1] - p[1]) * dir[1];
+					u1 = (q[2] - p[0]) * dir[0] + (q[3] - p[1]) * dir[1];
+					d->branch = k ? u1 > u0 : u1 < u0;
+				}
+				continue;
+			}
 			d->kind = SK_LINEAR;
 			d->smooth = 1;
 			d->tend = 1e300;
@@ -1806,8 +1942,8 @@ static void sk_splice(sk_run* r, unsigned int i, double t)
 			else
 			{
 				double x = p[0] - e->m[0], y = p[1] - e->m[1], l = hypot(x, y);
-				d->v[0] = l > 0 ? -e->s * x / l : 0;
-				d->v[1] = l > 0 ? -e->s * y / l : 0;
+				d->v[0] = l > 0 ? -e->s * e->w * x / l : 0;
+				d->v[1] = l > 0 ? -e->s * e->w * y / l : 0;
 			}
 			if (k) sp2 = 0; else sp1 = 0;
 		}
@@ -1979,6 +2115,17 @@ static void sk_settle(sk_run* r, unsigned int i, int spike, double t)
 				r->merge = m;
 				return;
 			}
+		}
+	}
+	/* supports that touch here and part at once (a smooth joint between edges of different weights, the faster drawing
+	   away): a gap, which a circle opened here fills */
+	if (c->kind == SK_CONIC && fabs(r->sup[c->in].w - r->sup[c->out].w) > 1e-12)
+	{
+		double qx[4];
+		if (sk_cross(&r->sup[c->in], &r->sup[c->out], t + 1e3 * r->eps_t, r->eps, qx) == 0)
+		{
+			sk_splice(r, i, t);
+			return;
 		}
 	}
 	/* a reflex corner past the splice angle opens at once */
@@ -2197,8 +2344,8 @@ collect:
 		if (ns == 3 && curved)
 		{
 			sk_sup const* three[3];
-			double q[4], tq[2];
-			unsigned int nq, best = 2;
+			double q[8], tq[4];
+			unsigned int nq, best = 4;
 			double bd = r->rad;
 			three[0] = &r->sup[sup[0]]; three[1] = &r->sup[sup[1]]; three[2] = &r->sup[sup[2]];
 			nq = sk_meet3(three, q, tq);
@@ -2207,7 +2354,7 @@ collect:
 				double d = hypot(q[2 * z] - p[0], q[2 * z + 1] - p[1]);
 				if (d <= bd && fabs(tq[z] - t) <= r->eps_r) { bd = d; best = z; }
 			}
-			if (best < 2)
+			if (best < 4)
 			{
 				/* kept only when it fits the three supports better (near a double
 				   root the solve itself is good to half the digits) */
@@ -2809,21 +2956,54 @@ void qaws_skeleton_destroy(qaws_skeleton* s)
 	qaws_internal_free(s);
 }
 
-/* the input curves of output curve i of a clip path: the source both its
-   vertices lie on */
-static void sk_source(qaws_clip_vertex const* v, unsigned int n, unsigned int i, unsigned int* path, unsigned int* curve)
+/* the input curve of the output's piece between vertices i and i + 1: of the curves those vertices lie on, the one
+   nearest the piece's point q (a vertex where one curve ends and the next starts names either) */
+static void sk_source(qaws_skeleton_desc const* desc, qaws_clip_vertex const* v, unsigned int n, unsigned int i, double const* q,
+	unsigned int* path, unsigned int* curve)
 {
-	qaws_clip_vertex const* a = &v[i];
-	qaws_clip_vertex const* b = &v[(i + 1) % n];
-	*path = a->path_a;
-	*curve = a->curve_a;
-	if ((a->path_a == b->path_a && a->curve_a == b->curve_a) || (a->path_a == b->path_b && a->curve_a == b->curve_b))
-		return;
-	if (a->curve_b != QAWS_CLIP_NONE_INDEX &&
-		((a->path_b == b->path_a && a->curve_b == b->curve_a) || (a->path_b == b->path_b && a->curve_b == b->curve_b)))
+	double best = HUGE_VAL;
+	unsigned int k, j, nc = 0, cand[24];
+	*path = v[i].path_a;
+	*curve = v[i].curve_a;
+	/* the candidates: each vertex's curves, and their neighbours along the path (a vertex may name the curve ending there) */
+	for (k = 0; k < 12; k++)
 	{
-		*path = a->path_b;
-		*curve = a->curve_b;
+		qaws_clip_vertex const* x = &v[(i + (k % 4) / 2) % n];
+		unsigned int pp = k & 1 ? x->path_b : x->path_a, cc = k & 1 ? x->curve_b : x->curve_a;
+		if ((k & 1 ? x->operand_b : x->operand_a) != 0 || pp >= desc->path_count || cc >= desc->paths[pp].curve_count)
+			continue;
+		if (k >= 4)
+			cc = (cc + (k < 8 ? 1 : desc->paths[pp].curve_count - 1)) % desc->paths[pp].curve_count;
+		for (j = 0; j < nc && !(cand[2 * j] == pp && cand[2 * j + 1] == cc); j++)
+			;
+		if (j == nc)
+		{
+			cand[2 * nc] = pp;
+			cand[2 * nc + 1] = cc;
+			nc++;
+		}
+	}
+	for (j = 0; j < nc; j++)
+	{
+		qaws_curve const* c = desc->paths[cand[2 * j]].curves[cand[2 * j + 1]];
+		qaws_vec2 at;
+		qaws_scalar u = 0;
+		qaws_eval_result_2d e;
+		double d = 0;
+		at.x = (qaws_scalar)q[0];
+		at.y = (qaws_scalar)q[1];
+		if (nc > 1)
+		{
+			if (qaws_curve_find_closest_parameter_2d(&u, c, at) != QAWS_STATUS_OK || qaws_curve_evaluate_2d(&e, c, u, QAWS_EVAL_FLAG_POSITION) != QAWS_STATUS_OK)
+				continue;
+			d = hypot((double)e.position.x - q[0], (double)e.position.y - q[1]);
+		}
+		if (d < best)
+		{
+			best = d;
+			*path = cand[2 * j];
+			*curve = cand[2 * j + 1];
+		}
 	}
 }
 
@@ -3249,16 +3429,41 @@ qaws_status qaws_skeleton_create(qaws_skeleton** out, qaws_skeleton_desc const* 
 	{
 		qaws_path_2d path;
 		qaws_clip_vertex const* vx = NULL;
-		unsigned int nv = 0, ci, first = s->nsup, first_node = s->nnodes, k;
+		unsigned int nv = 0, ci, first = s->nsup, first_node = s->nnodes, k, nseg = 0, segi = 0;
+		int byseg;
 		qaws_clip_result_get_path(&path, region, pi);
 		qaws_clip_result_get_vertices(&vx, &nv, region, 0, pi);
 		s->loop_first[s->nloops] = first;
+		/* the vertices one per curve, or one per segment when lines were joined into polylines */
+		for (ci = 0; ci < path.curve_count; ci++)
+		{
+			qaws_scalar dummy[2];
+			unsigned int n = 0;
+			if (sk_is_line(path.curves[ci]))
+			{
+				qaws_curve_get_control_points(dummy, &n, path.curves[ci], 0);
+				nseg += n > 0 ? n - 1 : 0;
+			}
+			else
+				nseg++;
+		}
+		byseg = vx && nv == nseg && nv != path.curve_count;
 		for (ci = 0; ci < path.curve_count && st == QAWS_STATUS_OK; ci++)
 		{
 			qaws_curve const* c = path.curves[ci];
 			unsigned int sp = 0, sc = 0;
-			if (vx && nv == path.curve_count)
-				sk_source(vx, nv, ci, &sp, &sc);
+			if ((vx && nv == path.curve_count) || (byseg && !sk_is_line(c)))
+			{
+				qaws_range rg = qaws_curve_get_parameter_range(c);
+				qaws_eval_result_2d em;
+				double mq[2] = { 0, 0 };
+				if (qaws_curve_evaluate_2d(&em, c, (qaws_scalar)(0.5 * ((double)rg.min_value + rg.max_value)), QAWS_EVAL_FLAG_POSITION) == QAWS_STATUS_OK)
+				{
+					mq[0] = (double)em.position.x;
+					mq[1] = (double)em.position.y;
+				}
+				sk_source(desc, vx, nv, byseg ? segi++ : ci, mq, &sp, &sc);
+			}
 			if (sk_is_line(c))
 			{
 				qaws_scalar buf[2 * 64], *cp = buf;
@@ -3285,6 +3490,13 @@ qaws_status qaws_skeleton_create(qaws_skeleton** out, qaws_skeleton_desc const* 
 					e.d = e.n[0] * a[0] + e.n[1] * a[1];
 					e.w = 1;
 					e.input = 1;
+					if (byseg)
+					{
+						double mq[2];
+						mq[0] = 0.5 * (a[0] + b[0]);
+						mq[1] = 0.5 * (a[1] + b[1]);
+						sk_source(desc, vx, nv, segi + j, mq, &sp, &sc);
+					}
 					e.path = sp; e.curve = sc; e.span = 0;
 					if (sp < desc->path_count && sc < desc->paths[sp].curve_count)
 					{
@@ -3309,6 +3521,7 @@ qaws_status qaws_skeleton_create(qaws_skeleton** out, qaws_skeleton_desc const* 
 					if (a[0] > hi[0]) hi[0] = a[0];
 					if (a[1] > hi[1]) hi[1] = a[1];
 				}
+				segi += n > 0 ? n - 1 : 0;
 				if (cp != buf) qaws_internal_free(cp);
 			}
 			else if (c->kind == QAWS_CURVE_KIND_ARC && c->dimension == QAWS_DIMENSION_2D)
@@ -3332,9 +3545,16 @@ qaws_status qaws_skeleton_create(qaws_skeleton** out, qaws_skeleton_desc const* 
 					e.sweep = sw;
 					e.input = 1;
 					e.path = sp; e.curve = sc; e.span = j;
+					if (desc->weight_fn)
+					{
+						e.w = (double)desc->weight_fn(desc->weight_user, e.path, e.curve, e.span);
+						if (!(e.w > 0))
+							st = QAWS_STATUS_INVALID_ARGUMENT;
+					}
 					a[0] = e.m[0] + e.r0 * cos(e.a0);
 					a[1] = e.m[1] + e.r0 * sin(e.a0);
-					st = sk_add_support(s, &capsup, &e, a);
+					if (st == QAWS_STATUS_OK)
+						st = sk_add_support(s, &capsup, &e, a);
 					{
 						/* the extent from points on the arc (a flat arc's circle is huge) */
 						unsigned int q;
@@ -3382,6 +3602,22 @@ qaws_status qaws_skeleton_create(qaws_skeleton** out, qaws_skeleton_desc const* 
 					e.w = 1;
 					e.input = 2;           /* fitted: exact doubles */
 					e.path = sp; e.curve = sc; e.span = j;
+					if (desc->weight_fn)
+					{
+						/* (weighed by the source's span at the piece's start) */
+						qaws_curve const* src = sp < desc->path_count && sc < desc->paths[sp].curve_count ? desc->paths[sp].curves[sc] : c;
+						qaws_vec2 at;
+						qaws_scalar u = 0;
+						at.x = (qaws_scalar)g->a[0];
+						at.y = (qaws_scalar)g->a[1];
+						e.w = (double)desc->weight_fn(desc->weight_user, e.path, e.curve,
+							qaws_curve_find_closest_parameter_2d(&u, src, at) == QAWS_STATUS_OK ? sk_span(src, (double)u) : 0);
+						if (!(e.w > 0))
+						{
+							st = QAWS_STATUS_INVALID_ARGUMENT;
+							break;
+						}
+					}
 					st = sk_add_support(s, &capsup, &e, g->a);
 					if (g->a[0] < lo[0]) lo[0] = g->a[0];
 					if (g->a[1] < lo[1]) lo[1] = g->a[1];

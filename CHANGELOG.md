@@ -64,6 +64,11 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Weights on every skeleton: `qaws_skeleton`'s arcs and the circles opened at reflex vertices move at their weights
+  (a vertex's the faster edge's), so sigma = pi gives the weighted medial axis; events between cones of different
+  speeds by a quartic. `qaws_surface_medial_desc` gains `weight_fn` for the surface medial axis and mitered skeleton.
+  Fixed: an edge of the united region named the wrong input curve when lines were joined into one polyline (or a
+  vertex named the curve ending there), so weights per curve landed on neighbours. Tests 99, 106; figure 38 (2D).
 - BFF with prescribed border angles (`bff_turning`, one per vertex; the rest of 2π spread by length): a cap to a
   square, its angles exact. Test 166, figure 55.
 - Atlas packing by the charts' shapes (rasterized, largest first, a quarter turn allowed; a skyline of boxes as

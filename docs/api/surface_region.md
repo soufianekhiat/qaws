@@ -563,6 +563,12 @@ qaws_surface_medial_axis_get_max_inscribed(&centre, &radius, m);
   found by Newton.
 - **Accuracy.** The axis is resolved to the resolution along it, and its
   points are on the true axis to the tolerance.
+- **Weights.** With `weight_fn` (`qaws_skeleton`'s type) each feature's
+  distance is divided by its weight, in the labels, the crossings and the
+  junctions: the weighted medial axis, its radii those times. A piece's
+  weight comes from `weight_fn` with the path and curve as
+  `qaws_surface_region_get_path` gives them and the knot span where the
+  piece starts; a corner takes the larger of its two pieces'.
 
 ### Checks (test 106, f64)
 
@@ -573,6 +579,7 @@ qaws_surface_medial_axis_get_max_inscribed(&centre, &radius, m);
 | Cylinder: a rectangle's axis, unrolled, on the plane rectangle's, radii the side distances | 3.5e-12 |
 | Wavy patch: axis points inside the region shrunk by r − 1e-6, outside it shrunk by r + 1e-6 | 5 of 5 |
 | Wavy patch: shrunk by the largest inscribed radius less 1e-6 a part left, plus 1e-6 nothing | yes |
+| Flat patch, a rectangle with its bottom at weight 2: radii the plane's weighted distances, the largest 1.6 / 3 | 1e-7 |
 
 In f32 the same checks hold to 3e-6. A test run takes about 14 s. Figure 22
 shows axes, junctions and the largest inscribed circles on a sphere, a wavy
@@ -603,6 +610,9 @@ its end tangents. Its front at time t is that curve's geodesic offset by t.
   make a segment, three labels a junction (Newton on the three distances).
   Crossings at radius 0 are the boundary: snapped to the corner within a
   mesh edge, else dropped.
+- **Weights.** With `weight_fn` each edge moves at its weight (its first
+  piece's): the distances are divided by it in the wedges' comparisons and
+  the junctions, the times the swept distances over it.
 - **Limits.** No split events: a front cut off by another counts on beyond
   the cut. That is exact for convex regions and for reflex corners whose
   fronts are not split. A loop without corners (its skeleton is the medial
@@ -611,6 +621,7 @@ its end tangents. Its front at time t is that curve's geodesic offset by t.
 | Check (test 106) | f64 | f32 |
 |---|---|---|
 | An L on a cylinder, unrolled: segment ends on the plane L's straight skeleton, times the swept distances; the mitre from the reflex corner found | 1e-8 (ends at corners 1e-5) | 2e-4 |
+| A rectangle on a flat patch, its bottom at weight 2: times the weighted distances, the top 1.6 / 3 | 1e-7 | |
 
 Figure 30 shows mitered skeletons against medial axes for an L on the
 wavy patch and a dart of shortest paths on the bump.
