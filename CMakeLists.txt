@@ -126,6 +126,7 @@ src/qaws/mesh/qaws_mesh_bvh.c
 src/qaws/mesh/qaws_quality_report.c
 src/qaws/mesh/qaws_mesh_watertight.c
 src/qaws/mesh/qaws_mesh_geodesic.c
+src/qaws/mesh/qaws_mesh_geodesic_exact.c
 src/qaws/mesh/qaws_mesh_smooth.c
 src/qaws/mesh/qaws_mesh_deform.c
 src/qaws/mesh/qaws_mesh_param.c

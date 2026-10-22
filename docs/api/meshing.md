@@ -1033,6 +1033,8 @@ qaws_mesh_geodesic_path(points, locations, &count, geo, distances, sources, sour
 
 The object copies what it needs, and concurrent queries are safe. Accuracy is that of the heat method: errors near the mean edge length's order in the worst places, much less on fine, well-shaped meshes.
 
+**Exact distances.** `qaws_mesh_3d_geodesic_exact(distances, mesh, sources, source_count)` gives the polyhedral distances at the vertices, exact up to rounding, with no object to make. It uses the windows of Chen and Han, filtered as Xin and Wang do (ICH, 2009). A window is an interval of an edge, seen straight from a source unfolded into the plane of the triangle it enters. Windows go cheapest first, and each triangle's far edges take the part of a window that its rays cross. A saddle vertex (its angles sum to more than 2π) or a border vertex that a window reaches becomes a pseudo-source. A window is dropped when one of its triangle's vertices already reaches both its ends sooner. Vertices no source reaches get HUGE_VAL. The cost grows with the number of windows: about n√n on smooth meshes, n² at worst. Use it for references and small meshes; use the heat method for repeated queries.
+
 **Speed** (one thread, f64, i7-12700H): factoring 10k to 15k vertices takes 50 to 110 ms; each query then takes 3 to 5 ms.
 
 **Test 164 checks:**
@@ -1041,6 +1043,7 @@ The object copies what it needs, and concurrent queries are safe. Accuracy is th
 - **Paths:** from the grid's corner to a source inside a triangle, every point nearer than the last, ending at the source, 0.15% longer than the straight segment; round the sphere from near one pole to the other, its length matching the arc.
 - **Obtuse triangles:** on a grid sheared 2.5 to 1, the Euclidean distance within 0.013 (1.78 without the intrinsic Delaunay flips).
 - **Parts:** on two separate squares, the one without a source is unreached.
+- **Exact:** on a flat grid with the source inside a triangle, the Euclidean distance to 7e-16. On the unit cube's surface from a corner, the shorter unfolding to 4e-16, with the far corner at √5. On two separate grids, the second is unreached. On an icosphere pushed out and in by turns (saddles everywhere), every distance is at least the chord and at most the edge graph's distance, and neighbours are within an edge's length of each other.
 - **Repeat and refusals:** a second query gives the same distances; no mesh, sources outside the triangles and a short buffer are refused.
 
 Figure 28 (key s) shows a torus's distance from one point with paths back to it, a bumpy sphere's distance to the nearest of three sources, and paths going round a hill.

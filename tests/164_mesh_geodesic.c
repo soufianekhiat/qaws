@@ -420,6 +420,216 @@ static void test_refusals(void)
 	qaws_mesh_3d_destroy(m);
 }
 
+/* the unit cube's surface, n x n quads a side (each cut in two), vertices shared by their integer coordinates */
+static qaws_mesh_3d* gd_cube(unsigned int n)
+{
+	unsigned int N = n + 1, *id = (unsigned int*)malloc(sizeof(unsigned int) * N * N * N), nv = 0, nf = 0, a, s, u, v, k;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * N * N * N);
+	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 36 * n * n);
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (k = 0; k < N * N * N; k++)
+	{
+		unsigned int q[3];
+		q[0] = k % N;
+		q[1] = (k / N) % N;
+		q[2] = k / (N * N);
+		id[k] = 0xFFFFFFFFu;
+		if (q[0] % n && q[1] % n && q[2] % n)
+			continue;
+		id[k] = nv;
+		for (a = 0; a < 3; a++) x[3 * nv + a] = (qaws_scalar)((double)q[a] / n);
+		nv++;
+	}
+	for (a = 0; a < 3; a++)
+		for (s = 0; s < 2; s++)
+			for (u = 0; u < n; u++)
+				for (v = 0; v < n; v++)
+				{
+					unsigned int q4[4], c, b = (a + 1) % 3, e = (a + 2) % 3;
+					for (c = 0; c < 4; c++)
+					{
+						unsigned int q[3];
+						q[a] = s * n;
+						q[b] = u + (c == 1 || c == 2);
+						q[e] = v + (c >= 2);
+						q4[c] = id[q[0] + N * (q[1] + N * q[2])];
+					}
+					if (!s)
+					{
+						c = q4[1];
+						q4[1] = q4[3];
+						q4[3] = c;
+					}
+					f[3 * nf] = q4[0]; f[3 * nf + 1] = q4[1]; f[3 * nf + 2] = q4[2]; nf++;
+					f[3 * nf] = q4[0]; f[3 * nf + 1] = q4[2]; f[3 * nf + 2] = q4[3]; nf++;
+				}
+	memset(&d, 0, sizeof d);
+	d.positions = x;
+	d.vertex_count = nv;
+	d.face_vertices = f;
+	d.face_count = nf;
+	qaws_mesh_3d_create(&m, &d);
+	free(id);
+	free(x);
+	free(f);
+	return m;
+}
+
+/* the geodesic distance on the unit cube's surface from the corner (0, 0, 0): straight on the three faces round it, else
+   the shorter of the two unfoldings across the faces between */
+static double gd_cube_distance(double const* p)
+{
+	unsigned int a;
+	for (a = 0; a < 3; a++)
+		if (p[a] < 1e-12)
+			return sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+	for (a = 0; a < 3; a++)
+		if (p[a] > 1 - 1e-12)
+		{
+			double y = p[(a + 1) % 3], z = p[(a + 2) % 3];
+			return fmin(sqrt((1 + y) * (1 + y) + z * z), sqrt((1 + z) * (1 + z) + y * y));
+		}
+	return -1;
+}
+
+static void test_exact(void)
+{
+	qaws_mesh_3d *g = gd_grids(12, 1), *cube = gd_cube(3), *two = gd_grids(4, 2);
+	qaws_mesh_location src;
+	qaws_scalar *dg, *dc, *d2;
+	unsigned int i, ng = qaws_mesh_3d_get_vertex_count(g), nc = qaws_mesh_3d_get_vertex_count(cube), n2 = qaws_mesh_3d_get_vertex_count(two), far = 0;
+	double eg = 0, ec = 0, corner = 0, sp[3];
+	qaws_status s1, s2, s3;
+	char msg[400];
+	dg = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ng);
+	dc = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nc);
+	d2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n2);
+	/* a point inside a triangle of the flat grid: the distances Euclidean */
+	src.patch = 77;
+	src.a = (qaws_scalar)0.3;
+	src.b = (qaws_scalar)0.2;
+	{
+		unsigned int c[3];
+		qaws_vec3 p0, p1, p2;
+		qaws_mesh_3d_get_triangle(c, g, src.patch);
+		p0 = qaws_mesh_3d_get_vertex(g, c[0]);
+		p1 = qaws_mesh_3d_get_vertex(g, c[1]);
+		p2 = qaws_mesh_3d_get_vertex(g, c[2]);
+		sp[0] = 0.5 * (double)p0.x + 0.3 * (double)p1.x + 0.2 * (double)p2.x;
+		sp[1] = 0.5 * (double)p0.y + 0.3 * (double)p1.y + 0.2 * (double)p2.y;
+		sp[2] = 0;
+	}
+	s1 = qaws_mesh_3d_geodesic_exact(dg, g, &src, 1);
+	for (i = 0; i < ng; i++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(g, i);
+		eg = fmax(eg, fabs((double)dg[i] - sqrt(((double)q.x - sp[0]) * ((double)q.x - sp[0]) + ((double)q.y - sp[1]) * ((double)q.y - sp[1]))));
+	}
+	/* the cube from its corner (0, 0, 0) */
+	for (i = 0; i < nc; i++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(cube, i);
+		if (q.x == 0 && q.y == 0 && q.z == 0)
+			break;
+	}
+	src = gd_at_vertex(cube, i);
+	s2 = qaws_mesh_3d_geodesic_exact(dc, cube, &src, 1);
+	for (i = 0; i < nc; i++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(cube, i);
+		double pp[3] = { q.x, q.y, q.z }, e = gd_cube_distance(pp);
+		ec = fmax(ec, fabs((double)dc[i] - e));
+		if (q.x == 1 && q.y == 1 && q.z == 1)
+			corner = (double)dc[i];
+	}
+	/* two grids apart: the second not reached */
+	src = gd_at_vertex(two, 0);
+	s3 = qaws_mesh_3d_geodesic_exact(d2, two, &src, 1);
+	for (i = 0; i < n2; i++) far += (double)d2[i] == HUGE_VAL;
+	sprintf(msg, "exact geodesics: a flat grid from inside a triangle, off Euclid by %.1e; the cube from a corner, off its unfoldings by %.1e, the far corner at %.12f (sqrt 5 = 2.236067977500); two grids apart, %u of %u unreached",
+		eg, ec, corner, far, n2);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_OK && eg < 1e-12 && ec < 1e-12 && fabs(corner - sqrt(5.0)) < 1e-12 &&
+		far == n2 / 2, msg);
+	free(dg);
+	free(dc);
+	free(d2);
+	qaws_mesh_3d_destroy(g);
+	qaws_mesh_3d_destroy(cube);
+	qaws_mesh_3d_destroy(two);
+}
+
+/* saddles everywhere: an icosphere's vertices pushed out and in by turns; the exact distances above the chords, within an
+   edge's length of their neighbours' and below the edge graph's */
+static void test_exact_saddles(void)
+{
+	qaws_mesh_3d *s = gd_icosphere(2), *m = NULL;
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(s), nt = qaws_mesh_3d_get_triangle_count(s), i, j, k, bad = 0, done_count = 0;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nt);
+	qaws_scalar* d = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+	double* g = (double*)malloc(sizeof(double) * nv);
+	unsigned char* done = (unsigned char*)calloc(nv, 1);
+	qaws_mesh_3d_desc desc;
+	qaws_mesh_location src;
+	qaws_status st;
+	double below = 0;
+	char msg[256];
+	qaws_mesh_3d_get_positions(x, s);
+	qaws_mesh_3d_get_triangles(t, s);
+	for (i = 0; i < nv; i++)
+		for (k = 0; k < 3; k++) x[3 * i + k] *= (qaws_scalar)(i % 2 ? 1.2 : 0.85);
+	memset(&desc, 0, sizeof desc);
+	desc.positions = x;
+	desc.vertex_count = nv;
+	desc.face_vertices = t;
+	desc.face_count = nt;
+	qaws_mesh_3d_create(&m, &desc);
+	src = gd_at_vertex(m, 0);
+	st = qaws_mesh_3d_geodesic_exact(d, m, &src, 1);
+	/* the edge graph's distances (Dijkstra, quadratic: a small mesh) */
+	for (i = 0; i < nv; i++) g[i] = HUGE_VAL;
+	g[0] = 0;
+	while (done_count < nv)
+	{
+		unsigned int u = nv;
+		for (i = 0; i < nv; i++)
+			if (!done[i] && (u == nv || g[i] < g[u]))
+				u = i;
+		done[u] = 1;
+		done_count++;
+		for (i = 0; i < 3 * nt; i++)
+			if (t[i] == u)
+				for (j = 1; j <= 2; j++)
+				{
+					unsigned int w = t[3 * (i / 3) + (i % 3 + j) % 3];
+					double l = sqrt(((double)x[3 * u] - (double)x[3 * w]) * ((double)x[3 * u] - (double)x[3 * w]) + ((double)x[3 * u + 1] - (double)x[3 * w + 1]) * ((double)x[3 * u + 1] - (double)x[3 * w + 1]) + ((double)x[3 * u + 2] - (double)x[3 * w + 2]) * ((double)x[3 * u + 2] - (double)x[3 * w + 2]));
+					if (g[u] + l < g[w])
+						g[w] = g[u] + l;
+					/* (neighbours within an edge of each other, once Dijkstra has passed) */
+					if (fabs((double)d[u] - (double)d[w]) > l + 1e-12)
+						bad++;
+				}
+	}
+	for (i = 0; i < nv; i++)
+	{
+		double c = sqrt(((double)x[3 * i] - (double)x[0]) * ((double)x[3 * i] - (double)x[0]) + ((double)x[3 * i + 1] - (double)x[1]) * ((double)x[3 * i + 1] - (double)x[1]) + ((double)x[3 * i + 2] - (double)x[2]) * ((double)x[3 * i + 2] - (double)x[2]));
+		bad += (double)d[i] < c - 1e-12 || (double)d[i] > g[i] + 1e-12;
+		below += g[i] - (double)d[i];
+	}
+	sprintf(msg, "exact geodesics on saddles (%u vertices): %u violations, %.3f below the edge graph on average", nv, bad, below / nv);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && bad == 0 && below > 0, msg);
+	free(x);
+	free(t);
+	free(d);
+	free(g);
+	free(done);
+	qaws_mesh_3d_destroy(s);
+	qaws_mesh_3d_destroy(m);
+}
+
 int test_164_mesh_geodesic_main(void)
 {
 	g_pass = 0;
@@ -428,6 +638,8 @@ int test_164_mesh_geodesic_main(void)
 	test_sphere();
 	test_plane();
 	test_sheared();
+	test_exact();
+	test_exact_saddles();
 	test_parts();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

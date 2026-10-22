@@ -142,8 +142,9 @@ All notable changes to Qaws are documented here.
   obtuse triangles handled), its matrices factored once by the sparse LDL^T so each
   query is a few solves; sources anywhere on the triangles; Neumann,
   Dirichlet or mean border conditions; paths down the distance shortened
-  through the triangles they cross (unfolded, funnel algorithm). Test 164,
-  figure 28 (key s).
+  through the triangles they cross (unfolded, funnel algorithm). Exact
+  polyhedral distances by `qaws_mesh_3d_geodesic_exact` (ICH windows,
+  pseudo-sources at saddles and borders). Test 164, figure 28 (key s).
 - Mesh Booleans (`qaws_mesh_boolean`): union, intersection, difference and
   self-union of closed triangle meshes, on the resolved arrangement: patches
   bounded by the cuts, each sampled once in front of and behind it by the

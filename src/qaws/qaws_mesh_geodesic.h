@@ -82,4 +82,16 @@ qaws_status qaws_mesh_geodesic_path(qaws_scalar* out_points, qaws_mesh_location*
 	qaws_mesh_geodesic const* geodesic, qaws_scalar const* distances, qaws_mesh_location const* sources, unsigned int source_count,
 	qaws_mesh_location from, unsigned int capacity);
 
+/* Exact polyhedral distances at the vertices (the triangles taken as they
+   are, polygons fanned): Chen and Han's windows with Xin and Wang's
+   filtering (ICH, 2009). A window is an interval of an edge seen straight
+   from a source unfolded into the plane of the triangle it enters; windows
+   go cheapest first, each triangle's far edges taking the part its rays
+   cross; a saddle vertex (its angles summing to more than 2 pi) or a border
+   vertex reached becomes a pseudo-source. Without a factor or a solve: no
+   object needed. HUGE_VAL where no source reaches. The cost grows with the
+   windows (about n sqrt n on smooth meshes, n^2 at worst). */
+qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources,
+	unsigned int source_count);
+
 #endif /* QAWS_MESH_GEODESIC_H */
