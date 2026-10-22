@@ -633,6 +633,177 @@ static int sdv_limit_normals(double* N, sdv_mesh const* m, double const* L, int 
 	return 1;
 }
 
+/* one level of Kobbelt's sqrt(3) on triangles m into o: a point at each triangle's centroid, each old vertex relaxed
+   ((1 - a) v + a times its neighbours' mean, a = (4 - 2 cos(2 pi / n)) / 9), each old edge between two triangles flipped
+   to join their centroids: a triangle per half-edge, (a, centroid across, own centroid) where flipped, (a, b, own
+   centroid) where not. Border and feature edges stay unflipped and their vertices fixed (shortcut: Kobbelt's ternary
+   rule for the border every second level not used; the border keeps its polyline) */
+static qaws_status sdv_sqrt3(sdv_mesh* o, sdv_mesh const* m, sdv_cols const* k)
+{
+	unsigned int nv = m->nv, nf = m->nf, nc = m->nc, kv = k->kv, kc = k->kc, kf = k->kf, ne = 0, i, j, e, f, t;
+	sdv_key* key = (sdv_key*)qaws_internal_scratch_malloc(sizeof(sdv_key) * ((size_t)nc + 1));
+	unsigned int* ui = (unsigned int*)qaws_internal_scratch_zalloc(6 * (size_t)nc + (size_t)nv + 1, sizeof(unsigned int));
+	unsigned char* fixed = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nv + 1, 1);
+	double* NS = (double*)qaws_internal_scratch_zalloc((size_t)nv * kv + 1, sizeof(double));
+	unsigned int *ev, *ec, *en, *ce, *val;
+	qaws_status st = QAWS_STATUS_OK;
+	memset(o, 0, sizeof *o);
+	if (!key || !ui || !fixed || !NS)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	ev = ui;                    /* per edge its two vertices (smaller first) */
+	ec = ev + 2 * (size_t)nc;   /* its first two corners */
+	en = ec + 2 * (size_t)nc;   /* its corners' count (3: not flipped) */
+	ce = en + nc;               /* per corner its edge */
+	val = ce + nc;              /* per vertex its edges */
+	for (f = 0; f < nf; f++)
+		for (j = m->fo[f]; j < m->fo[f + 1]; j++)
+		{
+			unsigned int a = m->fv[j], b = m->fv[j + 1 == m->fo[f + 1] ? m->fo[f] : j + 1];
+			key[j].a = a < b ? a : b;
+			key[j].b = a < b ? b : a;
+			key[j].c = j;
+		}
+	qsort(key, nc, sizeof(sdv_key), sdv_key_cmp);
+	for (i = 0; i < nc; i++)
+	{
+		if (i == 0 || key[i].a != key[i - 1].a || key[i].b != key[i - 1].b)
+		{
+			e = ne++;
+			ev[2 * e] = key[i].a;
+			ev[2 * e + 1] = key[i].b;
+		}
+		e = ne - 1;
+		ce[key[i].c] = e;
+		if (en[e] < 2)
+			ec[2 * e + en[e]] = key[i].c;
+		en[e]++;
+	}
+	/* fixed: on the border, on a feature, a corner */
+	for (e = 0; e < ne; e++)
+		if (en[e] != 2)
+			fixed[ev[2 * e]] = fixed[ev[2 * e + 1]] = 1;
+	for (t = 0; t < m->nfe; t++)
+	{
+		unsigned int x = sdv_find_edge(ev, ne, m->fe[2 * t], m->fe[2 * t + 1]);
+		if (x != HM_NONE)
+		{
+			en[x] = 3;   /* (unflipped like a border) */
+			fixed[ev[2 * x]] = fixed[ev[2 * x + 1]] = 1;
+		}
+	}
+	for (i = 0; i < nv; i++) fixed[i] |= m->vk[i];
+	for (e = 0; e < ne; e++)
+	{
+		/* (an edge between two faces flips only when they run it opposite ways) */
+		unsigned int a = ev[2 * e], b = ev[2 * e + 1];
+		if (en[e] == 2 && m->fv[ec[2 * e]] == m->fv[ec[2 * e + 1]])
+			en[e] = 3;
+		val[a]++;
+		val[b]++;
+		for (j = 0; j < kv; j++)
+		{
+			NS[(size_t)a * kv + j] += m->X[(size_t)b * kv + j];
+			NS[(size_t)b * kv + j] += m->X[(size_t)a * kv + j];
+		}
+	}
+	if ((size_t)nv + nf > SDV_MAX || 3 * (size_t)nf > SDV_MAX || 9 * (size_t)nf > SDV_MAX)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	o->nv = nv + nf;
+	o->nf = 3 * nf;
+	o->nc = 9 * nf;
+	o->nfe = m->nfe;
+	if (!sdv_alloc(o, k))
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	memcpy(o->fe, m->fe, sizeof(unsigned int) * 2 * (size_t)m->nfe);
+	memcpy(o->fs, m->fs, sizeof(double) * m->nfe);
+	/* the old vertices relaxed, the centroids */
+	for (i = 0; i < nv; i++)
+	{
+		double const* x = m->X + (size_t)i * kv;
+		double* y = o->X + (size_t)i * kv;
+		double n = (double)val[i], a = (4 - 2 * cos(6.283185307179586 / (val[i] ? n : 1))) / 9;
+		memcpy(y, x, sizeof(double) * kv);
+		o->vk[i] = m->vk[i];
+		if (fixed[i] || !val[i])
+			continue;
+		for (j = 0; j < kv; j++) y[j] = (1 - a) * x[j] + a * NS[(size_t)i * kv + j] / n;
+		sdv_rules(y, x, k, QAWS_MESH_VERTEX);
+	}
+	for (f = 0; f < nf; f++)
+	{
+		double* y = o->X + ((size_t)nv + f) * kv;
+		for (j = 0; j < kv; j++) y[j] = 0;
+		for (i = m->fo[f]; i < m->fo[f + 1]; i++)
+			for (j = 0; j < kv; j++) y[j] += m->X[(size_t)m->fv[i] * kv + j] / 3;
+		sdv_rules(y, m->X + (size_t)m->fv[m->fo[f]] * kv, k, QAWS_MESH_VERTEX);
+	}
+	/* a triangle per half-edge, its parent's rows; corners: an old vertex its corner in the face, a centroid its face's corners' mean */
+	for (f = 0; f < nf; f++)
+	{
+		unsigned int c0 = m->fo[f];
+		for (i = 0; i < 3; i++)
+		{
+			unsigned int c = c0 + i, cn = c0 + (i + 1) % 3, g = 3 * f + i, q = 3 * g, x = ce[c], tw, gf, s;
+			unsigned int src[3];   /* per new corner: its corner in m, or the face (as nc + face) whose mean it takes */
+			o->fo[g] = q;
+			memcpy(o->F + (size_t)g * kf, m->F + (size_t)f * kf, sizeof(double) * kf);
+			tw = en[x] == 2 ? (ec[2 * x] == c ? ec[2 * x + 1] : ec[2 * x]) : HM_NONE;
+			if (tw != HM_NONE)
+			{
+				/* flipped: (a, the twin's centroid, own centroid) */
+				gf = tw / 3;   /* (triangles only) */
+				o->fv[q] = m->fv[c];
+				o->fv[q + 1] = nv + gf;
+				o->fv[q + 2] = nv + f;
+				src[0] = c;
+				src[1] = nc + gf;
+				src[2] = nc + f;
+			}
+			else
+			{
+				o->fv[q] = m->fv[c];
+				o->fv[q + 1] = m->fv[cn];
+				o->fv[q + 2] = nv + f;
+				src[0] = c;
+				src[1] = cn;
+				src[2] = nc + f;
+			}
+			for (s = 0; s < 3; s++)
+			{
+				double* y = o->C + ((size_t)q + s) * kc;
+				if (src[s] < nc)
+					memcpy(y, m->C + (size_t)src[s] * kc, sizeof(double) * kc);
+				else
+				{
+					unsigned int ff = src[s] - nc, r;
+					for (j = 0; j < kc; j++) y[j] = 0;
+					for (r = m->fo[ff]; r < m->fo[ff + 1]; r++)
+						for (j = 0; j < kc; j++) y[j] += m->C[(size_t)r * kc + j] / 3;
+					sdv_rules(y, m->C + (size_t)m->fo[ff] * kc, k, QAWS_MESH_CORNER);
+				}
+			}
+		}
+	}
+	o->fo[3 * nf] = 9 * nf;
+done:
+	if (st != QAWS_STATUS_OK)
+		sdv_free(o);
+	qaws_internal_free(key);
+	qaws_internal_free(ui);
+	qaws_internal_free(fixed);
+	qaws_internal_free(NS);
+	return st;
+}
+
 qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* mesh, qaws_mesh_subdivide_desc const* desc)
 {
 	sdv_mesh m, o;
@@ -650,7 +821,8 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_mesh = NULL;
 	if (!mesh || !desc || (desc->scheme != QAWS_MESH_SUBDIVIDE_CATMULL_CLARK && desc->scheme != QAWS_MESH_SUBDIVIDE_LOOP &&
-		desc->scheme != QAWS_MESH_SUBDIVIDE_BUTTERFLY) || (desc->scheme == QAWS_MESH_SUBDIVIDE_BUTTERFLY && desc->limit_normals))
+		desc->scheme != QAWS_MESH_SUBDIVIDE_BUTTERFLY && desc->scheme != QAWS_MESH_SUBDIVIDE_SQRT3) ||
+		(desc->scheme == QAWS_MESH_SUBDIVIDE_BUTTERFLY && desc->limit_normals) || (desc->scheme == QAWS_MESH_SUBDIVIDE_SQRT3 && (desc->limit || desc->limit_normals)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	nv = qaws_mesh_3d_get_vertex_count(mesh);
 	nf = qaws_mesh_3d_get_face_count(mesh);
@@ -658,7 +830,7 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 	na = qaws_mesh_3d_get_attribute_count(mesh);
 	if (nf == 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	loop = desc->scheme == QAWS_MESH_SUBDIVIDE_LOOP ? 1 : (desc->scheme == QAWS_MESH_SUBDIVIDE_BUTTERFLY ? 2 : 0);
+	loop = desc->scheme == QAWS_MESH_SUBDIVIDE_LOOP ? 1 : desc->scheme == QAWS_MESH_SUBDIVIDE_BUTTERFLY ? 2 : desc->scheme == QAWS_MESH_SUBDIVIDE_SQRT3 ? 3 : 0;
 	levels = desc->levels ? desc->levels : 1;
 	memset(&m, 0, sizeof m);
 	memset(&o, 0, sizeof o);
@@ -739,7 +911,7 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 
 	for (lv = 0; lv < levels; lv++)
 	{
-		st = sdv_step(&o, &m, loop, &k, 0);
+		st = loop == 3 ? sdv_sqrt3(&o, &m, &k) : sdv_step(&o, &m, loop, &k, 0);
 		sdv_free(&m);
 		if (st != QAWS_STATUS_OK)
 			goto done;

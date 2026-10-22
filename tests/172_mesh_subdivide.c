@@ -26,6 +26,10 @@
  *     (valences 4 and 8) stays in its plane up to the border through two
  *     levels (Zorin's virtual vertices reflected across it), and a cubic
  *     along its border follows the four-point curve;
+ *   - sqrt(3): the octahedron to 14 vertices and 24 triangles, a valence 4
+ *     vertex at 5/9, a centroid at (1/3, 1/3, 1/3); two levels 38 and 72,
+ *     Euler 2; a sheet with a colour linear in the position: flat, the
+ *     colour exact, the border unmoved; limit refused;
  *   - refusals: Loop on quads, a negative sharpness, an unknown scheme, the
  *     butterfly on quads or with limit normals.
  */
@@ -663,6 +667,86 @@ static void test_butterfly(void)
 	qaws_mesh_3d_destroy(g1);
 }
 
+static void test_sqrt3(void)
+{
+	qaws_mesh_3d *oc = sd_octahedron(), *o1 = sd_run(oc, QAWS_MESH_SUBDIVIDE_SQRT3, 1, NULL), *o2 = sd_run(oc, QAWS_MESH_SUBDIVIDE_SQRT3, 2, NULL), *s = NULL, *s2 = NULL, *bad = NULL;
+	qaws_mesh_subdivide_desc d;
+	qaws_status sl;
+	double v0 = 1, c0 = 1, lin = 1, flat = 1, border = 1;
+	char msg[400];
+	{
+		/* a 4 x 4 sheet, a colour 0.3 x - 0.7 y + 2 */
+		enum { N = 4 };
+		qaws_scalar x[3 * (N + 1) * (N + 1)], col[(N + 1) * (N + 1)];
+		unsigned int t[6 * N * N], i, j, k = 0, id;
+		qaws_attribute_desc ad;
+		for (j = 0; j <= N; j++)
+			for (i = 0; i <= N; i++)
+			{
+				x[3 * (j * (N + 1) + i)] = (qaws_scalar)((double)i / N);
+				x[3 * (j * (N + 1) + i) + 1] = (qaws_scalar)((double)j / N);
+				x[3 * (j * (N + 1) + i) + 2] = 0;
+				col[j * (N + 1) + i] = (qaws_scalar)(0.3 * i / N - 0.7 * j / N + 2);
+			}
+		for (j = 0; j < N; j++)
+			for (i = 0; i < N; i++)
+			{
+				unsigned int a = j * (N + 1) + i;
+				t[k++] = a; t[k++] = a + 1; t[k++] = a + N + 2;
+				t[k++] = a; t[k++] = a + N + 2; t[k++] = a + N + 1;
+			}
+		s = sd_make(x, (N + 1) * (N + 1), t, NULL, 2 * N * N);
+		memset(&ad, 0, sizeof ad);
+		ad.name = "colour";
+		ad.element = QAWS_MESH_VERTEX;
+		ad.components = 1;
+		ad.rule = QAWS_ATTRIBUTE_LINEAR;
+		qaws_mesh_3d_add_attribute(&id, s, col, &ad);
+		s2 = sd_run(s, QAWS_MESH_SUBDIVIDE_SQRT3, 2, NULL);
+		if (s2 && qaws_mesh_3d_find_attribute(&id, s2, "colour") == QAWS_STATUS_OK)
+		{
+			unsigned int n2 = qaws_mesh_3d_get_vertex_count(s2);
+			qaws_scalar* c2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n2);
+			qaws_mesh_3d_get_attribute(c2, s2, id);
+			lin = flat = border = 0;
+			for (i = 0; i < n2; i++)
+			{
+				qaws_vec3 p = qaws_mesh_3d_get_vertex(s2, i);
+				lin = fmax(lin, fabs((double)c2[i] - (0.3 * (double)p.x - 0.7 * (double)p.y + 2)));
+				flat = fmax(flat, fabs((double)p.z));
+			}
+			for (i = 0; i < (N + 1) * (N + 1); i++)
+				if (i % (N + 1) == 0 || i % (N + 1) == N || i / (N + 1) == 0 || i / (N + 1) == N)
+				{
+					qaws_vec3 p = qaws_mesh_3d_get_vertex(s2, i);
+					border = fmax(border, fabs((double)p.x - x[3 * i]) + fabs((double)p.y - x[3 * i + 1]));
+				}
+			free(c2);
+		}
+	}
+	memset(&d, 0, sizeof d);
+	d.scheme = QAWS_MESH_SUBDIVIDE_SQRT3;
+	d.limit = 1;
+	sl = qaws_mesh_3d_subdivide(&bad, oc, &d);
+	if (o1)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(o1, 0), q = qaws_mesh_3d_get_vertex(o1, 6);
+		v0 = fabs((double)p.x - 5.0 / 9) + fabs((double)p.y) + fabs((double)p.z);
+		c0 = fabs((double)q.x - 1.0 / 3) + fabs((double)q.y - 1.0 / 3) + fabs((double)q.z - 1.0 / 3);
+	}
+	sprintf(msg, "sqrt(3): the octahedron to %u vertices, %u triangles; vertex 0 off 5/9 by %.1e, a centroid off by %.1e; two levels %u, %u; a sheet flat to %.1e, a linear colour to %.1e, its border moved %.1e; limit refused (%d)",
+		o1 ? qaws_mesh_3d_get_vertex_count(o1) : 0, o1 ? qaws_mesh_3d_get_face_count(o1) : 0, v0, c0, o2 ? qaws_mesh_3d_get_vertex_count(o2) : 0,
+		o2 ? qaws_mesh_3d_get_face_count(o2) : 0, flat, lin, border, (int)sl);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o1 && o2 && qaws_mesh_3d_get_vertex_count(o1) == 14 && qaws_mesh_3d_get_face_count(o1) == 24 && v0 < 1e-15 && c0 < 1e-15 &&
+		qaws_mesh_3d_get_vertex_count(o2) == 38 && qaws_mesh_3d_get_face_count(o2) == 72 && flat == 0 && lin < 1e-14 && border == 0 && sl == QAWS_STATUS_INVALID_ARGUMENT && !bad, msg);
+	qaws_mesh_3d_destroy(oc);
+	qaws_mesh_3d_destroy(o1);
+	qaws_mesh_3d_destroy(o2);
+	qaws_mesh_3d_destroy(s);
+	qaws_mesh_3d_destroy(s2);
+}
+
 int test_172_mesh_subdivide_main(void)
 {
 	g_pass = 0;
@@ -677,6 +761,7 @@ int test_172_mesh_subdivide_main(void)
 	test_limit_normals();
 	test_butterfly();
 	test_butterfly_border();
+	test_sqrt3();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

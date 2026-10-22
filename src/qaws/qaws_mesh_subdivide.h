@@ -70,6 +70,16 @@
  * it are virtual, reflected across it (Zorin et al.'s rule): planes are
  * kept up to the border, and the border is the four-point curve.
  *
+ * sqrt(3) (Kobbelt 2000) puts a point at each triangle's centroid, relaxes
+ * the old vertices ((1 - a) v + a times the neighbours' mean,
+ * a = (4 - 2 cos(2 pi / n)) / 9) and flips every old edge between two
+ * triangles to join their centroids: three triangles for one each level,
+ * nine every two, a gentler refinement than Loop's four. Border and feature
+ * edges are not flipped and their vertices stay (Kobbelt's ternary border
+ * rule is not used: the border keeps its polyline); sharpness is ignored
+ * (features stay sharp); limit and limit_normals are refused. The new
+ * faces follow their parent, one per half-edge.
+ *
  * The result carries the features (each crease edge's halves, while sharp;
  * the corners) and every attribute by its rule:
  *   per vertex  LINEAR and NORMALIZED by the scheme's own rules, as the
@@ -95,7 +105,8 @@ typedef enum qaws_mesh_subdivide_scheme
 {
 	QAWS_MESH_SUBDIVIDE_CATMULL_CLARK = 0,
 	QAWS_MESH_SUBDIVIDE_LOOP,
-	QAWS_MESH_SUBDIVIDE_BUTTERFLY
+	QAWS_MESH_SUBDIVIDE_BUTTERFLY,
+	QAWS_MESH_SUBDIVIDE_SQRT3
 } qaws_mesh_subdivide_scheme;
 #endif
 
@@ -108,9 +119,9 @@ typedef struct qaws_mesh_subdivide_desc
 	int limit_normals;                  /* 1: limit, and a vertex attribute "limit_normal" (NORMALIZED, 3): the limit surface's normals */
 } qaws_mesh_subdivide_desc;
 
-/* INVALID_ARGUMENT for a mesh without faces, an unknown scheme, Loop or the
-   butterfly on a face that is not a triangle, limit_normals with the
-   butterfly, a negative sharpness; ALLOCATION_FAILURE when the
+/* INVALID_ARGUMENT for a mesh without faces, an unknown scheme, Loop, the
+   butterfly or sqrt(3) on a face that is not a triangle, limit_normals with
+   the butterfly, limit or limit_normals with sqrt(3), a negative sharpness; ALLOCATION_FAILURE when the
    result's size does not fit. */
 qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* mesh, qaws_mesh_subdivide_desc const* desc);
 

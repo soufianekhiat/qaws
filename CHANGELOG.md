@@ -59,6 +59,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- sqrt(3) subdivision (`QAWS_MESH_SUBDIVIDE_SQRT3`, Kobbelt 2000): three triangles
+  for one per level. Test 172, figure 50 (key O).
 - Rounded offsets (`QAWS_MESH_OFFSET_ROUND`): the true offset of the triangles,
   cylinders at convex edges and spheres at convex corners, as a union of
   slabs, wedges and cones; inward offsets of flat solids exact. Test 171,
