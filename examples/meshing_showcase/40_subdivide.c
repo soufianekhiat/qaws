@@ -1,7 +1,8 @@
 /*
  * Figure 40: subdivision of meshes (qaws_mesh_3d_subdivide).
  *   - the cage: a ring of eight blocks with a post and a stub, quads;
- *   - Catmull-Clark, three levels, smooth (genus one kept);
+ *   - Catmull-Clark, three levels, smooth (genus one kept), at the limit,
+ *     its normals (red) at the cage's vertices;
  *   - the cage's edges semi-sharp (sharpness 1.5): rounded, not melted;
  *   - Loop on the cage cut into triangles, the base's rim an infinitely
  *     sharp crease (the bottom stays flat), a colour per vertex carried.
@@ -75,12 +76,33 @@ static void demo_subdivide(void)
 	memset(&d, 0, sizeof d);
 	d.scheme = QAWS_MESH_SUBDIVIDE_CATMULL_CLARK;
 	d.levels = 3;
+	d.limit_normals = 1;
 	qaws_mesh_3d_subdivide(&o, q, &d);
+	d.limit_normals = 0;
 	if (o)
 	{
-		sprintf(sub, "3 levels: %u quads", qaws_mesh_3d_get_face_count(o));
+		/* the limit normals at the cage's vertices (they keep their indices) */
+		static double const red[3] = { 200, 60, 50 };
+		unsigned int nq = qaws_mesh_3d_get_vertex_count(q), no = qaws_mesh_3d_get_vertex_count(o), id, i, j;
+		qaws_scalar* nn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * no);
+		sprintf(sub, "the limit, %u quads; normals", qaws_mesh_3d_get_face_count(o));
 		ms_panel(c, 450, 0, 450, 640, o, yaw, pitch, "Catmull-Clark", sub);
 		ms_draw(c, o, smooth, NULL, 1, light, 0.3);
+		if (nn && qaws_mesh_3d_find_attribute(&id, o, "limit_normal") == QAWS_STATUS_OK)
+		{
+			qaws_mesh_3d_get_attribute(nn, o, id);
+			for (i = 0; i < nq; i++)
+			{
+				qaws_vec3 v = qaws_mesh_3d_get_vertex(o, i);
+				double a[3], b[3];
+				a[0] = v.x;
+				a[1] = v.y;
+				a[2] = v.z;
+				for (j = 0; j < 3; j++) b[j] = a[j] + 0.35 * (double)nn[3 * i + j];
+				er_line(c, a, b, red, 1.6);
+			}
+		}
+		free(nn);
 		printf("  Catmull-Clark: %s\n", sub);
 		qaws_mesh_3d_destroy(o);
 		o = NULL;

@@ -59,6 +59,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Subdivision's limit normals (`qaws_mesh_subdivide_desc.limit_normals`): the
+  vertex attribute "limit_normal", exact at smooth vertices by the tangent
+  masks (Loop's; Catmull-Clark's of Halstead, Kass and DeRose). Test 172.
 - Subdivision's limit positions (`qaws_mesh_subdivide_desc.limit`): the last
   level's vertices moved onto the Loop or Catmull-Clark limit surface, creases
   by the cubic B-spline's limit. Test 172.

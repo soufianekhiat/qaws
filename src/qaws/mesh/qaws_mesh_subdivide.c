@@ -439,12 +439,92 @@ done:
 	return st;
 }
 
+/* the limit surface's unit normals at m's vertices, 3 per vertex in N, by the tangent masks on m's control points (Loop:
+   sum cos(2 pi i / n) e_i and sum sin(2 pi i / n) e_i over the ring in order; Catmull-Clark's of Halstead, Kass and DeRose,
+   the edge neighbours by A_n cos, the diagonal ones by cos + the next cos); a vertex on a border, a crease or a corner by
+   its faces' normals at the limit positions L, rows of kv (shortcut: not the creases' own masks, Biermann et al. 2000,
+   for exact normals there). 0 on allocation failure. */
+static int sdv_limit_normals(double* N, sdv_mesh const* m, double const* L, int loop, unsigned int kv)
+{
+	unsigned int nv = m->nv, nc = m->nc, *co = (unsigned int*)qaws_internal_scratch_zalloc(2 * (size_t)nv + 2 * (size_t)nc + 2, sizeof(unsigned int));
+	unsigned char* odd = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nv + 1, 1);
+	unsigned int *cv, *fc, *cf, v, f, j, i;
+	if (!co || !odd)
+	{
+		qaws_internal_free(co);
+		qaws_internal_free(odd);
+		return 0;
+	}
+	cv = co + nv + 1;   /* per vertex its corners, from co[v] */
+	cf = cv + nc;       /* per corner its face */
+	fc = cf + nc;       /* per vertex its corners placed */
+	for (j = 0; j < nc; j++) co[m->fv[j] + 1]++;
+	for (v = 0; v < nv; v++) co[v + 1] += co[v];
+	for (f = 0; f < m->nf; f++)
+		for (j = m->fo[f]; j < m->fo[f + 1]; j++)
+		{
+			cf[j] = f;
+			cv[co[m->fv[j]] + fc[m->fv[j]]++] = j;
+		}
+	for (j = 0; j < m->nfe; j++)
+		odd[m->fe[2 * j]] = odd[m->fe[2 * j + 1]] = 1;
+	for (v = 0; v < nv; v++)
+	{
+		unsigned int n = co[v + 1] - co[v], c = n ? cv[co[v]] : 0, k;
+		double t1[3] = { 0, 0, 0 }, t2[3] = { 0, 0, 0 }, *y = N + 3 * (size_t)v, l, w = 6.283185307179586 / (n ? n : 1),
+			An = 1 + cos(w) + cos(w / 2) * sqrt(2 * (9 + cos(w)));
+		odd[v] |= m->vk[v] | !n;
+		/* the ring in order: from a corner, the next one around v is the face whose edge out of v is this one's edge in */
+		for (k = 0; !odd[v] && k < n; k++)
+		{
+			unsigned int s = m->fo[cf[c]], fn = m->fo[cf[c] + 1] - s, nx = m->fv[s + (c - s + 1) % fn], pv = m->fv[s + (c - s + fn - 1) % fn],
+				dg = m->fv[s + (c - s + 2) % fn], q, b = HM_NONE;
+			double ca = cos(w * k), sa = sin(w * k), cb = cos(w * (k + 1)), sb = sin(w * (k + 1));
+			for (i = 0; i < 3; i++)
+			{
+				double e = m->X[(size_t)nx * kv + i], d = m->X[(size_t)dg * kv + i];
+				t1[i] += loop ? ca * e : An * ca * e + (ca + cb) * d;
+				t2[i] += loop ? sa * e : An * sa * e + (sa + sb) * d;
+			}
+			for (q = co[v]; q < co[v + 1]; q++)
+			{
+				unsigned int h0 = m->fo[cf[cv[q]]], hn = m->fo[cf[cv[q]] + 1] - h0;
+				if (m->fv[h0 + (cv[q] - h0 + 1) % hn] == pv)
+					b = cv[q];
+			}
+			odd[v] = b == HM_NONE || (!loop && fn != 4);   /* a border; a face that is not a quad */
+			c = b;
+		}
+		if (!odd[v] && c != cv[co[v]])
+			odd[v] = 1;   /* (the ring not closed after n faces: not a manifold vertex) */
+		y[0] = t1[1] * t2[2] - t1[2] * t2[1];
+		y[1] = t1[2] * t2[0] - t1[0] * t2[2];
+		y[2] = t1[0] * t2[1] - t1[1] * t2[0];
+		for (k = co[v]; odd[v] && k < co[v + 1]; k++)
+		{
+			unsigned int s = m->fo[cf[cv[k]]], fn = m->fo[cf[cv[k]] + 1] - s;
+			double const *p = L + (size_t)v * kv, *a = L + (size_t)m->fv[s + (cv[k] - s + 1) % fn] * kv, *b = L + (size_t)m->fv[s + (cv[k] - s + fn - 1) % fn] * kv;
+			if (k == co[v])
+				y[0] = y[1] = y[2] = 0;
+			y[0] += (a[1] - p[1]) * (b[2] - p[2]) - (a[2] - p[2]) * (b[1] - p[1]);
+			y[1] += (a[2] - p[2]) * (b[0] - p[0]) - (a[0] - p[0]) * (b[2] - p[2]);
+			y[2] += (a[0] - p[0]) * (b[1] - p[1]) - (a[1] - p[1]) * (b[0] - p[0]);
+		}
+		l = sqrt(y[0] * y[0] + y[1] * y[1] + y[2] * y[2]);
+		for (i = 0; l > 1e-300 && i < 3; i++) y[i] /= l;
+	}
+	qaws_internal_free(co);
+	qaws_internal_free(odd);
+	return 1;
+}
+
 qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* mesh, qaws_mesh_subdivide_desc const* desc)
 {
 	sdv_mesh m, o;
 	sdv_cols k;
 	sdv_attr* at = NULL;
 	qaws_scalar* sv = NULL;
+	double* ln = NULL;
 	unsigned int* fsz = NULL;
 	unsigned int nv, nf, nc, na, i, j, a, lv, levels;
 	int loop;
@@ -550,9 +630,15 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		m = o;
 		memset(&o, 0, sizeof o);
 	}
-	if (desc->limit)
+	if (desc->limit || desc->limit_normals)
 	{
 		st = sdv_step(&o, &m, loop, &k, 1);
+		if (st == QAWS_STATUS_OK && desc->limit_normals)
+		{
+			ln = (double*)qaws_internal_scratch_malloc(sizeof(double) * (3 * (size_t)m.nv + 1));
+			if (!ln || !sdv_limit_normals(ln, &m, o.X, loop, k.kv))
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+		}
 		sdv_free(&m);
 		if (st != QAWS_STATUS_OK)
 			goto done;
@@ -605,6 +691,17 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 			for (j = 0; j < at[a].n; j++) sv[(size_t)i * at[a].n + j] = (qaws_scalar)rows[(size_t)i * w + at[a].off + j];
 		st = qaws_mesh_3d_add_attribute(&id, out, sv, &d);
 	}
+	if (ln && st == QAWS_STATUS_OK)
+	{
+		qaws_attribute_desc d;
+		unsigned int id;
+		d.name = "limit_normal";
+		d.element = QAWS_MESH_VERTEX;
+		d.components = 3;
+		d.rule = QAWS_ATTRIBUTE_NORMALIZED;
+		for (i = 0; i < 3 * m.nv; i++) sv[i] = (qaws_scalar)ln[i];
+		st = qaws_mesh_3d_add_attribute(&id, out, sv, &d);
+	}
 done:
 	if (st != QAWS_STATUS_OK)
 		qaws_mesh_3d_destroy(out);
@@ -614,6 +711,7 @@ done:
 	sdv_free(&o);
 	qaws_internal_free(at);
 	qaws_internal_free(sv);
+	qaws_internal_free(ln);
 	qaws_internal_free(fsz);
 	return st;
 }

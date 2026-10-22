@@ -44,6 +44,15 @@
  * (1, 4, 1) / 6; corners stay. The vertices then lie on the surface the
  * levels converge to (Halstead, Kass, DeRose 1993).
  *
+ * limit_normals adds the limit surface's unit normals as the vertex
+ * attribute "limit_normal": at a smooth vertex the cross product of the
+ * scheme's two tangent masks over its ring (Loop's cos and sin weights;
+ * Catmull-Clark's of Halstead, Kass and DeRose, the edge neighbours by
+ * A_n = 1 + cos(2 pi / n) + cos(pi / n) sqrt(2 (9 + cos(2 pi / n))) cos,
+ * the diagonal ones by the sum of the two cos beside them), exact; at a
+ * vertex on a border, a crease or a corner its faces' normals at the limit
+ * positions summed, approximate (the creases' tangent masks are not used).
+ *
  * The result carries the features (each crease edge's halves, while sharp;
  * the corners) and every attribute by its rule:
  *   per vertex  LINEAR and NORMALIZED by the scheme's own rules, as the
@@ -78,6 +87,7 @@ typedef struct qaws_mesh_subdivide_desc
 	unsigned int levels;                /* 0: 1 */
 	qaws_scalar const* sharpness;       /* per feature edge (qaws_mesh_3d_get_feature_edges order), >= 0; NULL: infinitely sharp */
 	int limit;                          /* 1: the last level's vertices moved onto the limit surface */
+	int limit_normals;                  /* 1: limit, and a vertex attribute "limit_normal" (NORMALIZED, 3): the limit surface's normals */
 } qaws_mesh_subdivide_desc;
 
 /* INVALID_ARGUMENT for a mesh without faces, an unknown scheme, Loop on a face

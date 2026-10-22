@@ -1240,6 +1240,7 @@ Figure 39 (key D): a U offset outward by contouring (rounded, the slot narrowed)
   - NEAREST takes its value from the first source.
 - **Features:** the crease halves are kept while they are sharp, and so are the corners. The result has no footpoints.
 - **Limit:** `limit` moves the last level's vertices (and their LINEAR and NORMALIZED attributes) onto the limit surface: Loop's limit mask, Catmull-Clark's (n^2 V + 4 sum E + sum F) / (n (n + 5)), a crease's (1, 4, 1) / 6. One level at the limit lies within 2e-4 of six levels, where without it the gap is 0.2 (test 172).
+- **Limit normals:** `limit_normals` adds the vertex attribute "limit_normal", the limit surface's unit normals. At a smooth vertex it is the cross product of the scheme's two tangent masks over the ordered ring: Loop's cos and sin weights, and Catmull-Clark's of Halstead, Kass and DeRose (1993). These are exact: a vertex's normal after one level and after three agree to 1e-15. At a border, crease or corner vertex it is the sum of its faces' normals at the limit positions, an approximation.
 - **Order:** old vertices keep their indices. Then comes one vertex per edge (ordered by its smaller vertex index, then the larger), then one per face (Catmull-Clark). Children follow their parent face.
 
 | Check (test 172) | Result |
@@ -1251,9 +1252,10 @@ Figure 39 (key D): a U offset outward by contouring (rounded, the slot narrowed)
 | Semi-sharp (sharpness 0, 0.5, 1, 2, infinite), three levels: volumes | 2.665 < 4.284 < 6.389 < 7.646 < 8 |
 | A sheet of 2 x 2 quads: corners and border | fixed; on the border |
 | Attributes: linear in the position, normalized, corner UVs, face ids, labels | 4e-16; unit; exact; kept; kept |
+| Limit normals: one level against three (cube, octahedron); the cube's corner against -(1, 1, 1) / sqrt 3; the creased cube unit | 1.1e-15, 6.7e-16; 3.3e-16; 1e-16 |
 | Refusals: Loop on quads, a negative sharpness, an unknown scheme | INVALID_ARGUMENT |
 
-Figure 40 (key E) shows a voxel cage (a ring with a post and a stub), its Catmull-Clark surface, the same with semi-sharp creases, and Loop on the triangulated cage with the base rim sharp and a colour carried.
+Figure 40 (key E) shows a voxel cage (a ring with a post and a stub), its Catmull-Clark surface at the limit with the limit normals at the cage's vertices, the same with semi-sharp creases, and Loop on the triangulated cage with the base rim sharp and a colour carried.
 
 ## Spatial queries: qaws_mesh_bvh
 

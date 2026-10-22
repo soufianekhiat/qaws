@@ -16,6 +16,9 @@
  *     faces' ids their parent's, a nearest vertex label kept;
  *   - limit positions: one level at the limit within 2% of how far one
  *     level is from six (cube, octahedron); the creased cube still the cube;
+ *   - limit normals: a vertex's after one level and after three agree (the
+ *     same point of the same surface), the cube's corner outward along its
+ *     diagonal, with the creased cube's faces' normals there;
  *   - refusals: Loop on quads, a negative sharpness, an unknown scheme.
  */
 
@@ -438,6 +441,62 @@ static void test_limit(void)
 	qaws_mesh_3d_destroy(cc);
 }
 
+/* the limit normals after levels, NULL on failure (the caller frees) */
+static qaws_scalar* sd_normals(qaws_mesh_3d const* m, qaws_mesh_subdivide_scheme scheme, unsigned int levels, unsigned int* out_count)
+{
+	qaws_mesh_subdivide_desc d;
+	qaws_mesh_3d* o = NULL;
+	qaws_scalar* n = NULL;
+	unsigned int a;
+	memset(&d, 0, sizeof d);
+	d.scheme = scheme;
+	d.levels = levels;
+	d.limit_normals = 1;
+	if (qaws_mesh_3d_subdivide(&o, m, &d) == QAWS_STATUS_OK && qaws_mesh_3d_find_attribute(&a, o, "limit_normal") == QAWS_STATUS_OK)
+	{
+		*out_count = qaws_mesh_3d_get_vertex_count(o);
+		n = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * *out_count);
+		if (n)
+			qaws_mesh_3d_get_attribute(n, o, a);
+	}
+	qaws_mesh_3d_destroy(o);
+	return n;
+}
+
+static void test_limit_normals(void)
+{
+	qaws_mesh_3d *c = sd_cube(), *oc = sd_octahedron();
+	unsigned int n1 = 0, n3 = 0, m1 = 0, m3 = 0, nk = 0, i;
+	qaws_scalar *c1 = sd_normals(c, QAWS_MESH_SUBDIVIDE_CATMULL_CLARK, 1, &n1), *c3 = sd_normals(c, QAWS_MESH_SUBDIVIDE_CATMULL_CLARK, 3, &n3),
+		*o1 = sd_normals(oc, QAWS_MESH_SUBDIVIDE_LOOP, 1, &m1), *o3 = sd_normals(oc, QAWS_MESH_SUBDIVIDE_LOOP, 3, &m3), *ck;
+	double dc = 0, dl = 0, corner = 0, unit = 0;
+	char msg[400];
+	qaws_mesh_3d_detect_features(c, (qaws_scalar)0.5, 0, 0);
+	ck = sd_normals(c, QAWS_MESH_SUBDIVIDE_CATMULL_CLARK, 2, &nk);
+	if (c1 && c3 && o1 && o3 && ck && n1 == 26 && m1 == 18)
+	{
+		for (i = 0; i < 3 * n1; i++) dc = fmax(dc, fabs((double)c1[i] - c3[i]));
+		for (i = 0; i < 3 * m1; i++) dl = fmax(dl, fabs((double)o1[i] - o3[i]));
+		/* (vertex 0 is the corner (-1, -1, -1)) */
+		for (i = 0; i < 3; i++) corner = fmax(corner, fabs((double)c1[i] + 1 / sqrt(3.0)));
+		for (i = 0; i < nk; i++)
+			unit = fmax(unit, fabs(sqrt((double)ck[3 * i] * ck[3 * i] + (double)ck[3 * i + 1] * ck[3 * i + 1] + (double)ck[3 * i + 2] * ck[3 * i + 2]) - 1));
+		sprintf(msg, "limit normals: Catmull-Clark's cube after 1 and 3 levels %.2e apart, Loop's octahedron %.2e; the corner %.2e off -(1, 1, 1) / sqrt 3; the creased cube's %u unit within %.2e",
+			dc, dl, corner, nk, unit);
+		printf("  %s\n", msg);
+		TEST_ASSERT(dc < 1e-12 && dl < 1e-12 && corner < 1e-12 && unit < 1e-12, msg);
+	}
+	else
+		TEST_ASSERT(0, "limit normals");
+	free(c1);
+	free(c3);
+	free(o1);
+	free(o3);
+	free(ck);
+	qaws_mesh_3d_destroy(c);
+	qaws_mesh_3d_destroy(oc);
+}
+
 int test_172_mesh_subdivide_main(void)
 {
 	g_pass = 0;
@@ -449,6 +508,7 @@ int test_172_mesh_subdivide_main(void)
 	test_sheet();
 	test_attributes();
 	test_limit();
+	test_limit_normals();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
