@@ -680,6 +680,99 @@ static void test_exact_saddles(void)
 	qaws_mesh_3d_destroy(m);
 }
 
+/* exact distances inside the triangles: a flat grid against Euclid, the cube from a corner against its unfoldings */
+static void test_exact_at(void)
+{
+	qaws_mesh_3d *g = gd_grids(12, 1), *cube = gd_cube(3);
+	unsigned int ng = qaws_mesh_3d_get_triangle_count(g), nc = qaws_mesh_3d_get_triangle_count(cube), nvc = qaws_mesh_3d_get_vertex_count(cube), i, k, np;
+	qaws_mesh_location src, *pts = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * 2 * (ng + nc)), bad;
+	qaws_scalar* d = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (ng + nc));
+	double eg = 0, ec = 0, sp[3] = { 0, 0, 0 };
+	qaws_status s1, s2, s3;
+	char msg[300];
+	unsigned int c[3];
+	/* the grid, from inside a triangle */
+	src.patch = 2 * (5 * 12 + 4);
+	src.a = (qaws_scalar)0.3;
+	src.b = (qaws_scalar)0.2;
+	qaws_mesh_3d_get_triangle(c, g, src.patch);
+	for (k = 0; k < 3; k++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(g, c[k]);
+		double w = k == 0 ? 0.5 : (k == 1 ? 0.3 : 0.2);
+		sp[0] += w * (double)q.x;
+		sp[1] += w * (double)q.y;
+	}
+	for (i = 0, np = 0; i < ng; i++, np += 2)
+	{
+		pts[np].patch = pts[np + 1].patch = i;
+		pts[np].a = (qaws_scalar)0.25;
+		pts[np].b = (qaws_scalar)0.4;
+		pts[np + 1].a = (qaws_scalar)0.6;
+		pts[np + 1].b = (qaws_scalar)0.1;
+	}
+	s1 = qaws_mesh_3d_geodesic_exact_at(d, g, &src, pts, 1, np);
+	for (i = 0; s1 == QAWS_STATUS_OK && i < np; i++)
+	{
+		double P[3] = { 0, 0, 0 }, wt[3];
+		qaws_mesh_3d_get_triangle(c, g, pts[i].patch);
+		wt[0] = 1 - (double)pts[i].a - (double)pts[i].b;
+		wt[1] = (double)pts[i].a;
+		wt[2] = (double)pts[i].b;
+		for (k = 0; k < 3; k++)
+		{
+			qaws_vec3 q = qaws_mesh_3d_get_vertex(g, c[k]);
+			P[0] += wt[k] * (double)q.x;
+			P[1] += wt[k] * (double)q.y;
+		}
+		eg = fmax(eg, fabs((double)d[i] - sqrt((P[0] - sp[0]) * (P[0] - sp[0]) + (P[1] - sp[1]) * (P[1] - sp[1]))));
+	}
+	/* the cube, from its corner (0, 0, 0) */
+	for (i = 0; i < nvc; i++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(cube, i);
+		if (q.x == 0 && q.y == 0 && q.z == 0)
+			break;
+	}
+	src = gd_at_vertex(cube, i);
+	for (i = 0, np = 0; i < nc; i++, np += 2)
+	{
+		pts[np].patch = pts[np + 1].patch = i;
+		pts[np].a = (qaws_scalar)0.25;
+		pts[np].b = (qaws_scalar)0.4;
+		pts[np + 1].a = (qaws_scalar)0.6;
+		pts[np + 1].b = (qaws_scalar)0.1;
+	}
+	s2 = qaws_mesh_3d_geodesic_exact_at(d, cube, &src, pts, 1, np);
+	for (i = 0; s2 == QAWS_STATUS_OK && i < np; i++)
+	{
+		double P[3] = { 0, 0, 0 }, wt[3];
+		qaws_mesh_3d_get_triangle(c, cube, pts[i].patch);
+		wt[0] = 1 - (double)pts[i].a - (double)pts[i].b;
+		wt[1] = (double)pts[i].a;
+		wt[2] = (double)pts[i].b;
+		for (k = 0; k < 3; k++)
+		{
+			qaws_vec3 q = qaws_mesh_3d_get_vertex(cube, c[k]);
+			P[0] += wt[k] * (double)q.x;
+			P[1] += wt[k] * (double)q.y;
+			P[2] += wt[k] * (double)q.z;
+		}
+		ec = fmax(ec, fabs((double)d[i] - gd_cube_distance(P)));
+	}
+	bad.patch = nc;
+	bad.a = bad.b = 0;
+	s3 = qaws_mesh_3d_geodesic_exact_at(d, cube, &src, &bad, 1, 1);
+	sprintf(msg, "exact geodesics inside triangles: the grid off Euclid by %.1e, the cube off its unfoldings by %.1e (%u points); a point outside refused (%d)",
+		eg, ec, np, (int)s3);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_INVALID_ARGUMENT && eg < 1e-12 && ec < 1e-12, msg);
+	qaws_mesh_3d_destroy(g);
+	qaws_mesh_3d_destroy(cube);
+	free(pts);
+	free(d);
+}
+
 /* two sources on a flat grid: the regions parted along their bisector, from the exact distances and from the heat method's */
 static void test_nearest(void)
 {
@@ -740,6 +833,7 @@ int test_164_mesh_geodesic_main(void)
 	test_sheared();
 	test_exact();
 	test_exact_saddles();
+	test_exact_at();
 	test_nearest();
 	test_parts();
 	test_refusals();

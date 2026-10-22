@@ -292,97 +292,101 @@ static int gx_cmp_key(void const* a, void const* b)
 	return x < y ? -1 : x > y ? 1 : 0;
 }
 
-qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources, unsigned int source_count,
-	qaws_scalar max_distance)
+static void gx_release(gx_ctx* c)
 {
-	gx_ctx c;
+	qaws_internal_free(c->x); qaws_internal_free(c->t); qaws_internal_free(c->adj); qaws_internal_free(c->v0); qaws_internal_free(c->vc);
+	qaws_internal_free(c->saddle); qaws_internal_free(c->d); qaws_internal_free(c->split_d); qaws_internal_free(c->split_t); qaws_internal_free(c->w); qaws_internal_free(c->heap);
+	memset(c, 0, sizeof *c);
+}
+
+/* the windows from the sources, cheapest first, until the cheapest left lies beyond R: c's distances and every window made
+   kept for the caller, who releases c (gx_release) whatever the status */
+static qaws_status gx_solve(gx_ctx* c, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources, unsigned int source_count, double R)
+{
 	qaws_scalar* p = NULL;
 	double* ang = NULL;
 	unsigned int i, k, s;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
-	double R = (double)max_distance;
-	if (!out_distances || !mesh || (source_count && !sources) || !(R >= 0))
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	memset(&c, 0, sizeof c);
-	c.nv = qaws_mesh_3d_get_vertex_count(mesh);
-	c.nt = qaws_mesh_3d_get_triangle_count(mesh);
+	memset(c, 0, sizeof *c);
+	c->nv = qaws_mesh_3d_get_vertex_count(mesh);
+	c->nt = qaws_mesh_3d_get_triangle_count(mesh);
 	for (s = 0; s < source_count; s++)
-		if (sources[s].patch >= c.nt || !isfinite((double)sources[s].a) || !isfinite((double)sources[s].b))
+		if (sources[s].patch >= c->nt || !isfinite((double)sources[s].a) || !isfinite((double)sources[s].b))
 			return QAWS_STATUS_INVALID_ARGUMENT;
-	c.x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.nv + 1));
-	c.t = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)c.nt + 1));
-	c.adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)c.nt + 1));
-	c.v0 = (unsigned int*)qaws_internal_zalloc((size_t)c.nv + 2, sizeof(unsigned int));
-	c.vc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)c.nt + 1));
-	c.saddle = (unsigned char*)qaws_internal_zalloc((size_t)c.nv + 1, 1);
-	c.d = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)c.nv + 1));
-	c.split_d = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.nt + 1));
-	c.split_t = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.nt + 1));
-	p = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)c.nv + 1));
-	ang = (double*)qaws_internal_scratch_zalloc((size_t)c.nv + 1, sizeof(double));
-	if (!c.x || !c.t || !c.adj || !c.v0 || !c.vc || !c.saddle || !c.d || !c.split_d || !c.split_t || !p || !ang)
+	c->x = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c->nv + 1));
+	c->t = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)c->nt + 1));
+	c->adj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)c->nt + 1));
+	c->v0 = (unsigned int*)qaws_internal_zalloc((size_t)c->nv + 2, sizeof(unsigned int));
+	c->vc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)c->nt + 1));
+	c->saddle = (unsigned char*)qaws_internal_zalloc((size_t)c->nv + 1, 1);
+	c->d = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)c->nv + 1));
+	c->split_d = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c->nt + 1));
+	c->split_t = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c->nt + 1));
+	p = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)c->nv + 1));
+	ang = (double*)qaws_internal_scratch_zalloc((size_t)c->nv + 1, sizeof(double));
+	if (!c->x || !c->t || !c->adj || !c->v0 || !c->vc || !c->saddle || !c->d || !c->split_d || !c->split_t || !p || !ang)
 		goto done;
 	qaws_mesh_3d_get_positions(p, mesh);
-	for (i = 0; i < 3 * c.nv; i++) c.x[i] = (double)p[i];
-	qaws_mesh_3d_get_triangles(c.t, mesh);
+	for (i = 0; i < 3 * c->nv; i++) c->x[i] = (double)p[i];
+	qaws_mesh_3d_get_triangles(c->t, mesh);
 	/* the neighbours: each directed edge's (smaller, larger) vertex pair and corner sorted, pairs of two matched */
-	for (i = 0; i < 3 * c.nt; i++)
+	for (i = 0; i < 3 * c->nt; i++)
 	{
-		c.adj[i] = GX_NONE;
-		c.split_d[i] = HUGE_VAL;
-		c.split_t[i] = 0;
+		c->adj[i] = GX_NONE;
+		c->split_d[i] = HUGE_VAL;
+		c->split_t[i] = 0;
 	}
 	{
-		unsigned long long* kc = (unsigned long long*)qaws_internal_scratch_malloc(sizeof(unsigned long long) * 2 * (3 * (size_t)c.nt + 1));
+		unsigned long long* kc = (unsigned long long*)qaws_internal_scratch_malloc(sizeof(unsigned long long) * 2 * (3 * (size_t)c->nt + 1));
 		if (!kc)
 			goto done;
-		for (i = 0; i < 3 * c.nt; i++)
+		for (i = 0; i < 3 * c->nt; i++)
 		{
-			unsigned long long a = c.t[i], b = c.t[3 * (i / 3) + (i % 3 + 1) % 3];
+			unsigned long long a = c->t[i], b = c->t[3 * (i / 3) + (i % 3 + 1) % 3];
 			kc[2 * (size_t)i] = ((a < b ? a : b) << 32) | (a < b ? b : a);
 			kc[2 * (size_t)i + 1] = i;
 		}
-		qsort(kc, 3 * (size_t)c.nt, sizeof(unsigned long long) * 2, gx_cmp_key);
-		for (i = 0; i + 1 < 3 * c.nt; i++)
-			if (kc[2 * (size_t)i] == kc[2 * (size_t)i + 2] && (i + 2 >= 3 * c.nt || kc[2 * (size_t)i + 4] != kc[2 * (size_t)i]))
+		qsort(kc, 3 * (size_t)c->nt, sizeof(unsigned long long) * 2, gx_cmp_key);
+		for (i = 0; i + 1 < 3 * c->nt; i++)
+			if (kc[2 * (size_t)i] == kc[2 * (size_t)i + 2] && (i + 2 >= 3 * c->nt || kc[2 * (size_t)i + 4] != kc[2 * (size_t)i]))
 			{
 				unsigned int a = (unsigned int)kc[2 * (size_t)i + 1], b = (unsigned int)kc[2 * (size_t)i + 3];
-				c.adj[a] = b;
-				c.adj[b] = a;
+				c->adj[a] = b;
+				c->adj[b] = a;
 				i++;
 			}
 		qaws_internal_free(kc);
 	}
 	/* each vertex's corners, its angle sum; saddles and border vertices */
-	for (i = 0; i < 3 * c.nt; i++) c.v0[c.t[i] + 1]++;
-	for (i = 0; i < c.nv; i++) c.v0[i + 1] += c.v0[i];
+	for (i = 0; i < 3 * c->nt; i++) c->v0[c->t[i] + 1]++;
+	for (i = 0; i < c->nv; i++) c->v0[i + 1] += c->v0[i];
 	{
-		unsigned int* fill = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)c.nv + 1));
+		unsigned int* fill = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)c->nv + 1));
 		if (!fill)
 			goto done;
-		memcpy(fill, c.v0, sizeof(unsigned int) * c.nv);
-		for (i = 0; i < 3 * c.nt; i++) c.vc[fill[c.t[i]]++] = i;
+		memcpy(fill, c->v0, sizeof(unsigned int) * c->nv);
+		for (i = 0; i < 3 * c->nt; i++) c->vc[fill[c->t[i]]++] = i;
 		qaws_internal_free(fill);
 	}
-	for (i = 0; i < 3 * c.nt; i++)
+	for (i = 0; i < 3 * c->nt; i++)
 	{
-		double const *v = c.x + 3 * (size_t)c.t[i], *a = c.x + 3 * (size_t)c.t[3 * (i / 3) + (i % 3 + 1) % 3], *b = c.x + 3 * (size_t)c.t[3 * (i / 3) + (i % 3 + 2) % 3];
+		double const *v = c->x + 3 * (size_t)c->t[i], *a = c->x + 3 * (size_t)c->t[3 * (i / 3) + (i % 3 + 1) % 3], *b = c->x + 3 * (size_t)c->t[3 * (i / 3) + (i % 3 + 2) % 3];
 		double u[3], w2[3], la, lb, cs;
 		for (k = 0; k < 3; k++) { u[k] = a[k] - v[k]; w2[k] = b[k] - v[k]; }
 		la = sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
 		lb = sqrt(w2[0] * w2[0] + w2[1] * w2[1] + w2[2] * w2[2]);
 		cs = la > 0 && lb > 0 ? (u[0] * w2[0] + u[1] * w2[1] + u[2] * w2[2]) / (la * lb) : 1;
-		ang[c.t[i]] += acos(cs > 1 ? 1 : cs < -1 ? -1 : cs);
-		if (c.adj[i] == GX_NONE)
+		ang[c->t[i]] += acos(cs > 1 ? 1 : cs < -1 ? -1 : cs);
+		if (c->adj[i] == GX_NONE)
 		{
-			c.saddle[c.t[i]] = 1;
-			c.saddle[c.t[3 * (i / 3) + (i % 3 + 1) % 3]] = 1;
+			c->saddle[c->t[i]] = 1;
+			c->saddle[c->t[3 * (i / 3) + (i % 3 + 1) % 3]] = 1;
 		}
 	}
-	for (i = 0; i < c.nv; i++)
+	for (i = 0; i < c->nv; i++)
 	{
-		c.saddle[i] |= ang[i] > 2 * 3.14159265358979323846 + 1e-9;
-		c.d[i] = HUGE_VAL;
+		c->saddle[i] |= ang[i] > 2 * 3.14159265358979323846 + 1e-9;
+		c->d[i] = HUGE_VAL;
 	}
 	/* the sources: their triangle's vertices reached straight, a window across each of its edges (a source on a vertex: that
 	   vertex a pseudo-source) */
@@ -391,40 +395,125 @@ qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d
 		unsigned int f = sources[s].patch;
 		double a = (double)sources[s].a, b = (double)sources[s].b, S[3];
 		for (k = 0; k < 3; k++)
-			S[k] = (1 - a - b) * c.x[3 * (size_t)c.t[3 * f] + k] + a * c.x[3 * (size_t)c.t[3 * f + 1] + k] + b * c.x[3 * (size_t)c.t[3 * f + 2] + k];
+			S[k] = (1 - a - b) * c->x[3 * (size_t)c->t[3 * f] + k] + a * c->x[3 * (size_t)c->t[3 * f + 1] + k] + b * c->x[3 * (size_t)c->t[3 * f + 2] + k];
 		for (k = 0; k < 3; k++)
 		{
-			unsigned int v = c.t[3 * f + k];
-			double dv = gx_len(S, c.x + 3 * (size_t)v);
+			unsigned int v = c->t[3 * f + k];
+			double dv = gx_len(S, c->x + 3 * (size_t)v);
 			if (dv <= GX_EPS)
 			{
 				/* (on the vertex: every triangle round it at once) */
-				unsigned char was = c.saddle[v];
-				c.saddle[v] = 1;
-				if (!gx_reach(&c, v, 0))
+				unsigned char was = c->saddle[v];
+				c->saddle[v] = 1;
+				if (!gx_reach(c, v, 0))
 					goto done;
-				c.saddle[v] = was;
+				c->saddle[v] = was;
 			}
-			else if (!gx_reach(&c, v, dv))
+			else if (!gx_reach(c, v, dv))
 				goto done;
-			if (!gx_emit_across(&c, f, k, S, 0, 0, gx_len(c.x + 3 * (size_t)c.t[3 * f + k], c.x + 3 * (size_t)c.t[3 * f + (k + 1) % 3])))
+			if (!gx_emit_across(c, f, k, S, 0, 0, gx_len(c->x + 3 * (size_t)c->t[3 * f + k], c->x + 3 * (size_t)c->t[3 * f + (k + 1) % 3])))
 				goto done;
 		}
 	}
-	while (c.nh)
+	while (c->nh)
 	{
-		gx_win w = c.w[gx_pop(&c)];
+		gx_win w = c->w[gx_pop(c)];
 		if (w.key > R)
 			break;   /* (every window left is farther: the distances within R are settled) */
-		if (w.f == GX_NONE ? w.sigma == c.d[w.k] && !gx_expand(&c, w.k, w.sigma) : !gx_propagate(&c, &w))
+		if (w.f == GX_NONE ? w.sigma == c->d[w.k] && !gx_expand(c, w.k, w.sigma) : !gx_propagate(c, &w))
 			goto done;
 	}
-	for (i = 0; i < c.nv; i++) out_distances[i] = (qaws_scalar)(c.d[i] <= R ? c.d[i] : HUGE_VAL);
 	st = QAWS_STATUS_OK;
 done:
-	qaws_internal_free(c.x); qaws_internal_free(c.t); qaws_internal_free(c.adj); qaws_internal_free(c.v0); qaws_internal_free(c.vc);
-	qaws_internal_free(c.saddle); qaws_internal_free(c.d); qaws_internal_free(c.split_d); qaws_internal_free(c.split_t); qaws_internal_free(c.w); qaws_internal_free(c.heap);
-	qaws_internal_free(p); qaws_internal_free(ang);
+	qaws_internal_free(p);
+	qaws_internal_free(ang);
+	return st;
+}
+
+qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources, unsigned int source_count,
+	qaws_scalar max_distance)
+{
+	gx_ctx c;
+	unsigned int i;
+	qaws_status st;
+	double R = (double)max_distance;
+	if (!out_distances || !mesh || (source_count && !sources) || !(R >= 0))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	st = gx_solve(&c, mesh, sources, source_count, R);
+	for (i = 0; st == QAWS_STATUS_OK && i < c.nv; i++) out_distances[i] = (qaws_scalar)(c.d[i] <= R ? c.d[i] : HUGE_VAL);
+	gx_release(&c);
+	return st;
+}
+
+qaws_status qaws_mesh_3d_geodesic_exact_at(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources,
+	qaws_mesh_location const* points, unsigned int source_count, unsigned int point_count)
+{
+	gx_ctx c;
+	unsigned int *fo = NULL, *fw = NULL, i, j, k, s, q;
+	qaws_status st;
+	if (!out_distances || !mesh || (source_count && !sources) || (point_count && !points))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	st = gx_solve(&c, mesh, sources, source_count, HUGE_VAL);
+	for (q = 0; st == QAWS_STATUS_OK && q < point_count; q++)
+		if (points[q].patch >= c.nt || !isfinite((double)points[q].a) || !isfinite((double)points[q].b))
+			st = QAWS_STATUS_INVALID_ARGUMENT;
+	if (st == QAWS_STATUS_OK)
+	{
+		/* per triangle the windows entering it */
+		fo = (unsigned int*)qaws_internal_scratch_zalloc((size_t)c.nt + 2, sizeof(unsigned int));
+		fw = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)c.nw + 1));
+		if (!fo || !fw)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	if (st == QAWS_STATUS_OK)
+	{
+		for (j = 0; j < c.nw; j++)
+			if (c.w[j].f != GX_NONE)
+				fo[c.w[j].f + 2]++;
+		for (i = 0; i < c.nt; i++) fo[i + 2] += fo[i + 1];
+		for (j = 0; j < c.nw; j++)
+			if (c.w[j].f != GX_NONE)
+				fw[fo[c.w[j].f + 1]++] = j;
+	}
+	for (q = 0; st == QAWS_STATUS_OK && q < point_count; q++)
+	{
+		/* the least of: a vertex of its triangle and on straight, a source in its triangle straight, a window entering its
+		   triangle that sees it through its interval */
+		unsigned int f = points[q].patch;
+		double a = (double)points[q].a, b = (double)points[q].b, P[3], best = HUGE_VAL;
+		for (k = 0; k < 3; k++)
+			P[k] = (1 - a - b) * c.x[3 * (size_t)c.t[3 * f] + k] + a * c.x[3 * (size_t)c.t[3 * f + 1] + k] + b * c.x[3 * (size_t)c.t[3 * f + 2] + k];
+		for (k = 0; k < 3; k++)
+			best = fmin(best, c.d[c.t[3 * f + k]] + gx_len(P, c.x + 3 * (size_t)c.t[3 * f + k]));
+		for (s = 0; s < source_count; s++)
+			if (sources[s].patch == f)
+			{
+				double sa = (double)sources[s].a, sb = (double)sources[s].b, S[3];
+				for (k = 0; k < 3; k++)
+					S[k] = (1 - sa - sb) * c.x[3 * (size_t)c.t[3 * f] + k] + sa * c.x[3 * (size_t)c.t[3 * f + 1] + k] + sb * c.x[3 * (size_t)c.t[3 * f + 2] + k];
+				best = fmin(best, gx_len(P, S));
+			}
+		for (j = fo[f]; j < fo[f + 1]; j++)
+		{
+			gx_win const* w = &c.w[fw[j]];
+			double U[3], e[3], n[3], L, wx, wy, px = 0, py = 0, t;
+			gx_frame(&c, f, w->k, U, e, n, &L, &wx, &wy);
+			for (k = 0; k < 3; k++)
+			{
+				px += (P[k] - U[k]) * e[k];
+				py += (P[k] - U[k]) * n[k];
+			}
+			if (!(py - w->sy > 0))
+				continue;
+			t = w->sx + (px - w->sx) * -w->sy / (py - w->sy);   /* (where the ray from the source to the point crosses the edge) */
+			if (t >= w->t0 - GX_EPS * L && t <= w->t1 + GX_EPS * L)
+				best = fmin(best, w->sigma + sqrt((px - w->sx) * (px - w->sx) + (py - w->sy) * (py - w->sy)));
+		}
+		out_distances[q] = (qaws_scalar)best;
+	}
+	qaws_internal_free(fo);
+	qaws_internal_free(fw);
+	gx_release(&c);
 	return st;
 }
 

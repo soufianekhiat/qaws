@@ -59,6 +59,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Exact geodesic distances anywhere (`qaws_mesh_3d_geodesic_exact_at`): at
+  locations inside the triangles, from the windows kept. Test 164.
 - Nearest sources (`qaws_mesh_3d_geodesic_nearest`): each vertex's nearest
   source from the heat method's or the exact distances, the geodesic Voronoi
   regions. Test 164, figure 28.

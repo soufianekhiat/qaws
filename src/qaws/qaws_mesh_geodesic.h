@@ -100,6 +100,15 @@ qaws_status qaws_mesh_geodesic_path(qaws_scalar* out_points, qaws_mesh_location*
 qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources,
 	unsigned int source_count, qaws_scalar max_distance);
 
+/* The exact distances at points anywhere on the surface (point_count
+   locations), not only at the vertices: the windows of
+   qaws_mesh_3d_geodesic_exact kept, each point's distance the least of a
+   window entering its triangle that sees it through its interval, a vertex
+   of its triangle then straight, a source in its triangle straight.
+   INVALID_ARGUMENT for a point outside the triangles. */
+qaws_status qaws_mesh_3d_geodesic_exact_at(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources,
+	qaws_mesh_location const* points, unsigned int source_count, unsigned int point_count);
+
 /* The nearest source of every vertex (an index into sources; QAWS_MESH_NONE
    where the distance is not finite), from the distances to the nearest of
    them (the heat method's or the exact ones): the geodesic Voronoi regions.
