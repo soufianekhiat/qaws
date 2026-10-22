@@ -162,6 +162,82 @@ Hexahedra and quads (research-scale):
 21. **GLOBAL torus periods: landed** (`qg_periods`, test 136, figure 58 key W): tree-cotree cuts, a whole step along each changing one period; the map's energy over the four steps fitted from 15 solves on one factor, its least integer point kept. Spirals in 14 of 20 tori before, 2 after (radii 1 and 0.3 to 0.7, at 0.12 to 0.4), at the same time; those left follow a field that turns slowly round the tube (INSTANT keeps the smoothest on a tie; guided along the parallels 17 of 20 close). Next: higher genus (4 g steps), the curvature-aligned field preferred on closed tubes.
 22. **FRAME_FIELD through singular edges: landed** (`hs_hexes`, `ff_frames` with MBO, test 128, figure 59 key X): the field relaxed by MBO (20 rounds of 48 diffusion steps on cells at 0.28 of the cell size: a can's singular loop near its axis becomes four straight lines along its side, a ball's graph a cube's), a map with transitions across a reduced cut (CubeCover) rounded greedily (singular lines, border planes, transitions), its lattice read off as HexEx does (registrations merged by the transitions, cubes from their centres and, where flat cells hid them, from their corners), the hexahedra relaxed. A can at 0.4: 16 hexahedra, a ball at 0.5: 27, all valid. Tried first without MBO (kept in the plan's history): the sweeps' field collapses the map. Next: border pits (cubes whose corner cells squeezed flat), robustness across sizes (the rounding's choices), genus beyond zero, speed (the field's MBO and one factor per rounding round).
 
+### Roadmap (2026-10-22): follow-ups
+
+The enrichments' "Next" items, in the order agreed: the larger ones first, then the smaller ones.
+
+Larger:
+
+1. **FRAME_FIELD through singular edges, robust:** no border pits, results stable across cell sizes (rounding that turns
+   no cell over), genus beyond zero (a torus), speed (MBO's projections, one factor per rounding round). Check: a can,
+   two balls and a torus over five cell sizes, all valid and without pits.
+2. **Torus periods, further:** higher genus (4 g steps, the same fit); the curvature-aligned field preferred on closed
+   tubes. Check: a double torus with no spiral, the thin torus without guides.
+3. **Polycube labels, further:** spikes (bumps past half the height) given their own patches; the atlas groups by the
+   same cut. Check: the bump at 0.6 valid; atlas borders from the cut.
+4. **Atlas, further:** splits along the distortion's level lines, a skyline packing, groups by the graph cut. Check:
+   stretch bound met with fewer charts, fill above 0.6.
+5. **BFF, further:** prescribed border angles (cone points), the inside by the conjugate harmonic. Check: a square
+   chart from a disc with four corners, angles kept.
+
+Smaller (each with its check): Zorin's refined butterfly border rules; Kobbelt's ternary sqrt(3) border; Catmull-Clark
+adaptive levels; geodesic regions' borders inside triangles; fewer saddle windows; corner attributes in decimation (UV
+wedges); Lindstrom and Turk's boundary and shape terms; an octree for fine offsets; rounded offset pieces cheaper; the
+curved-element optimizer by the bound's gradient with border nodes sliding; simplex subdivision for the tetrahedra's
+bound; point clouds with cavities.
+
+### Roadmap (2026-10-22): sweeps and continuous Booleans
+
+After the follow-ups and building on the Booleans (items 5 and 6): animation as a first-class input, so a mesh moving
+between poses carves, adds or meets another one continuously, not at sampled instants. One instance, the continuous
+difference (carving), generalized to every Boolean: sweep(A, motion) op B, op in union, intersection, difference,
+and both moving (their relative motion).
+
+Use cases: CNC simulation (the stock less the tool's sweep along its path, the removed volume measured), continuous
+collision detection (the sweep's intersection with an obstacle: whether, when first, how much volume), virtual sculpting
+by sweeps alone (a continuous union along the stroke).
+
+Inspiration and prior work: Wang, Zhang et al., Implicit Swept Volume SDF (SIGGRAPH 2024, TOG; video
+https://www.youtube.com/watch?v=XbcX-jPE89U): the swept volume's signed distance as a semi-infinite program (the least
+over time of the moving shape's distance), queried implicitly, no tunnelling between samples; Sellan, Aigerman,
+Jacobson, Swept Volumes via Spacetime Numerical Continuation (2021): the sweep as a 4D object's projection, its
+boundary traced in space-time; the lifted surfacing of generalized sweep volumes (Adobe research).
+
+1. **Motion as input.** A mesh and its motion: rigid (rotation and translation), affine, or per vertex (a deforming
+   mesh). The path either given as a qaws curve or spline (qaws's own curves: exact, rational where they are), or built
+   from two poses with their first, and optionally second, derivatives, the way PN triangles build a patch from its
+   corners' positions and normals: cubic Hermite from positions and velocities, quintic from accelerations too, each
+   vertex then on a polynomial (Bezier) trajectory, so the interpolation is exact and the swept triangle is a polynomial
+   patch (barycentric in space, Bezier in time). Rotations as quaternions with rational Hermite (Cayley's rational
+   rotations) so a rigid motion stays rational and exact. API sketch: `qaws_motion` (from a curve, from two poses and
+   derivatives, evaluated with its derivatives at t), `qaws_mesh_3d_sweep` (the swept solid), `qaws_mesh_sweep_boolean`
+   (out = sweep(A, motion) op B). Check: a pose evaluated at 0 and 1 exactly the given ones, derivatives matched, a
+   Hermite path reproducing a cubic exactly.
+2. **The swept solid, conservative and certified.** Time cut adaptively until each slab's motion is within the
+   tolerance of a straight one (bounded by the trajectory's derivatives); each triangle's slab sweep enclosed (its start,
+   its end, its edges' ruled surfaces, the bulge bound); the union of the slabs' sweeps by the Booleans. The envelope's
+   characteristic curves (where the velocity runs along the surface) on each slab mark the silhouette that bounds it.
+   Check: a cube translated along a line is a box exactly; a box turned about an axis gives the annular sector's
+   volume; a ball along a Hermite curve gives a tube (pi r^2 L + 4/3 pi r^3) within the tolerance.
+3. **Exact where the motion allows.** Translations along polylines and polynomial paths with the exact kernel:
+   the sweep of a polyhedron along a segment is exact (its faces' prisms and the union), so G-code's linear moves give
+   exact carving; polynomial and rational motions exact up to the slabs' certified bound, the Booleans exact on them.
+   Check: a ball-end or flat-end tool along G-code lines in a block: the slots' volume exact (flat end) or within the
+   bound (ball end).
+4. **Continuous Booleans.** `qaws_mesh_sweep_boolean`: difference (carving: the stock less the tool's sweep, the
+   removed volume reported), union (sculpting: the stroke added), intersection (contact: the overlap's volume). Several
+   motions in sequence (a tool path) carved in one pass, the stock's mesh updated incrementally. Check: carving a block
+   by a sequence equals carving by the union of the sweeps; volumes conserved (stock = result + removed).
+5. **Continuous collision detection.** The first time of contact between a moving mesh and an obstacle: the slabs
+   tested by the BVH (item 1), the first slab that touches bisected in time to the tolerance (exactly for translations by
+   the exact kernel); the overlap's volume over the whole motion. Check: a ball falling on a plane touches at the
+   analytic time; a thin wall is not tunnelled through at any speed.
+6. **The implicit route, for comparison and sculpting.** The swept volume's signed distance as the least over time of
+   the moving shape's distance (ISV-SDF; the BVH's signed distance for the shape, a 1D minimization in t per query
+   bracketed by the slabs), contoured by the offsets' contouring (item 17 of the enrichments, adaptive blocks): smooth
+   sweeps for sculpting, a cross-check of 2 and 4. Check: the implicit and the explicit sweeps within the tolerance of
+   each other on the tube and the turned box.
+
 Ideas noted (not ordered):
 
 - Dynamic local remeshing for elastoplastic simulation (video: https://www.youtube.com/watch?v=moGZi1kim-8, likely Wicke
