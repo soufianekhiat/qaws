@@ -1116,7 +1116,7 @@ qaws_mesh_3d_deform(mesh, handles, targets, handle_count, &d);
 
 - **LSCM** (Lévy et al. 2002), as the conformal energy E_D − A (Mullen et al. 2008) with two border vertices pinned: angles kept as well as the triangles allow, free border, one solve.
 - **ARAP** (Liu et al. 2008): each triangle's map nearest a rotation, by local-global rounds from LSCM's: lengths and areas kept better, at the cost of some angle.
-- **BFF** (Sawhney and Crane 2017) is reserved (`UNSUPPORTED_OPERATION`).
+- **BFF** (boundary first flattening, Sawhney and Crane 2017) sets the border first. The scale factors u come from the curvatures: the cotangent Laplacian K u equals the angle defects inside. On the border either u = 0 (the default: its lengths kept), or with `bff_disk` its turning is set to 2π times its share of the border's length after scaling (a circle; damped rounds, as the share depends on u). The border then turns by k − (K u) with lengths e^((uᵢ+uⱼ)/2) l, closed by the least change of the lengths, and the inside is the curve's harmonic extension. A chart must be a disc (one border loop). On a sphere's cap the border keeps its lengths to 1e-4 with angles distorted 0.0445 (LSCM 0.0452); to a disc its corners lie on a circle to 0.1%. Figure 55 (key T) shows a hill by LSCM, BFF with its lengths kept and BFF to a disc.
 
 The report gives the charts, the triangles turned over, the mean corner angle error and the area distortion (the sum of |each triangle's share of the plane's area − of the mesh's|).
 
@@ -1126,7 +1126,7 @@ The report gives the charts, the triangles turned over, the mean corner angle er
 - **Flat grid:** flattened without distortion (1e-14).
 - **Sphere cap:** nothing turned over; ARAP's area distortion 0.13 against LSCM's 0.28, LSCM's angles 0.045 against ARAP's 0.082.
 - **Seams:** a closed sphere is refused, and cut from pole to pole gives one chart, nothing turned; two grids give two charts side by side.
-- **Refusals:** a seam that is not an edge; BFF.
+- **Refusals:** a seam that is not an edge.
 
 Figure 30 (key u) shows a bar bent by ARAP and by Laplacian editing, and a hill flattened by ARAP with its (u, v) grid and its layout. Figure 31 (key v) repeats the ARAP paper's own tests (its figures 2 and 6): a plate with 4 × 4 bumps held on one side and lifted on the other, and a square bar twisted a quarter turn, by ARAP, Laplacian editing and the biharmonic bend.
 

@@ -153,7 +153,7 @@ Volumes, points, smoothing (larger):
 
 Parameterization:
 
-18. **BFF** (boundary first flattening, Sawhney and Crane 2017), reserved in the enum: conformal maps with the border's lengths or angles given. Check: a disc to a disc with its angles kept; the flattened lengths prescribed.
+18. **BFF: landed** (`QAWS_PARAM_BFF`, `bff_disk`, test 166, figure 55 key T): the Yamabe scale factors, the border's curve from its new turning and lengths closed by least change, the inside harmonic; lengths kept to 1e-4 on a cap (angles below LSCM's), a disc round to 0.1%, a sphere cut pole to pole flattened. Next: prescribed border angles in general (cone points), the inside by the conjugate harmonic rather than both coordinates' harmonic extension.
 19. **Seams and chart packing.** Seams cut automatically where the distortion is high (or along features), the charts packed into the unit square. Check: every chart flat within its bound, no overlap, the fill ratio stated.
 
 Hexahedra and quads (research-scale):

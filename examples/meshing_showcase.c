@@ -99,6 +99,7 @@
  *   mesh52_offset_round.png  rounded offsets: the U moved (mitred), rounded out, rounded in
  *   mesh53_volume_cubic.png  cubic volume elements: a ball of hexahedra straight, Q2, Q3
  *   mesh54_subdivide_adaptive.png  adaptive subdivision: a cube by uniform and adaptive Loop
+ *   mesh55_bff.png     boundary first flattening: a hill to a disc, LSCM and BFF layouts
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -284,16 +285,17 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/52_offset_round.c"
 #include "meshing_showcase/53_volume_cubic.c"
 #include "meshing_showcase/54_subdivide_adaptive.c"
+#include "meshing_showcase/55_bff.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 54 are A to S) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 55 are A to T) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
 		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2, demo_decimate, demo_decimate_views, demo_remesh_attributes, demo_connect, demo_connect_more,
-		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2, demo_offset, demo_subdivide, demo_volume_improve, demo_volume_curve, demo_tetrahedra_border, demo_polycube, demo_quads_pairing, demo_quad_layout, demo_denoise, demo_points, demo_geodesic_exact, demo_butterfly, demo_decimate_attributes, demo_offset_round, demo_volume_cubic, demo_subdivide_adaptive };
-	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRS";
+		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2, demo_offset, demo_subdivide, demo_volume_improve, demo_volume_curve, demo_tetrahedra_border, demo_polycube, demo_quads_pairing, demo_quad_layout, demo_denoise, demo_points, demo_geodesic_exact, demo_butterfly, demo_decimate_attributes, demo_offset_round, demo_volume_cubic, demo_subdivide_adaptive, demo_bff };
+	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRST";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

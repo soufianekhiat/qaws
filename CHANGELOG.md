@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- BFF parameterization (`QAWS_PARAM_BFF`, Sawhney and Crane 2017): the border's lengths
+  kept, or mapped to a disc (`bff_disk`). Test 166, figure 55 (key T).
 - Contoured offsets evaluate the distance only where the level may pass (blocks
   halved from a coarse stride): the same surfaces, 22% of the evaluations at 128
   cells. The report's `evaluated`. Test 171.

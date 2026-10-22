@@ -31,8 +31,15 @@
  *   ARAP   as rigid as possible (Liu et al. 2008): each triangle's map
  *          nearest a rotation, by local-global rounds from LSCM's:
  *          lengths and areas kept better, at the cost of some angle;
- *   BFF    boundary first flattening (Sawhney, Crane 2017): reserved
- *          (UNSUPPORTED_OPERATION).
+ *   BFF    boundary first flattening (Sawhney, Crane 2017): the border
+ *          set first, the scale factors u from the curvatures (the
+ *          cotangent Laplacian K u = the angle defects inside; on the
+ *          border u = 0, its lengths kept, or with bff_disk its turning
+ *          set to 2 pi times its share of the border's length, a circle),
+ *          the border's new turning k - (K u) and lengths
+ *          e^((u_i + u_j) / 2) l closed by the least change of the lengths,
+ *          its curve integrated, the inside its harmonic extension. A chart
+ *          must be a disk (one border loop: INVALID_TOPOLOGY else).
  *
  * Polygons are fanned from their first vertex (qaws_mesh_3d_get_triangle):
  * the output is per triangle corner, in that order.
@@ -52,6 +59,7 @@ typedef struct qaws_param_desc
 {
 	qaws_param_method method;
 	unsigned int iterations;            /* ARAP's local-global rounds; 0: 10 */
+	int bff_disk;                       /* BFF: 1 the border a circle; 0 its lengths kept */
 } qaws_param_desc;
 
 typedef struct qaws_param_report
