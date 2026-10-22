@@ -57,6 +57,13 @@
  *            folds gone. The mitre is not the true offset at convex
  *            corners (farther from the input, up to |m| |d|).
  *
+ * distances (MOVE): a distance per vertex, each vertex moved along its
+ * mitre by its own; distance must still be nonzero and finite (its sign
+ * no longer matters). A varying offset is not the true offset of anything:
+ * where it changes fast the moved surface folds, which the self-union
+ * resolves. CONTOUR with distances: INVALID_ARGUMENT (shortcut: a contour of
+ * a varying offset needs a level per point of the distance field).
+ *
  * The report measures the offset surface (not the input's copy in a
  * shell): its vertices' distances to the input, smallest and largest
  * (SURFACE and SHELL: d's size; THICKEN: half of it, exactly where it is
@@ -88,6 +95,7 @@ typedef struct qaws_mesh_offset_desc
 	qaws_mesh_offset_method method;
 	qaws_scalar distance;               /* d (SHELL and THICKEN: its size) */
 	unsigned int resolution;            /* CONTOUR: cells along the result's box's longest side; 0: 64 */
+	qaws_scalar const* distances;       /* MOVE: per input vertex its own distance (signed for SURFACE, its size for SHELL and THICKEN); NULL: distance everywhere */
 } qaws_mesh_offset_desc;
 
 typedef struct qaws_mesh_offset_report

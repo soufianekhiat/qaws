@@ -12,7 +12,9 @@
  *   - a U whose slot 0.4 wide closes when moved out by 0.25: its faces
  *     crossing, resolved, closed, the slot's middle inside;
  *   - a slab 0.1 thick offset inward by 0.1: nothing left;
- *   - refusals: distance 0, an unknown kind.
+ *   - refusals: distance 0, an unknown kind;
+ *   - a distance per vertex (MOVE): the cube's top out by 0.2, its bottom by
+ *     0.1, the faces between them tilted; all alike, the uniform result.
  */
 
 #include "test_common.h"
@@ -335,6 +337,55 @@ static void test_empty(void)
 	qaws_mesh_3d_destroy(s);
 }
 
+/* a distance per vertex (MOVE): the cube's top corners out by 0.2, its bottom ones by 0.1 */
+static void test_varying(void)
+{
+	static double const lo[3] = { -0.5, -0.5, -0.5 }, hi[3] = { 0.5, 0.5, 0.5 };
+	qaws_mesh_3d *cube = ot_box(lo, hi), *o = NULL, *u = NULL, *z = NULL;
+	qaws_mesh_offset_desc d;
+	qaws_mesh_offset_report r;
+	qaws_scalar dist[8], same[8];
+	double zmin = 1e30, zmax = -1e30, v = 0;
+	unsigned int i, nv;
+	qaws_status st, s0;
+	char msg[300];
+	for (i = 0; i < 8; i++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(cube, i);
+		dist[i] = (qaws_scalar)(q.z > 0 ? 0.2 : 0.1);
+		same[i] = (qaws_scalar)0.1;
+	}
+	memset(&d, 0, sizeof d);
+	d.kind = QAWS_MESH_OFFSET_SURFACE;
+	d.method = QAWS_MESH_OFFSET_MOVE;
+	d.distance = (qaws_scalar)1;
+	d.distances = dist;
+	st = qaws_mesh_3d_offset(&o, &r, cube, &d);
+	if (o)
+	{
+		nv = qaws_mesh_3d_get_vertex_count(o);
+		for (i = 0; i < nv; i++)
+		{
+			qaws_vec3 q = qaws_mesh_3d_get_vertex(o, i);
+			zmin = fmin(zmin, (double)q.z);
+			zmax = fmax(zmax, (double)q.z);
+		}
+	}
+	d.distances = same;
+	qaws_mesh_3d_offset(&u, NULL, cube, &d);
+	if (u)
+		v = ot_volume(u);
+	d.method = QAWS_MESH_OFFSET_CONTOUR;
+	s0 = qaws_mesh_3d_offset(&z, NULL, cube, &d);
+	sprintf(msg, "a distance per vertex: the cube's top out by 0.2, its bottom by 0.1: z from %.12f to %.12f; all 0.1: volume %.12f (1.728); with CONTOUR refused (%d)",
+		zmin, zmax, v, (int)s0);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && fabs(zmin + 0.6) < 1e-12 && fabs(zmax - 0.7) < 1e-12 && fabs(v - 1.728) < 1e-9 && s0 == QAWS_STATUS_INVALID_ARGUMENT && !z, msg);
+	qaws_mesh_3d_destroy(o);
+	qaws_mesh_3d_destroy(u);
+	qaws_mesh_3d_destroy(cube);
+}
+
 int test_171_mesh_offset_main(void)
 {
 	g_pass = 0;
@@ -345,6 +396,7 @@ int test_171_mesh_offset_main(void)
 	test_thicken();
 	test_u();
 	test_empty();
+	test_varying();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

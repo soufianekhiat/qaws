@@ -361,6 +361,15 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 	d = (double)desc->distance;
 	nv = qaws_mesh_3d_get_vertex_count(mesh);
 	nt = qaws_mesh_3d_get_triangle_count(mesh);
+	if (desc->distances)
+	{
+		/* (MOVE only: a contour of a varying distance needs a level per point) */
+		if (desc->method != QAWS_MESH_OFFSET_MOVE)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		for (i = 0; i < nv; i++)
+			if (!isfinite((double)desc->distances[i]))
+				return QAWS_STATUS_INVALID_ARGUMENT;
+	}
 	memset(&f, 0, sizeof f);
 	P = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nv + 1));
 	ps = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
@@ -445,7 +454,13 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 		for (c = 0; c < copies; c++)
 			for (i = 0; i < nv; i++)
 				for (k = 0; k < 3; k++)
-					Y[3 * ((size_t)c * nv + i) + k] = P[3 * (size_t)i + k] + (c ? sgn1 : sgn0) * m[3 * (size_t)i + k];
+				{
+					/* (a distance per vertex: the copies' at its own, as the uniform ones at d) */
+					double s = c ? sgn1 : sgn0;
+					if (desc->distances)
+						s = s / (desc->kind == QAWS_MESH_OFFSET_SURFACE ? d : fabs(d)) * (desc->kind == QAWS_MESH_OFFSET_SURFACE ? (double)desc->distances[i] : fabs((double)desc->distances[i]));
+					Y[3 * ((size_t)c * nv + i) + k] = P[3 * (size_t)i + k] + s * m[3 * (size_t)i + k];
+				}
 		for (i = 0; i < 3 * copies * nv; i++) Ys[i] = (qaws_scalar)Y[i];
 		memcpy(T, t, sizeof(unsigned int) * 3 * nt);
 		for (i = 0; copies == 2 && i < nt; i++)
