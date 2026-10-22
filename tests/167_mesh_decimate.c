@@ -17,6 +17,8 @@
  *     vertices; a tight bound on the faces' turn stops earlier;
  *   - attributes in the quadric: a sheet's colour step kept where plain
  *     quadrics smear it, a linear colour exact at the vertices left;
+ *   - memoryless: the icosphere's volume kept to round-off, its deviation
+ *     near the quadrics';
  *   - refusals: no mesh, a negative error bound.
  */
 
@@ -210,6 +212,37 @@ static double dm_volume(qaws_mesh_3d const* m, double* area)
 		*area += 0.5 * sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
 	}
 	return v;
+}
+
+/* memoryless: the icosphere to 320 faces, its volume kept to round-off, its deviation near the quadrics' */
+static void test_memoryless(void)
+{
+	qaws_mesh_3d *m = dm_icosphere(3), *q = dm_icosphere(3);
+	qaws_decimate_desc d;
+	qaws_decimate_report r, rq;
+	qaws_mesh_topology top;
+	double ar = 0, v0 = dm_volume(m, &ar), v1, vq;
+	qaws_status st, sr;
+	char msg[300];
+	memset(&d, 0, sizeof d);
+	d.target_faces = 320;
+	d.flags = QAWS_DECIMATE_MEASURE | QAWS_DECIMATE_MEMORYLESS;
+	st = qaws_mesh_3d_decimate(&r, m, &d);
+	d.flags = QAWS_DECIMATE_MEASURE;
+	qaws_mesh_3d_decimate(&rq, q, &d);
+	v1 = dm_volume(m, &ar);
+	vq = dm_volume(q, &ar);
+	qaws_mesh_3d_get_topology(&top, m);
+	d.flags = QAWS_DECIMATE_MEMORYLESS;
+	d.octahedral_views = 2;
+	sr = qaws_mesh_3d_decimate(NULL, q, &d);
+	sprintf(msg, "memoryless: icosphere %u -> %u faces, closed %d, volume %.12f against %.12f (quadrics %.6f), deviation %.4f (quadrics %.4f); views refused (%d)",
+		r.faces_before, r.faces_after, top.closed, v1, v0, vq, (double)r.deviation.hausdorff[1], (double)rq.deviation.hausdorff[1], (int)sr);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && r.faces_after <= 320 && r.faces_after >= 300 && top.closed && fabs(v1 - v0) < 1e-12 * v0 &&
+		r.deviation.hausdorff[1] < 2 * rq.deviation.hausdorff[1] && sr == QAWS_STATUS_INVALID_ARGUMENT, msg);
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(q);
 }
 
 static void test_sphere(void)
@@ -698,6 +731,7 @@ int test_167_mesh_decimate_main(void)
 	g_fail = 0;
 	printf("Test 167: decimation\n");
 	test_sphere();
+	test_memoryless();
 	test_plane();
 	test_cube();
 	test_silhouette();

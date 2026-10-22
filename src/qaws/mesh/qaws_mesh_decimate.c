@@ -167,7 +167,162 @@ typedef struct dc_work
 	unsigned char* border;
 	unsigned char* locked;          /* neither removed nor moved: a locked border, an importance of 0 or less */
 	double cosmax;                  /* the cosine of the largest turn of a face a collapse may make */
+	int memless;                    /* QAWS_DECIMATE_MEMORYLESS: costs from the current faces, nothing stored */
+	double fw;                      /* the border's and features' weight */
 } dc_work;
+
+/* memoryless (Lindstrom and Turk 1998): a and b to one point x placed from the faces round them as they are now. The
+   volume under them (each face fanned, its tetrahedra to a) is linear in x: kept, one constraint. Each face moving with
+   a or b sweeps a volume n . (x - o) (n its fan triangle's cross product, o the vertex leaving): their squares summed are
+   the cost (read as a distance: over the sum of |n|^2), least under the constraint (with the border's and features'
+   planes, as now, and a hair of pull to the edge's middle for the directions nothing fixes). fixed: x is b. */
+static void dc_memless(dc_work const* w, unsigned int a, unsigned int b, int fixed, double* x, double* cost)
+{
+	qaws_hm const* m = w->m;
+	double A[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, B[3] = { 0, 0, 0 }, C = 0, g[3] = { 0, 0, 0 }, vold = 0, vconst = 0, nn = 0, mid[3], tr, eps, y[3];
+	double const* o = m->x + 3 * (size_t)a;
+	unsigned int side, c, k, j;
+	for (k = 0; k < 3; k++) mid[k] = 0.5 * (m->x[3 * (size_t)a + k] + m->x[3 * (size_t)b + k]) - o[k];
+	for (side = 0; side < 2; side++)
+	{
+		unsigned int v = side ? b : a;
+		for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
+		{
+			unsigned int f = m->cf[c], f0 = m->fc[f], fn = m->fn[f], hasa = 0, hasb = 0, q;
+			double P[64][3];
+			int mv[64];
+			for (q = 0; q < fn; q++)
+			{
+				hasa |= m->cv[f0 + q] == a;
+				hasb |= m->cv[f0 + q] == b;
+			}
+			if ((side && hasa) || fn > 64)
+				continue;   /* (a face round both: counted from a) */
+			/* the face relative to a, its moving corners marked */
+			for (q = 0; q < fn; q++)
+			{
+				unsigned int u = m->cv[f0 + q];
+				for (k = 0; k < 3; k++) P[q][k] = m->x[3 * (size_t)u + k] - o[k];
+				mv[q] = u == a || u == b;
+			}
+			/* its volume before (fan from its first corner, apex a), and after as constant + g . x */
+			for (q = 1; q + 1 < fn; q++)
+			{
+				double const *p0 = P[0], *p1 = P[q], *p2 = P[q + 1];
+				unsigned int nmv = (unsigned int)(mv[0] + mv[q] + mv[q + 1]);
+				vold += p0[0] * (p1[1] * p2[2] - p1[2] * p2[1]) - p0[1] * (p1[0] * p2[2] - p1[2] * p2[0]) + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0]);
+				if (nmv == 0)
+					vconst += p0[0] * (p1[1] * p2[2] - p1[2] * p2[1]) - p0[1] * (p1[0] * p2[2] - p1[2] * p2[0]) + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0]);
+				else if (nmv == 1)
+				{
+					/* det(x, p, q) with the others in turn: x . (p x q) */
+					double const *pp = mv[0] ? p1 : mv[q] ? p2 : p0, *qq = mv[0] ? p2 : mv[q] ? p0 : p1;
+					g[0] += pp[1] * qq[2] - pp[2] * qq[1];
+					g[1] += pp[2] * qq[0] - pp[0] * qq[2];
+					g[2] += pp[0] * qq[1] - pp[1] * qq[0];
+				}
+			}
+			/* the swept volumes: a face round one of them only, fanned from the moving corner */
+			if (hasa != hasb)
+			{
+				unsigned int s0 = 0;
+				while (!mv[s0]) s0++;
+				for (q = 1; q + 1 < fn; q++)
+				{
+					double const *ov = P[s0], *p1 = P[(s0 + q) % fn], *p2 = P[(s0 + q + 1) % fn];
+					double e1[3], e2[3], n[3], d;
+					for (k = 0; k < 3; k++) { e1[k] = p1[k] - ov[k]; e2[k] = p2[k] - ov[k]; }
+					n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+					n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+					n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+					d = n[0] * ov[0] + n[1] * ov[1] + n[2] * ov[2];
+					for (k = 0; k < 3; k++)
+					{
+						for (j = 0; j < 3; j++) A[3 * k + j] += n[k] * n[j];
+						B[k] += n[k] * d;
+					}
+					C += d * d;
+					nn += n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
+				}
+			}
+			/* the border's and features' planes, standing on their edges (weights in the same units: length^4) */
+			for (q = 0; q < fn; q++)
+			{
+				unsigned int cq = f0 + q;
+				if (!(mv[q] || mv[(q + 1) % fn]) || !(m->co[cq] == HM_NONE || (m->cflag[cq] & HM_FEATURE)))
+					continue;
+				{
+					double const *pa = P[q], *pb = P[(q + 1) % fn];
+					double u[3], fnrm[3] = { 0, 0, 0 }, s[3], l2, ls, d;
+					unsigned int r;
+					for (r = 1; r + 1 < fn; r++)
+					{
+						/* (the face's normal) */
+						double e1[3], e2[3];
+						for (k = 0; k < 3; k++) { e1[k] = P[r][k] - P[0][k]; e2[k] = P[r + 1][k] - P[0][k]; }
+						fnrm[0] += e1[1] * e2[2] - e1[2] * e2[1];
+						fnrm[1] += e1[2] * e2[0] - e1[0] * e2[2];
+						fnrm[2] += e1[0] * e2[1] - e1[1] * e2[0];
+					}
+					for (k = 0; k < 3; k++) u[k] = pb[k] - pa[k];
+					l2 = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+					s[0] = u[1] * fnrm[2] - u[2] * fnrm[1];
+					s[1] = u[2] * fnrm[0] - u[0] * fnrm[2];
+					s[2] = u[0] * fnrm[1] - u[1] * fnrm[0];
+					ls = sqrt(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]);
+					if (!(ls > 0))
+						continue;
+					for (k = 0; k < 3; k++) s[k] /= ls;
+					d = s[0] * pa[0] + s[1] * pa[1] + s[2] * pa[2];
+					for (k = 0; k < 3; k++)
+					{
+						for (j = 0; j < 3; j++) A[3 * k + j] += w->fw * l2 * l2 * s[k] * s[j];
+						B[k] += w->fw * l2 * l2 * s[k] * d;
+					}
+					C += w->fw * l2 * l2 * d * d;
+				}
+			}
+		}
+	}
+	tr = A[0] + A[4] + A[8];
+	eps = 1e-9 * (tr > 0 ? tr : 1);
+	if (fixed)
+		for (k = 0; k < 3; k++) y[k] = m->x[3 * (size_t)b + k] - o[k];
+	else
+	{
+		/* the least of x^T A x - 2 B . x + C (plus eps |x - mid|^2) with g . x = vold - vconst: the KKT system */
+		double M4[16], r4[4], gl = sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+		int ok;
+		for (k = 0; k < 3; k++)
+		{
+			for (j = 0; j < 3; j++) M4[4 * k + j] = A[3 * k + j] + (k == j ? eps : 0);
+			M4[4 * k + 3] = g[k];
+			M4[12 + k] = g[k];
+			r4[k] = B[k] + eps * mid[k];
+		}
+		M4[15] = 0;
+		r4[3] = vold - vconst;
+		ok = gl > 0 && dc_solve(M4, r4, 4);
+		if (!ok)
+		{
+			double M3[9];
+			for (k = 0; k < 9; k++) M3[k] = A[k] + (k % 4 == 0 ? eps : 0);
+			for (k = 0; k < 3; k++) r4[k] = B[k] + eps * mid[k];
+			ok = dc_solve(M3, r4, 3);
+		}
+		for (k = 0; k < 3; k++) y[k] = ok ? r4[k] : mid[k];
+	}
+	for (k = 0; k < 3; k++) x[k] = y[k] + o[k];
+	{
+		double e = C;
+		for (k = 0; k < 3; k++)
+		{
+			e -= 2 * B[k] * y[k];
+			for (j = 0; j < 3; j++) e += A[3 * k + j] * y[k] * y[j];
+		}
+		*cost = (e > 0 ? e : 0) / (nn > 0 ? nn : 1);
+	}
+}
 
 /* the attributes (scaled) least for Q at position z[0..2], into z[3..n1 - 2]; where Q gives none, a's and b's mean */
 static void dc_attributes(dc_work const* w, double const* Q, double* z, unsigned int a, unsigned int b)
@@ -201,6 +356,11 @@ static int dc_candidate(dc_work const* w, unsigned int a, unsigned int b, double
 		Q[k] = w->Q[w->K * (size_t)a + k] + w->Q[w->K * (size_t)b + k];
 	/* b stays where it is when it may not leave its place: a corner, a locked border vertex, a feature vertex the edge leaves */
 	fixed = (m->vflag[b] & HM_CORNER) || w->locked[b] || (hm_feature_degree(m, b) && !(m->cflag[c] & HM_FEATURE));
+	if (w->memless)
+	{
+		dc_memless(w, a, b, fixed, x, cost);
+		return 1;
+	}
 	memcpy(tries[nt++], m->x + 3 * (size_t)b, 3 * sizeof(double));
 	if (!fixed)
 	{
@@ -538,7 +698,8 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		report = &local;
 	memset(report, 0, sizeof *report);
 	if (!mesh || (desc && (!(desc->max_error >= 0) || !(desc->crease_angle >= 0) || !(desc->max_normal_angle >= 0) || !(desc->silhouette_weight >= 0)
-		|| !(desc->feature_weight >= 0) || !(desc->attribute_weight >= 0) || (desc->view_count && !desc->views))))
+		|| !(desc->feature_weight >= 0) || !(desc->attribute_weight >= 0) || (desc->view_count && !desc->views)
+		|| ((desc->flags & QAWS_DECIMATE_MEMORYLESS) && (desc->view_count || desc->octahedral_views || desc->attribute_weight > 0)))))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = &mesh->hm;
 	memset(&w, 0, sizeof w);
@@ -564,6 +725,8 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	}
 	w.m = m;
 	w.cosmax = desc && desc->max_normal_angle > 0 ? cos((double)desc->max_normal_angle) : 0.2;
+	w.memless = desc && (desc->flags & QAWS_DECIMATE_MEMORYLESS);
+	w.fw = desc && desc->feature_weight > 0 ? (double)desc->feature_weight : 100;
 	if (desc && desc->crease_angle > 0)
 		report->creases = dc_creases(m, (double)desc->crease_angle);
 	report->seams = dc_seams(m);
@@ -799,6 +962,28 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		{
 			failed = 1;
 			break;
+		}
+		if (w.memless)
+		{
+			/* (memoryless: the faces round b's neighbours changed too, so their edges' costs) */
+			unsigned int nr = hm_ring(m, b, ring, rcap), q, *nb2 = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nr + 1));
+			if (!nb2 || nr > rcap)
+			{
+				qaws_internal_free(nb2);
+				failed = !nb2;
+				if (failed)
+					break;
+				continue;
+			}
+			memcpy(nb2, ring, sizeof(unsigned int) * nr);
+			for (q = 0; q < nr && !failed; q++)
+			{
+				w.stamp[nb2[q]]++;
+				failed = !dc_push_edges(&w, &H, nb2[q], &ring, &rcap);
+			}
+			qaws_internal_free(nb2);
+			if (failed)
+				break;
 		}
 	}
 	hm_compact(m);

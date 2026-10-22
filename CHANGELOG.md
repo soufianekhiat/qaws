@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Memoryless decimation (`QAWS_DECIMATE_MEMORYLESS`, Lindstrom and Turk 1998): costs
+  from the current faces, the volume kept to round-off. Test 167.
 - Watertight surfaces from points without normals (`normals` NULL): estimated by
   PCA and oriented along a minimum spanning tree (Hoppe et al. 1992). Test 161,
   figure 48.

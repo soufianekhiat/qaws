@@ -64,6 +64,15 @@
  *              together where the sum is least; collapses that would
  *              smear an attribute's change cost, so its edges are kept.
  *              The error then reads in the same units.
+ * memoryless  with QAWS_DECIMATE_MEMORYLESS nothing is stored per vertex
+ *              (Lindstrom and Turk 1998): each collapse is costed from the
+ *              faces round its edge as they are. The volume under them is
+ *              kept (one linear constraint on the new point), and the point
+ *              is where the volumes the moving faces sweep, squared and
+ *              summed, are least (with the border's and features' planes):
+ *              a closed mesh keeps its volume to round-off. Views and
+ *              attribute_weight are refused with it (they live in the
+ *              stored quadrics); importance only locks.
  * Attributes follow the collapses by their rules (qaws_mesh.h). Their seams
  * stay: an inside edge whose faces' corner attributes differ at either end
  * (UVs cut apart, split normals) or whose faces' attributes differ
@@ -80,6 +89,7 @@
 #define QAWS_DECIMATE_MEASURE 2u            /* the report's deviation measured */
 #define QAWS_DECIMATE_VIEW_POINTS 4u        /* views are eye points (perspective), not directions */
 #define QAWS_DECIMATE_HEMISPHERE 8u         /* the octahedral views over the +z hemisphere only */
+#define QAWS_DECIMATE_MEMORYLESS 16u        /* costs from the current faces, nothing stored (Lindstrom and Turk 1998) */
 
 typedef struct qaws_decimate_desc
 {
