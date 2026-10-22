@@ -528,6 +528,71 @@ static void test_options(void)
 	}
 }
 
+/* a UV seam: the grid's corners' UVs cut apart along x = 1/2 (the right half's moved by 10); decimated, no face crosses it */
+static void test_seams(void)
+{
+	unsigned int n = 16, nf, nc, f, i, cross = 0, ends = 0, id;
+	qaws_mesh_3d* m = dm_grid(n);
+	unsigned int* fv;
+	qaws_scalar* uv;
+	qaws_attribute_desc ad;
+	qaws_decimate_desc d;
+	qaws_decimate_report r;
+	qaws_status st;
+	char msg[300];
+	nf = qaws_mesh_3d_get_face_count(m);
+	nc = qaws_mesh_3d_get_corner_count(m);
+	fv = (unsigned int*)malloc(sizeof(unsigned int) * nc);
+	uv = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * nc);
+	qaws_mesh_3d_get_faces(fv, NULL, m);
+	for (f = 0; f < nf; f++)
+	{
+		double cx = 0;
+		for (i = 0; i < 3; i++) cx += (double)qaws_mesh_3d_get_vertex(m, fv[3 * f + i]).x / 3;
+		for (i = 0; i < 3; i++)
+		{
+			qaws_vec3 q = qaws_mesh_3d_get_vertex(m, fv[3 * f + i]);
+			uv[2 * (3 * f + i)] = (qaws_scalar)((double)q.x + (cx > 0.5 ? 10 : 0));
+			uv[2 * (3 * f + i) + 1] = q.y;
+		}
+	}
+	memset(&ad, 0, sizeof ad);
+	ad.name = "uv";
+	ad.element = QAWS_MESH_CORNER;
+	ad.components = 2;
+	ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(&id, m, uv, &ad);
+	memset(&d, 0, sizeof d);
+	d.target_faces = 32;
+	memset(&r, 0, sizeof r);
+	st = qaws_mesh_3d_decimate(&r, m, &d);
+	nf = qaws_mesh_3d_get_face_count(m);
+	for (f = 0; f < nf; f++)
+	{
+		unsigned int t[3], left = 0, right = 0;
+		qaws_mesh_3d_get_triangle(t, m, f);
+		for (i = 0; i < 3; i++)
+		{
+			double x = (double)qaws_mesh_3d_get_vertex(m, t[i]).x;
+			left += x < 0.5 - 1e-12;
+			right += x > 0.5 + 1e-12;
+		}
+		cross += left && right;
+	}
+	for (i = 0; i < qaws_mesh_3d_get_vertex_count(m); i++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(m, i);
+		ends += fabs((double)q.x - 0.5) < 1e-12 && (q.y == 0 || q.y == 1);
+	}
+	sprintf(msg, "a UV seam across a grid: %u seam edges made features, %u -> %u faces, faces across the seam %u, its two ends kept %u",
+		r.seams, r.faces_before, r.faces_after, cross, ends);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && r.seams == n && r.faces_after <= 40 && cross == 0 && ends == 2, msg);
+	free(fv);
+	free(uv);
+	qaws_mesh_3d_destroy(m);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d* m = dm_grid(2);
@@ -549,6 +614,7 @@ int test_167_mesh_decimate_main(void)
 	test_cube();
 	test_silhouette();
 	test_options();
+	test_seams();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

@@ -243,6 +243,50 @@ static unsigned int dc_creases(qaws_hm* m, double angle)
 	return n;
 }
 
+/* the attributes' seams made features: an inside edge whose two faces' corner attributes differ at either end (UVs cut
+   apart, split normals) or whose faces' attributes differ (materials); the corners recounted; returns how many were made */
+static unsigned int dc_seams(qaws_hm* m)
+{
+	unsigned int c, v, n = 0, a;
+	for (c = 0; c < m->nc; c++)
+	{
+		unsigned int o = m->co[c], seam = 0;
+		if (m->cf[c] == HM_NONE || o == HM_NONE || o < c || (m->cflag[c] & HM_FEATURE))
+			continue;
+		for (a = 0; a < m->na && !seam; a++)
+		{
+			hm_attr const* at = &m->attr[a];
+			unsigned int k;
+			if (at->element == QAWS_MESH_CORNER)
+			{
+				/* c runs a -> b in its face, o b -> a in the other: a's values at c and next(o), b's at next(c) and o */
+				double const *p0 = hm_attr_at(m, a, c), *p1 = hm_attr_at(m, a, hm_next(m, o)), *q0 = hm_attr_at(m, a, hm_next(m, c)), *q1 = hm_attr_at(m, a, o);
+				for (k = 0; k < at->n && !seam; k++)
+					seam = fabs(p0[k] - p1[k]) > 1e-12 * (1 + fabs(p0[k])) || fabs(q0[k] - q1[k]) > 1e-12 * (1 + fabs(q0[k]));
+			}
+			else if (at->element == QAWS_MESH_FACE)
+			{
+				double const *p0 = hm_attr_at(m, a, m->cf[c]), *p1 = hm_attr_at(m, a, m->cf[o]);
+				for (k = 0; k < at->n && !seam; k++)
+					seam = fabs(p0[k] - p1[k]) > 1e-12 * (1 + fabs(p0[k]));
+			}
+		}
+		if (seam)
+		{
+			m->cflag[c] |= HM_FEATURE;
+			m->cflag[o] |= HM_FEATURE;
+			n++;
+		}
+	}
+	for (v = 0; n && v < m->nv; v++)
+	{
+		unsigned int d = (m->vflag[v] & HM_DELETED) ? 0 : hm_feature_degree(m, v);
+		if (d && d != 2)
+			m->vflag[v] |= HM_CORNER;
+	}
+	return n;
+}
+
 /* the view directions: given, and N x N on an octahedral map (cell centres; the hemisphere's map turned 45 degrees) */
 static double* dc_views(qaws_decimate_desc const* d, unsigned int* out_n)
 {
@@ -414,6 +458,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	w.cosmax = desc && desc->max_normal_angle > 0 ? cos((double)desc->max_normal_angle) : 0.2;
 	if (desc && desc->crease_angle > 0)
 		report->creases = dc_creases(m, (double)desc->crease_angle);
+	report->seams = dc_seams(m);
 	w.Q = (double*)qaws_internal_zalloc(qaws_internal_mul2(10, (size_t)m->nv + 1), sizeof(double));
 	w.W = (double*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(double));
 	w.stamp = (unsigned int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(unsigned int));

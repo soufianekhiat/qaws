@@ -1143,6 +1143,8 @@ Figure 33 (key x) shows what decimation keeps: the rippled sphere's outline from
 
 Figure 32 (key w) shows a rippled torus at 20%, 5% and 1.5% of its triangles with the certified deviation of each (0.004, 0.014, 0.062 on a torus of radius 1.4), and a fine cube down to 12 triangles with its creases kept.
 
+**Seams stay:** an inside edge whose faces' corner attributes differ at either end (UVs cut apart, split normals), or whose faces' attributes differ (materials), is made a feature before the collapses, and the report's `seams` counts these. In test 167 a grid's UVs are cut along x = 1/2; decimated from 512 to 31 faces, no face crosses the seam and its two ends stay.
+
 ## Remeshing from attributes
 
 Three tools turn a mesh's attributes into what remeshing keeps and how fine it goes.

@@ -55,7 +55,10 @@
  *              vertices are held still with QAWS_DECIMATE_LOCK_BORDER.
  *   shape      a collapse turning a face by more than max_normal_angle is
  *              refused.
- * Attributes follow the collapses by their rules (qaws_mesh.h).
+ * Attributes follow the collapses by their rules (qaws_mesh.h). Their seams
+ * stay: an inside edge whose faces' corner attributes differ at either end
+ * (UVs cut apart, split normals) or whose faces' attributes differ
+ * (materials) is made a feature first, kept as the lines are.
  *
  * It stops at the target face count, before a collapse whose error passes
  * max_error, or when no collapse is left. With QAWS_DECIMATE_MEASURE the
@@ -93,6 +96,7 @@ typedef struct qaws_decimate_report
 	unsigned int creases;               /* edges made features by crease_angle */
 	unsigned int silhouette_edges;      /* silhouette edges, summed over the views */
 	qaws_mesh_deviation deviation;      /* with QAWS_DECIMATE_MEASURE */
+	unsigned int seams;                 /* edges made features as attribute seams */
 } qaws_decimate_report;
 
 /* report may be NULL; desc NULL: half the faces */
