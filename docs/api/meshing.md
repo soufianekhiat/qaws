@@ -1567,7 +1567,7 @@ bent or twisted bar as a bent or twisted grid. Fields with singular edges
 
 `QAWS_HEXES_POLYCUBE` deforms the inside's tetrahedra into a polycube (Gregson, Sheffer, Zhang 2011) and reads its hexahedra off the integer-grid map of `FRAME_FIELD`, with the deformation's rotations as frames and the polycube's faces as patches. Each pass of the deformation:
 
-1. labels the border facets by their nearest axis, with hysteresis, and a facet unlike its agreeing neighbours takes their label;
+1. labels the border facets by an alpha-expansion graph cut (Boykov, Veksler, Zabih 2001): a facet's cost for an axis is its area times 1 − its normal's component along it (0.1 more than its old label's), a shared edge's its length times 0.2 times the mean edge between two labels (twice between the two sides of one axis);
 2. turns each facet onto its axis;
 3. spreads those turns inside, harmonically per vertex;
 4. solves the Poisson problem for positions whose gradients are the cells' turned ones.
@@ -1579,9 +1579,10 @@ There is no field to comb: a sphere becomes a cube, which `FRAME_FIELD` refuses 
 | A box turned in space (cell 0.25) | 128 hexahedra, scaled Jacobian 0.994, border vertices on the faces (2e-16) |
 | An L of three blocks, turned | 96 hexahedra, scaled Jacobian 0.979 |
 | A bent bar | valid, scaled Jacobian 0.26 (the corner), volume within 1.2% |
+| A box with a bump of 0.3 or 0.4 on its top (0.2 wide) | 128 hexahedra, scaled Jacobian 0.68 and 0.67 (nearest axes with neighbour votes: 0.36 and 0.29) |
 | A sphere (16 x 8 rings, cell 0.3) | a cube's grid: valid, scaled Jacobian 0.32; `FRAME_FIELD`: UNSUPPORTED_OPERATION |
 
-Figure 44 (key I) shows a sphere, a box rounded by semi-sharp Catmull-Clark, figure 40's ring and figure 8's bent bar as polycube hexahedra.
+Figure 44 (key I) shows a sphere, a box rounded by semi-sharp Catmull-Clark, figure 40's ring and figure 8's bent bar as polycube hexahedra; figure 57 (key V) a box with bumps of 0.3, 0.4 and 0.45. The cut keeps a bump's steep sides in the top's patch; past about half the box's height the bump is a spike that would need patches of its own, and the hexahedra there degrade.
 
 ## Boundary layers
 

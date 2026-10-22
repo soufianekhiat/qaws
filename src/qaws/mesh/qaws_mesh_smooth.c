@@ -908,3 +908,193 @@ done:
 	qaws_internal_free(par); qaws_internal_free(move); qaws_internal_free(anchored);
 	return st;
 }
+
+/* sm_label_cut's flow network: the sites, then the source and the sink; each arc and its reverse side by side */
+typedef struct sm_flow
+{
+	unsigned int *head, *to, *next, *level, *it, *queue, *stack;
+	double* cap;
+	unsigned int na, nn;
+} sm_flow;
+
+static void sm_flow_arc(sm_flow* F, unsigned int a, unsigned int b, double c, double back)
+{
+	F->to[F->na] = b; F->cap[F->na] = c; F->next[F->na] = F->head[a]; F->head[a] = F->na++;
+	F->to[F->na] = a; F->cap[F->na] = back; F->next[F->na] = F->head[b]; F->head[b] = F->na++;
+}
+
+/* the most flow from s to t (Dinic: levels by breadth, blocking flows by an explicit stack) */
+static void sm_flow_max(sm_flow* F, unsigned int s, unsigned int t)
+{
+	for (;;)
+	{
+		unsigned int qh = 0, qt = 0, i;
+		for (i = 0; i < F->nn; i++) F->level[i] = 0xFFFFFFFFu;
+		F->level[s] = 0;
+		F->queue[qt++] = s;
+		while (qh < qt)
+		{
+			unsigned int v = F->queue[qh++], e;
+			for (e = F->head[v]; e != 0xFFFFFFFFu; e = F->next[e])
+				if (F->cap[e] > 1e-12 && F->level[F->to[e]] == 0xFFFFFFFFu)
+				{
+					F->level[F->to[e]] = F->level[v] + 1;
+					F->queue[qt++] = F->to[e];
+				}
+		}
+		if (F->level[t] == 0xFFFFFFFFu)
+			return;
+		for (i = 0; i < F->nn; i++) F->it[i] = F->head[i];
+		for (;;)
+		{
+			/* a path s to t along rising levels: its arcs on the stack */
+			unsigned int sp = 0, v = s;
+			while (v != t)
+			{
+				unsigned int e = F->it[v];
+				while (e != 0xFFFFFFFFu && !(F->cap[e] > 1e-12 && F->level[F->to[e]] == F->level[v] + 1))
+					e = F->it[v] = F->next[e];
+				if (e == 0xFFFFFFFFu)
+				{
+					if (!sp)
+						break;
+					F->level[v] = 0xFFFFFFFFu;   /* (a dead end) */
+					v = F->to[F->stack[--sp] ^ 1];
+					continue;
+				}
+				F->stack[sp++] = e;
+				v = F->to[e];
+			}
+			if (v != t)
+				break;
+			{
+				double f = HUGE_VAL;
+				for (i = 0; i < sp; i++) f = fmin(f, F->cap[F->stack[i]]);
+				for (i = 0; i < sp; i++)
+				{
+					F->cap[F->stack[i]] -= f;
+					F->cap[F->stack[i] ^ 1] += f;
+				}
+			}
+		}
+	}
+}
+
+static double sm_label_energy(unsigned char const* lab, double const* data, unsigned int n, unsigned int L, unsigned int const* nbr,
+	double const* wgt, double const* V)
+{
+	double e = 0;
+	unsigned int i, k;
+	for (i = 0; i < n; i++)
+	{
+		e += data[(size_t)L * i + lab[i]];
+		for (k = 0; k < 3; k++)
+			if (nbr[3 * (size_t)i + k] != 0xFFFFFFFFu && nbr[3 * (size_t)i + k] > i)
+				e += wgt[3 * (size_t)i + k] * V[(size_t)L * lab[i] + lab[nbr[3 * (size_t)i + k]]];
+	}
+	return e;
+}
+
+int sm_label_cut(unsigned char* lab, double const* data, unsigned int n, unsigned int L, unsigned int const* nbr, double const* wgt,
+	double const* V, unsigned int rounds)
+{
+	sm_flow F;
+	size_t arcs = 2 * (5 * (size_t)n + 1);
+	double *c0 = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)n + 1)), *c1 = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)n + 1));
+	unsigned char* trial = (unsigned char*)qaws_internal_malloc((size_t)n + 1);
+	unsigned int r, a, i, k, ok = 0;
+	double best = sm_label_energy(lab, data, n, L, nbr, wgt, V);
+	memset(&F, 0, sizeof F);
+	F.nn = n + 2;
+	F.head = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * F.nn);
+	F.level = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * F.nn);
+	F.it = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * F.nn);
+	F.queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * F.nn);
+	F.stack = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * F.nn);
+	F.to = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * arcs);
+	F.next = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * arcs);
+	F.cap = (double*)qaws_internal_malloc(sizeof(double) * arcs);
+	if (!c0 || !c1 || !trial || !F.head || !F.level || !F.it || !F.queue || !F.stack || !F.to || !F.next || !F.cap)
+		goto done;
+	for (r = 0; r < rounds; r++)
+	{
+		int better = 0;
+		for (a = 0; a < L; a++)
+		{
+			double e;
+			/* x_i = 1: site i takes a. The source side keeps its label (cut s -> i: the cost of 1), the sink side takes a (cut
+			   i -> t: the cost of 0); a pair E(x_i, x_j) = A + (C - A) x_i - C x_j + (B + C - A) (1 - x_i) x_j */
+			for (i = 0; i < n; i++)
+			{
+				c0[i] = data[(size_t)L * i + lab[i]];
+				c1[i] = data[(size_t)L * i + a];
+				F.head[i] = 0xFFFFFFFFu;
+			}
+			F.head[n] = F.head[n + 1] = 0xFFFFFFFFu;
+			F.na = 0;
+			for (i = 0; i < n; i++)
+				for (k = 0; k < 3; k++)
+				{
+					unsigned int j = nbr[3 * (size_t)i + k];
+					double w = wgt[3 * (size_t)i + k], A, B, C;
+					if (j == 0xFFFFFFFFu || j < i)
+						continue;
+					A = w * V[(size_t)L * lab[i] + lab[j]];
+					B = w * V[(size_t)L * lab[i] + a];
+					C = w * V[(size_t)L * a + lab[j]];
+					if (C > A)
+						c1[i] += C - A;
+					else
+						c0[i] += A - C;
+					c0[j] += C;
+					if (B + C - A > 0)
+						sm_flow_arc(&F, i, j, B + C - A, 0);
+				}
+			for (i = 0; i < n; i++)
+			{
+				double m = fmin(c0[i], c1[i]);
+				if (lab[i] == a)
+					continue;   /* (it has a already: either side the same) */
+				if (c1[i] - m > 0)
+					sm_flow_arc(&F, n, i, c1[i] - m, 0);
+				if (c0[i] - m > 0)
+					sm_flow_arc(&F, i, n + 1, c0[i] - m, 0);
+			}
+			sm_flow_max(&F, n, n + 1);
+			/* the source's side: reachable from it in the residual network; the rest takes a */
+			{
+				unsigned int qh = 0, qt = 0;
+				for (i = 0; i < F.nn; i++) F.level[i] = 0;
+				F.level[n] = 1;
+				F.queue[qt++] = n;
+				while (qh < qt)
+				{
+					unsigned int v = F.queue[qh++], g;
+					for (g = F.head[v]; g != 0xFFFFFFFFu; g = F.next[g])
+						if (F.cap[g] > 1e-12 && !F.level[F.to[g]])
+						{
+							F.level[F.to[g]] = 1;
+							F.queue[qt++] = F.to[g];
+						}
+				}
+			}
+			for (i = 0; i < n; i++)
+				trial[i] = F.level[i] ? lab[i] : (unsigned char)a;
+			e = sm_label_energy(trial, data, n, L, nbr, wgt, V);
+			if (e < best - 1e-12 * fabs(best))
+			{
+				best = e;
+				memcpy(lab, trial, n);
+				better = 1;
+			}
+		}
+		if (!better)
+			break;
+	}
+	ok = 1;
+done:
+	qaws_internal_free(c0); qaws_internal_free(c1); qaws_internal_free(trial);
+	qaws_internal_free(F.head); qaws_internal_free(F.level); qaws_internal_free(F.it); qaws_internal_free(F.queue); qaws_internal_free(F.stack);
+	qaws_internal_free(F.to); qaws_internal_free(F.next); qaws_internal_free(F.cap);
+	return (int)ok;
+}

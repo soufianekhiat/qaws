@@ -908,10 +908,11 @@ static void hx_polar(double const* J, double* R)
 }
 
 #define HX_POLY_PASSES 40u
+#define HX_POLY_SMOOTH 0.2
 
 /* A polycube's frames (Gregson, Sheffer, Zhang 2011): the tetrahedra deformed until every border facet's normal lies on an
-   axis. Each pass labels the facets by their nearest axis (the old label kept unless another is clearly nearer; a facet
-   unlike its neighbours that agree takes theirs), turns each facet's normal onto its axis, spreads the turns inside
+   axis. Each pass labels the facets by a graph cut (their normals against the axes, the old label favoured, the labels'
+   borders short), turns each facet's normal onto its axis, spreads the turns inside
    (harmonic per vertex), and solves for the positions whose gradients are the cells' turned ones (one vertex pinned).
    R: the final gradients (rows: the polycube's axes, 9 per cell); flab: per facet slot 4 c + f its axis and side
    (2 k + positive), 0xFF inside. */
@@ -920,8 +921,9 @@ static qaws_status hx_polycube_frames(qaws_volume_mesh const* t, double* R, unsi
 	hx_mat K;
 	hx_pmap em;
 	unsigned int *bf = NULL, *nbr = NULL, nb = 0, c, f, i, k, pass, q;
-	double *Y = NULL, *W = NULL, *b = NULL, *y = NULL, *nrm = NULL, *area = NULL, *rv = NULL, (*G)[4][3] = NULL, *vol = NULL;
-	unsigned char *fixed = NULL, *pin = NULL;
+	double *Y = NULL, *W = NULL, *b = NULL, *y = NULL, *nrm = NULL, *area = NULL, *rv = NULL, (*G)[4][3] = NULL, *vol = NULL, *cost = NULL, *ew = NULL;
+	double vpair[36];
+	unsigned char *fixed = NULL, *pin = NULL, *lab = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(&K, 0, sizeof K);
 	memset(&em, 0, sizeof em);
@@ -941,8 +943,13 @@ static qaws_status hx_polycube_frames(qaws_volume_mesh const* t, double* R, unsi
 	vol = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)t->nc + 1));
 	fixed = (unsigned char*)qaws_internal_scratch_zalloc((size_t)t->nv + 1, 1);
 	pin = (unsigned char*)qaws_internal_scratch_zalloc((size_t)t->nv + 1, 1);
-	if (!bf || !nbr || !Y || !W || !b || !y || !nrm || !area || !rv || !G || !vol || !fixed || !pin)
+	cost = (double*)qaws_internal_scratch_malloc(sizeof(double) * (24 * (size_t)t->nc + 1));
+	ew = (double*)qaws_internal_scratch_malloc(sizeof(double) * (12 * (size_t)t->nc + 1));
+	lab = (unsigned char*)qaws_internal_scratch_malloc(4 * (size_t)t->nc + 1);
+	if (!bf || !nbr || !Y || !W || !b || !y || !nrm || !area || !rv || !G || !vol || !fixed || !pin || !cost || !ew || !lab)
 		goto done;
+	for (i = 0; i < 36; i++)
+		vpair[i] = i / 6 == i % 6 ? 0 : i / 12 == (i % 6) / 2 ? 2 : 1;
 	memcpy(Y, t->x, sizeof(double) * 3 * t->nv);
 	for (c = 0; c < t->nc; c++) vol[c] = hx_grads(t, c, G[c]);
 	pin[t->cv[0]] = 1;
@@ -995,37 +1002,45 @@ static qaws_status hx_polycube_frames(qaws_volume_mesh const* t, double* R, unsi
 			area[i] = 0.5 * l;
 			for (k = 0; k < 3; k++) nrm[3 * (size_t)i + k] = l > 0 ? N[k] / l : 0;
 		}
-		/* the labels: the nearest axis, the old one kept unless another is nearer by 0.1 */
-		for (i = 0; i < nb; i++)
+		/* the labels by a graph cut (sm_label_cut): a facet's cost for an axis its area times 1 - its normal's component along it
+		   (0.1 more than its old label's), a shared edge's its length times HX_POLY_SMOOTH times the mean edge between two labels
+		   (twice between the two sides of one axis) */
 		{
-			double const* n = nrm + 3 * (size_t)i;
-			unsigned int best = 0, old = flab[bf[i]];
-			double dmax = -1;
-			for (k = 0; k < 3; k++)
-				if (fabs(n[k]) > dmax)
-				{
-					dmax = fabs(n[k]);
-					best = 2 * k + (n[k] > 0);
-				}
-			if (old != 0xFF && (n[old / 2] > 0) == (old % 2 == 1) && fabs(n[old / 2]) > dmax - 0.1)
-				best = old;
-			flab[bf[i]] = (unsigned char)best;
-		}
-		/* a facet whose neighbours agree on another label takes theirs */
-		for (q = 0; q < 2; q++)
+			double le = 0;
+			unsigned int ne = 0;
 			for (i = 0; i < nb; i++)
 			{
-				unsigned int a = nbr[3 * i], bb = nbr[3 * i + 1], e = nbr[3 * i + 2], la, lb, le, mine = flab[bf[i]];
-				if (a == HM_NONE || bb == HM_NONE || e == HM_NONE)
-					continue;
-				la = flab[bf[a]];
-				lb = flab[bf[bb]];
-				le = flab[bf[e]];
-				if (la != mine && lb != mine && le != mine)
-					flab[bf[i]] = (unsigned char)(la == lb || la == le ? la : lb == le ? lb : mine);
-				else if ((la == lb && la != mine && le != mine) || (la == le && la != mine && lb != mine) || (lb == le && lb != mine && la != mine))
-					flab[bf[i]] = (unsigned char)(la == lb || la == le ? la : lb);
+				unsigned int n3, e2;
+				unsigned char const* loc = vm_facet(QAWS_CELL_TETRAHEDRON, bf[i] % 4, &n3);
+				for (e2 = 0; e2 < 3; e2++)
+				{
+					double const *pa = Y + 3 * (size_t)t->cv[t->c0[bf[i] / 4] + loc[e2]], *pb = Y + 3 * (size_t)t->cv[t->c0[bf[i] / 4] + loc[(e2 + 1) % 3]];
+					ew[3 * (size_t)i + e2] = sqrt((pb[0] - pa[0]) * (pb[0] - pa[0]) + (pb[1] - pa[1]) * (pb[1] - pa[1]) + (pb[2] - pa[2]) * (pb[2] - pa[2]));
+					le += ew[3 * (size_t)i + e2];
+					ne++;
+				}
 			}
+			le = ne ? le / ne : 0;
+			for (i = 0; i < 3 * nb; i++) ew[i] *= HX_POLY_SMOOTH * le;
+			for (i = 0; i < nb; i++)
+			{
+				double const* n = nrm + 3 * (size_t)i;
+				unsigned int best = 0, old = flab[bf[i]];
+				double dmax = -1;
+				for (k = 0; k < 3; k++)
+					if (fabs(n[k]) > dmax)
+					{
+						dmax = fabs(n[k]);
+						best = 2 * k + (n[k] > 0);
+					}
+				for (k = 0; k < 6; k++)
+					cost[6 * (size_t)i + k] = area[i] * (1 - (k % 2 ? n[k / 2] : -n[k / 2]) + (old != 0xFF && k != old ? 0.1 : 0));
+				lab[i] = (unsigned char)(old != 0xFF ? old : best);
+			}
+			if (!sm_label_cut(lab, cost, nb, 6, nbr, ew, vpair, 4))
+				goto done;
+			for (i = 0; i < nb; i++) flab[bf[i]] = lab[i];
+		}
 		/* each facet's turn onto its axis; spread to the vertices (area-weighted at the border, harmonic inside) */
 		memset(W, 0, sizeof(double) * 3 * t->nv);
 		memset(y, 0, sizeof(double) * t->nv);
@@ -1120,7 +1135,7 @@ done:
 	qaws_internal_free(em.key); qaws_internal_free(em.val);
 	qaws_internal_free(bf); qaws_internal_free(nbr); qaws_internal_free(Y); qaws_internal_free(W); qaws_internal_free(b); qaws_internal_free(y);
 	qaws_internal_free(nrm); qaws_internal_free(area); qaws_internal_free(rv); qaws_internal_free(G); qaws_internal_free(vol);
-	qaws_internal_free(fixed); qaws_internal_free(pin);
+	qaws_internal_free(fixed); qaws_internal_free(pin); qaws_internal_free(cost); qaws_internal_free(ew); qaws_internal_free(lab);
 	return st;
 }
 

@@ -9,6 +9,8 @@
  *   - a bent bar: its inner and outer faces labelled by their nearest axes,
  *     so its polycube turns a corner at 45 degrees (a polycube's limit: the
  *     hexahedra there are poorer), the grid following it;
+ *   - a box with a bump on its top: the labels by a graph cut keep the bump's
+ *     steep sides in the top's patch, the hexahedra near cubes;
  *   - a sphere: deformed into a cube (its field's singular edges are why
  *     FRAME_FIELD refuses it), filled, valid, its volume near the ball's.
  */
@@ -113,6 +115,18 @@ static void pc_bent(double const* p, double* x)
 	x[2] = p[2];
 }
 
+/* 2 x 1 x 1, a bump of height g_pc_amp on its top (a Gaussian, 0.2 wide) */
+static double g_pc_amp = 0.3;
+static void pc_bump(double const* p, double* x)
+{
+	unsigned int k;
+	double const s[3] = { 2, 1, 1 };
+	for (k = 0; k < 3; k++)
+		x[k] = s[k] * p[k];
+	if (p[2] > 0.999)
+		x[2] += g_pc_amp * exp(-((x[0] - 0.7) * (x[0] - 0.7) + (x[1] - 0.5) * (x[1] - 0.5)) / 0.04);
+}
+
 /* a unit sphere: rings between single poles */
 static qaws_mesh_3d* pc_sphere(unsigned int nu, unsigned int nv)
 {
@@ -203,6 +217,28 @@ static void test_boxes(void)
 	qaws_mesh_3d_destroy(bent);
 }
 
+/* a box with a bump on its top: the bump's steep sides kept in the top's label by the graph cut (nearest axes cut them off
+   as small patches: scaled Jacobians 0.36 and 0.29), the hexahedra near cubes */
+static void test_bump(void)
+{
+	static unsigned int const n[3] = { 24, 12, 6 };
+	char msg[300];
+	unsigned int k;
+	for (k = 0; k < 2; k++)
+	{
+		qaws_mesh_3d* m;
+		pc_out a;
+		g_pc_amp = 0.3 + 0.1 * k;
+		m = pc_block(n, pc_all, pc_bump);
+		a = pc_run(m, QAWS_HEXES_POLYCUBE, 0.25);
+		sprintf(msg, "a box with a bump of %.1f: %s, %u hexahedra, scaled Jacobian from %.3f, volume %.4f, valid %d", g_pc_amp,
+			qaws_status_to_string(a.st), a.q.hexahedra, (double)a.q.min_scaled_jacobian, (double)a.q.volume, a.valid);
+		printf("  %s\n", msg);
+		TEST_ASSERT(a.st == QAWS_STATUS_OK && a.q.hexahedra == 128 && a.q.min_scaled_jacobian > 0.6 && a.valid, msg);
+		qaws_mesh_3d_destroy(m);
+	}
+}
+
 static void test_sphere(void)
 {
 	qaws_mesh_3d* s = pc_sphere(16, 8);
@@ -223,6 +259,7 @@ int test_176_hexahedra_polycube_main(void)
 	printf("Test 176: hexahedra of a polycube map\n");
 	test_boxes();
 	test_sphere();
+	test_bump();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

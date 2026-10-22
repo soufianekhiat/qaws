@@ -1642,6 +1642,7 @@
 #define sf_create_scaled QAWS_SFX(sf_create_scaled)
 #define sf_eval QAWS_SFX(sf_eval)
 #define sm_csr_free QAWS_SFX(sm_csr_free)
+#define sm_label_cut QAWS_SFX(sm_label_cut)
 #define sm_laplacian QAWS_SFX(sm_laplacian)
 #define sm_mul QAWS_SFX(sm_mul)
 #define sm_system_factor QAWS_SFX(sm_system_factor)

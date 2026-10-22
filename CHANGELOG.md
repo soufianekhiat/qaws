@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Polycube labels by an alpha-expansion graph cut (normals against the axes, short label
+  borders): a box with a bump hexahedralized at scaled Jacobian 0.68 (0.36 before).
+  Test 176, figure 57 (key V).
 - Parameterization atlases: `auto_seams` cuts charts by the axis direction nearest each
   normal (borders smoothed), `max_stretch` splits charts that stretch too much, `pack` turns
   and packs them into the unit square (shelves, one scale; `fill` reported).

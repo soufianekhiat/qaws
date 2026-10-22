@@ -247,6 +247,12 @@ qaws_status sm_system_factor(sm_system* S, sm_csr const* A, double const* xyz, u
 /* x (dim per row of A) solved on the moving rows from rhs, the held rows' x read; its own workspace */
 qaws_status sm_system_solve(sm_system const* S, double* x, double const* rhs, unsigned int dim);
 void sm_system_free(sm_system* S);
+/* labels by alpha-expansion graph cuts (Boykov, Veksler, Zabih 2001): n sites, L labels (at most 255); data: L costs per site;
+   nbr: 3 neighbours per site (0xFFFFFFFF: none; symmetric), wgt: those pairs' weights; a pair's cost its weight times V[a L + b]
+   (a metric: V[a L + a] = 0, the triangle inequality). lab: the start in, the labels out; cycles over the labels until none
+   lowers the energy (rounds at most). 0 on allocation failure */
+int sm_label_cut(unsigned char* lab, double const* data, unsigned int n, unsigned int L, unsigned int const* nbr, double const* wgt,
+	double const* V, unsigned int rounds);
 
 /* the symmetric 3 x 3 A (row major) diagonalized in place by Jacobi rotations, its eigenvectors the columns of V (qaws_mesh_watertight.c) */
 void wt_sym_eigen3(double* A, double* V);
