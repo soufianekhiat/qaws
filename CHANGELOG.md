@@ -59,6 +59,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Exact geodesics in bounded memory: processed windows' slots reused (59 MB at
+  100k vertices, was 460 MB at 20k); times measured to 100k vertices.
 - Exact geodesic distances anywhere (`qaws_mesh_3d_geodesic_exact_at`): at
   locations inside the triangles, from the windows kept. Test 164.
 - Nearest sources (`qaws_mesh_3d_geodesic_nearest`): each vertex's nearest

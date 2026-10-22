@@ -44,6 +44,8 @@ typedef struct gx_ctx
 	gx_win* w;
 	unsigned int nw, capw;
 	unsigned int *heap, nh, caph;
+	unsigned int *spare, nspare, capspare; /* the windows' slots free again (when not kept) */
+	int keep;                /* 1: every window made kept in w (for distances inside the triangles) */
 } gx_ctx;
 
 static double gx_len(double const* a, double const* b)
@@ -83,7 +85,7 @@ static int gx_heap_less(gx_ctx const* c, unsigned int a, unsigned int b)
 static int gx_push(gx_ctx* c, gx_win const* w)
 {
 	unsigned int i;
-	if (c->nw == c->capw)
+	if (!c->nspare && c->nw == c->capw)
 	{
 		unsigned int cap = c->capw ? 2 * c->capw : 1024;
 		gx_win* g = (gx_win*)qaws_internal_realloc(c->w, sizeof(gx_win) * (size_t)cap);
@@ -101,9 +103,12 @@ static int gx_push(gx_ctx* c, gx_win const* w)
 		c->heap = g;
 		c->caph = cap;
 	}
-	c->w[c->nw] = *w;
 	i = c->nh++;
-	c->heap[i] = c->nw++;
+	if (c->nspare)
+		c->heap[i] = c->spare[--c->nspare];
+	else
+		c->heap[i] = c->nw++;
+	c->w[c->heap[i]] = *w;
 	while (i > 0 && gx_heap_less(c, c->heap[i], c->heap[(i - 1) / 2]))
 	{
 		unsigned int p = (i - 1) / 2, s = c->heap[i];
@@ -296,18 +301,20 @@ static void gx_release(gx_ctx* c)
 {
 	qaws_internal_free(c->x); qaws_internal_free(c->t); qaws_internal_free(c->adj); qaws_internal_free(c->v0); qaws_internal_free(c->vc);
 	qaws_internal_free(c->saddle); qaws_internal_free(c->d); qaws_internal_free(c->split_d); qaws_internal_free(c->split_t); qaws_internal_free(c->w); qaws_internal_free(c->heap);
+	qaws_internal_free(c->spare);
 	memset(c, 0, sizeof *c);
 }
 
 /* the windows from the sources, cheapest first, until the cheapest left lies beyond R: c's distances and every window made
    kept for the caller, who releases c (gx_release) whatever the status */
-static qaws_status gx_solve(gx_ctx* c, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources, unsigned int source_count, double R)
+static qaws_status gx_solve(gx_ctx* c, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources, unsigned int source_count, double R, int keep)
 {
 	qaws_scalar* p = NULL;
 	double* ang = NULL;
 	unsigned int i, k, s;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(c, 0, sizeof *c);
+	c->keep = keep;
 	c->nv = qaws_mesh_3d_get_vertex_count(mesh);
 	c->nt = qaws_mesh_3d_get_triangle_count(mesh);
 	for (s = 0; s < source_count; s++)
@@ -417,7 +424,22 @@ static qaws_status gx_solve(gx_ctx* c, qaws_mesh_3d const* mesh, qaws_mesh_locat
 	}
 	while (c->nh)
 	{
-		gx_win w = c->w[gx_pop(c)];
+		unsigned int top = gx_pop(c);
+		gx_win w = c->w[top];
+		if (!c->keep)
+		{
+			/* (its slot free for the windows it makes: the store bounded by the queue, not by every window made) */
+			if (c->nspare == c->capspare)
+			{
+				unsigned int cap = c->capspare ? 2 * c->capspare : 1024;
+				unsigned int* g = (unsigned int*)qaws_internal_realloc(c->spare, sizeof(unsigned int) * (size_t)cap);
+				if (!g)
+					goto done;
+				c->spare = g;
+				c->capspare = cap;
+			}
+			c->spare[c->nspare++] = top;
+		}
 		if (w.key > R)
 			break;   /* (every window left is farther: the distances within R are settled) */
 		if (w.f == GX_NONE ? w.sigma == c->d[w.k] && !gx_expand(c, w.k, w.sigma) : !gx_propagate(c, &w))
@@ -439,7 +461,7 @@ qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d
 	double R = (double)max_distance;
 	if (!out_distances || !mesh || (source_count && !sources) || !(R >= 0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = gx_solve(&c, mesh, sources, source_count, R);
+	st = gx_solve(&c, mesh, sources, source_count, R, 0);
 	for (i = 0; st == QAWS_STATUS_OK && i < c.nv; i++) out_distances[i] = (qaws_scalar)(c.d[i] <= R ? c.d[i] : HUGE_VAL);
 	gx_release(&c);
 	return st;
@@ -453,7 +475,7 @@ qaws_status qaws_mesh_3d_geodesic_exact_at(qaws_scalar* out_distances, qaws_mesh
 	qaws_status st;
 	if (!out_distances || !mesh || (source_count && !sources) || (point_count && !points))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = gx_solve(&c, mesh, sources, source_count, HUGE_VAL);
+	st = gx_solve(&c, mesh, sources, source_count, HUGE_VAL, 1);
 	for (q = 0; st == QAWS_STATUS_OK && q < point_count; q++)
 		if (points[q].patch >= c.nt || !isfinite((double)points[q].a) || !isfinite((double)points[q].b))
 			st = QAWS_STATUS_INVALID_ARGUMENT;
