@@ -197,6 +197,10 @@ Larger:
    for 12 and more distortion; the median plane stays.
 5. **BFF, further:** prescribed border angles (cone points), the inside by the conjugate harmonic. Check: a square
    chart from a disc with four corners, angles kept.
+   Done (2026-10-22): `bff_turning` per vertex, the rest of 2 pi spread by length (the disc's rounds): the cap to a
+   square, corners and sides exact to 1e-14, none turned (an ear with three corners on a side goes flat). Tried and
+   dropped: v the conjugate harmonic of u (least E_D - A, u held): the cap's angles 0.0447 for 0.0445 and the border's
+   lengths off by 0.4%; the harmonic extension stays. Interior cones (cut to them) not done.
 6. **Weights per edge on every skeleton** (asked 2026-10-22). Today `qaws_skeleton` weighs its lines only
    (`weight_fn`); arcs and the circles opened at reflex vertices move at speed 1, so the medial axis mode (splice angle
    pi) is unweighted; the surface regions' `qaws_surface_region_medial_axis` and `qaws_surface_region_mitered_skeleton`

@@ -402,6 +402,71 @@ static void test_bff(void)
 	printf("  %s\n", msg);
 	TEST_ASSERT(s0 == QAWS_STATUS_OK && s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && rg.angle_distortion < 1e-9 && lmin > 0.98 && lmax < 1.02 &&
 		rl.flipped == 0 && rd.flipped == 0 && rl.angle_distortion < 2 * rs.angle_distortion && cmax < 1.02 * cmin, msg);
+	/* to a square: the four border vertices nearest the disc's diagonals turned by pi / 2, the rest straight; every vertex's
+	   angle in the plane: pi / 2 at the corners, pi along the sides; none turned (but a triangle with its three corners on
+	   one side, flat) */
+	{
+		unsigned int nv = qaws_mesh_3d_get_vertex_count(cap), nt = qaws_mesh_3d_get_triangle_count(cap), i, q, corner[4];
+		qaws_scalar* turn = (qaws_scalar*)calloc(nv, sizeof(qaws_scalar));
+		double *pos = (double*)calloc(2 * (size_t)nv, sizeof(double)), *sum = (double*)calloc(nv, sizeof(double)), best[4] = { 0, 0, 0, 0 };
+		double ec = 0, es = 0, mx = 0, my = 0;
+		unsigned int turned = 0;
+		qaws_param_report rq;
+		qaws_status s3;
+		for (i = 0; i < nt; i++)
+		{
+			unsigned int t[3];
+			qaws_mesh_3d_get_triangle(t, cap, i);
+			for (q = 0; q < 3; q++)
+			{
+				pos[2 * (size_t)t[q]] = uc[6 * (size_t)i + 2 * q];
+				pos[2 * (size_t)t[q] + 1] = uc[6 * (size_t)i + 2 * q + 1];
+			}
+		}
+		for (i = 0; i < nv; i++)
+		{
+			mx += pos[2 * (size_t)i] / nv;
+			my += pos[2 * (size_t)i + 1] / nv;
+		}
+		for (i = 0; i < nv; i++)
+			for (q = 0; q < 4; q++)
+			{
+				double cx = q == 0 || q == 3 ? 1 : -1, cy = q < 2 ? 1 : -1, dg = (pos[2 * (size_t)i] - mx) * cx + (pos[2 * (size_t)i + 1] - my) * cy;
+				if (dg > best[q])
+				{
+					best[q] = dg;
+					corner[q] = i;
+				}
+			}
+		for (q = 0; q < 4; q++)
+			turn[corner[q]] = (qaws_scalar)(3.14159265358979323846 / 2);
+		d.bff_disk = 0;
+		d.bff_turning = turn;
+		s3 = qaws_mesh_3d_parameterize(uc, &rq, cap, NULL, 0, &d);
+		for (i = 0; i < nt; i++)
+		{
+			unsigned int t[3];
+			qaws_mesh_3d_get_triangle(t, cap, i);
+			turned += ((double)uc[6 * i + 2] - uc[6 * i]) * ((double)uc[6 * i + 5] - uc[6 * i + 1]) - ((double)uc[6 * i + 4] - uc[6 * i]) * ((double)uc[6 * i + 3] - uc[6 * i + 1]) < -1e-12;
+			for (q = 0; q < 3; q++)
+			{
+				qaws_scalar const *o = uc + 6 * i + 2 * q, *a = uc + 6 * i + 2 * ((q + 1) % 3), *b = uc + 6 * i + 2 * ((q + 2) % 3);
+				double ux = (double)a[0] - o[0], uy = (double)a[1] - o[1], wx = (double)b[0] - o[0], wy = (double)b[1] - o[1];
+				sum[t[q]] += atan2(fabs(ux * wy - uy * wx), ux * wx + uy * wy);
+			}
+		}
+		for (i = 0; i < nv; i++)
+			if (turn[i] > 0)
+				ec = fmax(ec, fabs(sum[i] - 3.14159265358979323846 / 2));
+			else if (sum[i] < 1.5 * 3.14159265358979323846)
+				es = fmax(es, fabs(sum[i] - 3.14159265358979323846));
+		sprintf(msg, "BFF to a square: corners' angles off by %.1e, the sides' by %.1e, %u turned (%u flat), angles %.4f", ec, es, turned, rq.flipped - turned, (double)rq.angle_distortion);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s3 == QAWS_STATUS_OK && turned == 0 && ec < 1e-6 && es < 1e-6, msg);
+		free(turn);
+		free(pos);
+		free(sum);
+	}
 	qaws_mesh_3d_destroy(g);
 	qaws_mesh_3d_destroy(cap);
 	free(ug);

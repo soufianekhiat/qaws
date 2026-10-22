@@ -144,7 +144,8 @@ static double pm_angle(double const* o, double const* p, double const* q, unsign
    the lengths (weighted by them), its curve integrated; the inside its harmonic extension. Into uv (2 per wedge).
    INVALID_TOPOLOGY for a chart without exactly one border loop. */
 static qaws_status pm_bff(double* uv, double const* xw, unsigned int W, unsigned int const* wedge, unsigned int nt,
-	unsigned char const* bord, unsigned int const* chart, unsigned int C, sm_csr const* K, unsigned int const* pin, int disk)
+	unsigned char const* bord, unsigned int const* chart, unsigned int C, sm_csr const* K, unsigned int const* pin, int disk,
+	unsigned int const* cv, qaws_scalar const* turn)
 {
 	unsigned int n = 3 * nt, i, j, k, *nx = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)W + 1));
 	unsigned int *wch = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)W + 1)), *loops = (unsigned int*)qaws_internal_zalloc((size_t)C + 1, sizeof(unsigned int));
@@ -153,11 +154,13 @@ static qaws_status pm_bff(double* uv, double const* xw, unsigned int W, unsigned
 	double *blen = (double*)qaws_internal_zalloc((size_t)W + 1, sizeof(double)), *ltot = (double*)qaws_internal_zalloc((size_t)C + 1, sizeof(double));
 	unsigned char *isb = (unsigned char*)qaws_internal_zalloc((size_t)W + 1, 1), *move = (unsigned char*)qaws_internal_malloc((size_t)W + 1);
 	unsigned char* seen = (unsigned char*)qaws_internal_zalloc((size_t)W + 1, 1);
+	double *bt = (double*)qaws_internal_zalloc((size_t)W + 1, sizeof(double)), *bsum = (double*)qaws_internal_zalloc((size_t)C + 1, sizeof(double));
 	sm_system S;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(&S, 0, sizeof S);
-	if (!nx || !wch || !loops || !ang || !u || !rhs || !ku || !blen || !ltot || !isb || !move || !seen)
+	if (!nx || !wch || !loops || !ang || !u || !rhs || !ku || !blen || !ltot || !isb || !move || !seen || !bt || !bsum)
 		goto done;
+	disk = disk || turn;
 	for (i = 0; i < W; i++) nx[i] = PM_NONE;
 	/* the corners' angles summed per wedge; the border's loops (next wedge along each, interior on its left) */
 	for (i = 0; i < n; i++)
@@ -177,6 +180,11 @@ static qaws_status pm_bff(double* uv, double const* xw, unsigned int W, unsigned
 			}
 			nx[w0] = w1;
 			isb[w0] = isb[w1] = 1;
+			if (turn)
+			{
+				bt[w0] = (double)turn[cv[i]];   /* (the prescribed turning, once per border wedge) */
+				bsum[chart[i / 3]] += bt[w0];
+			}
 			blen[w0] += 0.5 * l;
 			blen[w1] += 0.5 * l;
 			ltot[chart[i / 3]] += l;
@@ -202,11 +210,12 @@ static qaws_status pm_bff(double* uv, double const* xw, unsigned int W, unsigned
 				goto done;
 			}
 		}
-	/* the scale factors: K u = the angle defects inside; on the border u = 0 (lengths) or K u = k - the target turning (disk) */
+	/* the scale factors: K u = the angle defects inside; on the border u = 0 (lengths) or K u = k - the target turning (disk:
+	   the prescribed turning, what it leaves of 2 pi spread by the border's length) */
 	for (i = 0; i < W; i++)
 	{
 		move[i] = !isb[i] || disk;
-		rhs[i] = isb[i] ? (disk ? (3.14159265358979323846 - ang[i]) - 6.283185307179586 * blen[i] / ltot[wch[i]] : 0) : 6.283185307179586 - ang[i];
+		rhs[i] = isb[i] ? (disk ? (3.14159265358979323846 - ang[i]) - bt[i] - (6.283185307179586 - bsum[wch[i]]) * blen[i] / ltot[wch[i]] : 0) : 6.283185307179586 - ang[i];
 	}
 	for (i = 0; disk && i < C; i++) move[pin[i]] = 0;
 	st = sm_system_factor(&S, K, xw, move);
@@ -230,7 +239,7 @@ static qaws_status pm_bff(double* uv, double const* xw, unsigned int W, unsigned
 			}
 		for (i = 0; i < W; i++)
 			if (isb[i])
-				rhs[i] = 0.5 * rhs[i] + 0.5 * ((3.14159265358979323846 - ang[i]) - 6.283185307179586 * blen[i] / ltot[wch[i]]);
+				rhs[i] = 0.5 * rhs[i] + 0.5 * ((3.14159265358979323846 - ang[i]) - bt[i] - (6.283185307179586 - bsum[wch[i]]) * blen[i] / ltot[wch[i]]);
 		for (i = 0; i < C; i++) u[pin[i]] = 0;
 	}
 	sm_system_free(&S);
@@ -297,6 +306,7 @@ static qaws_status pm_bff(double* uv, double const* xw, unsigned int W, unsigned
 		st = sm_system_solve(&S, uv, rhs, 2);
 done:
 	sm_system_free(&S);
+	qaws_internal_free(bt); qaws_internal_free(bsum);
 	qaws_internal_free(nx); qaws_internal_free(wch); qaws_internal_free(loops); qaws_internal_free(ang); qaws_internal_free(u); qaws_internal_free(rhs);
 	qaws_internal_free(ku); qaws_internal_free(blen); qaws_internal_free(ltot); qaws_internal_free(isb); qaws_internal_free(move); qaws_internal_free(seen);
 	return st;
@@ -903,7 +913,7 @@ static qaws_status pm_parameterize(qaws_scalar* out_uv, qaws_param_report* repor
 	}
 	if (method == QAWS_PARAM_BFF)
 	{
-		st = pm_bff(uv, xw, W, wedge, nt, bord, chart, C, &K, pin_a, desc && desc->bff_disk);
+		st = pm_bff(uv, xw, W, wedge, nt, bord, chart, C, &K, pin_a, desc && desc->bff_disk, t, desc ? desc->bff_turning : NULL);
 		if (st != QAWS_STATUS_OK)
 			goto done;
 		goto laid;

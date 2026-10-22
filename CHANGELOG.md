@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- BFF with prescribed border angles (`bff_turning`, one per vertex; the rest of 2π spread by length): a cap to a
+  square, its angles exact. Test 166, figure 55.
 - Atlas packing by the charts' shapes (rasterized, largest first, a quarter turn allowed; a skyline of boxes as
   the fallback): a blob's fill 0.57 to 0.60. Test 166, figure 56.
 - Polycube labels: patches too small for hexahedra (under 3 h^2, a spike's walls) merged into a neighbour's label (a

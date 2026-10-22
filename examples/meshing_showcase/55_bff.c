@@ -2,20 +2,23 @@
  * Figure 55: boundary first flattening (QAWS_PARAM_BFF), figure 30's hill:
  *   - the hill with BFF's (u, v) lines, its border mapped to a circle;
  *   - the layouts in the plane: LSCM (free border), BFF with the border's
- *     lengths kept, BFF to a disc.
+ *     lengths kept, BFF to a disc, BFF to a square whose corners are the
+ *     midpoints of the hill's sides (bff_turning: pi / 2 there, 0 elsewhere;
+ *     the 2 turned: the old corners' triangles, flat on a side).
  * Printed: the angle and area distortions.
  */
 
 static void demo_bff(void)
 {
 	static double const warm[3] = { 225, 190, 150 }, wire[3] = { 90, 80, 70 }, red[3] = { 200, 60, 50 }, blue[3] = { 50, 90, 200 };
-	static char const* const titles[3] = { "LSCM", "BFF, lengths kept", "BFF, a disc" };
+	static char const* const titles[4] = { "LSCM", "BFF, lengths kept", "BFF, a disc", "BFF, a square" };
 	enum { N = 32 };
-	er_canvas* c = er_create(1800, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(2250, 640, 3, 252, 252, 250);
 	double* x = (double*)malloc(sizeof(double) * 3 * (N + 1) * (N + 1));
 	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 6 * N * N), i, j, kk = 0, nt, k;
 	qaws_mesh_3d* m;
 	char sub[200];
+	qaws_scalar turn[(N + 1) * (N + 1)];
 	if (!c)
 		return;
 	for (j = 0; j <= N; j++)
@@ -33,9 +36,11 @@ static void demo_bff(void)
 			t[kk++] = a; t[kk++] = a + 1; t[kk++] = a + N + 2;
 			t[kk++] = a; t[kk++] = a + N + 2; t[kk++] = a + N + 1;
 		}
+	memset(turn, 0, sizeof turn);
+	turn[N / 2] = turn[(N / 2) * (N + 1)] = turn[(N / 2) * (N + 1) + N] = turn[N * (N + 1) + N / 2] = (qaws_scalar)1.5707963267948966;
 	m = ms_make(x, (N + 1) * (N + 1), t, NULL, 2 * N * N);
 	nt = qaws_mesh_3d_get_triangle_count(m);
-	for (k = 0; k < 3; k++)
+	for (k = 0; k < 4; k++)
 	{
 		qaws_scalar* uv = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * nt);
 		qaws_param_desc d;
@@ -43,6 +48,7 @@ static void demo_bff(void)
 		memset(&d, 0, sizeof d);
 		d.method = k ? QAWS_PARAM_BFF : QAWS_PARAM_LSCM;
 		d.bff_disk = k == 2;
+		d.bff_turning = k == 3 ? turn : NULL;
 		if (qaws_mesh_3d_parameterize(uv, &r, m, NULL, 0, &d) == QAWS_STATUS_OK)
 		{
 			double* fx = (double*)malloc(sizeof(double) * 9 * nt);

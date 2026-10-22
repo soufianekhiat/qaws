@@ -35,7 +35,11 @@
  *          set first, the scale factors u from the curvatures (the
  *          cotangent Laplacian K u = the angle defects inside; on the
  *          border u = 0, its lengths kept, or with bff_disk its turning
- *          set to 2 pi times its share of the border's length, a circle),
+ *          set to 2 pi times its share of the border's length, a circle;
+ *          with bff_turning each border vertex turns by its given angle,
+ *          what they leave of 2 pi spread by length: pi / 2 at four
+ *          corners and 0 elsewhere a rectangle, the angles exact; a
+ *          triangle with its three corners on one straight side goes flat),
  *          the border's new turning k - (K u) and lengths
  *          e^((u_i + u_j) / 2) l closed by the least change of the lengths,
  *          its curve integrated, the inside its harmonic extension. A chart
@@ -80,6 +84,7 @@ typedef struct qaws_param_desc
 	int auto_seams;                     /* 1: cut also between triangles facing different axis directions (6 groups) */
 	int pack;                           /* 1: the charts packed into the unit square (shelves, one scale); 0: side by side along u */
 	qaws_scalar max_stretch;            /* auto_seams: a chart whose triangles' area scales differ by more (largest over least) split; 0: none */
+	qaws_scalar const* bff_turning;     /* BFF: per vertex its border's turning (a corner's pi - its angle; what that leaves of 2 pi spread by length); NULL: none */
 } qaws_param_desc;
 
 typedef struct qaws_param_report
