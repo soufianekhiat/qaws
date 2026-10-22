@@ -1309,6 +1309,8 @@ Figure 22 (key m) is a torus soup with three holes:
 - its winding number on a plane;
 - its signed distance on the same plane.
 
+**Overlap queries:** `qaws_mesh_bvh_query_box` and `qaws_mesh_bvh_query_ball` give the elements whose simplices meet a box (exact separating axes against each segment, triangle or tetrahedron) or a ball (by the closest point), each once and ascending, with BUFFER_TOO_SMALL and the full count past the capacity. Test 159 checks 40 boxes and 40 balls on a sphere's 960 triangles against brute force (clipping and distances): no disagreement.
+
 ## Quality reports
 
 `qaws_quality_report.h` measures every element of a 2D, surface or volume mesh, then summarizes those values in the forms a solver checks.

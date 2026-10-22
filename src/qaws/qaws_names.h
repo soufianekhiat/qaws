@@ -961,6 +961,8 @@
 #define qaws_mesh_bvh_create_volume QAWS_SFX(qaws_mesh_bvh_create_volume)
 #define qaws_mesh_bvh_desc QAWS_SFX(qaws_mesh_bvh_desc)
 #define qaws_mesh_bvh_destroy QAWS_SFX(qaws_mesh_bvh_destroy)
+#define qaws_mesh_bvh_query_ball QAWS_SFX(qaws_mesh_bvh_query_ball)
+#define qaws_mesh_bvh_query_box QAWS_SFX(qaws_mesh_bvh_query_box)
 #define qaws_mesh_bvh_ray QAWS_SFX(qaws_mesh_bvh_ray)
 #define qaws_mesh_bvh_refit QAWS_SFX(qaws_mesh_bvh_refit)
 #define qaws_mesh_bvh_signed_distance QAWS_SFX(qaws_mesh_bvh_signed_distance)

@@ -772,6 +772,120 @@ static void test_paths(void)
 	free(h1);
 }
 
+/* brute force: triangle abc clipped by the box (Sutherland-Hodgman against its six planes); 1 when something is left */
+static int bt_tri_box(double const* a, double const* b, double const* c, double const* lo, double const* hi)
+{
+	double poly[2][12][3];
+	unsigned int n = 3, cur = 0, ax, s, i, k;
+	for (k = 0; k < 3; k++) { poly[0][0][k] = a[k]; poly[0][1][k] = b[k]; poly[0][2][k] = c[k]; }
+	for (ax = 0; ax < 3; ax++)
+		for (s = 0; s < 2; s++)
+		{
+			unsigned int m = 0;
+			double lim = s ? hi[ax] : lo[ax], sg = s ? -1 : 1;
+			for (i = 0; i < n; i++)
+			{
+				double const *P = poly[cur][i], *Q = poly[cur][(i + 1) % n];
+				double dp = sg * (P[ax] - lim), dq = sg * (Q[ax] - lim);
+				if (dp >= 0 && m < 12)
+					memcpy(poly[1 - cur][m++], P, sizeof(double) * 3);
+				if ((dp >= 0) != (dq >= 0) && m < 12)
+				{
+					double t = dp / (dp - dq);
+					for (k = 0; k < 3; k++) poly[1 - cur][m][k] = P[k] + t * (Q[k] - P[k]);
+					m++;
+				}
+			}
+			n = m;
+			cur = 1 - cur;
+			if (!n)
+				return 0;
+		}
+	return 1;
+}
+
+/* box and ball queries against brute force over every triangle of the sphere */
+static void test_overlap(void)
+{
+	qaws_scalar *x;
+	unsigned int nv, nt, *f, q, i, bad_box = 0, bad_ball = 0, total = 0, cnt, *got = NULL, small = 0;
+	qaws_mesh_bvh_desc d;
+	qaws_mesh_bvh* b = NULL;
+	qaws_status st;
+	char msg[300];
+	bt_sphere(32, 16, &x, &nv, &f, &nt);
+	memset(&d, 0, sizeof d);
+	d.positions = x;
+	d.vertex_count = nv;
+	d.dimension = 3;
+	d.simplices = f;
+	d.simplex_size = 3;
+	d.simplex_count = nt;
+	qaws_mesh_bvh_create(&b, &d);
+	got = (unsigned int*)malloc(sizeof(unsigned int) * nt);
+	for (q = 0; b && q < 40; q++)
+	{
+		double lo[3], hi[3], c[3], r = 0.1 + 0.4 * bt_rand();
+		qaws_scalar slo[3], shi[3], sc[3];
+		unsigned int k;
+		for (k = 0; k < 3; k++)
+		{
+			double m = 2.4 * bt_rand() - 1.2, w = 0.05 + 0.5 * bt_rand();
+			lo[k] = m - w;
+			hi[k] = m + w;
+			c[k] = 2.4 * bt_rand() - 1.2;
+			slo[k] = (qaws_scalar)lo[k];
+			shi[k] = (qaws_scalar)hi[k];
+			sc[k] = (qaws_scalar)c[k];
+		}
+		/* the box: the elements found against the triangles the clipping keeps */
+		st = qaws_mesh_bvh_query_box(got, &cnt, b, slo, shi, nt);
+		for (i = 0, k = 0; st == QAWS_STATUS_OK && i < nt; i++)
+		{
+			double A[3], B[3], C[3];
+			int in, found = k < cnt && got[k] == i;
+			bt_get(A, x, f[3 * i]);
+			bt_get(B, x, f[3 * i + 1]);
+			bt_get(C, x, f[3 * i + 2]);
+			in = bt_tri_box(A, B, C, lo, hi);
+			bad_box += in != found;
+			k += found;
+		}
+		bad_box += st != QAWS_STATUS_OK;
+		total += cnt;
+		/* the ball: against the triangles' distances */
+		st = qaws_mesh_bvh_query_ball(got, &cnt, b, sc, (qaws_scalar)r, nt);
+		for (i = 0, k = 0; st == QAWS_STATUS_OK && i < nt; i++)
+		{
+			double A[3], B[3], C[3], dd;
+			int found = k < cnt && got[k] == i;
+			bt_get(A, x, f[3 * i]);
+			bt_get(B, x, f[3 * i + 1]);
+			bt_get(C, x, f[3 * i + 2]);
+			dd = bt_tri_d2(c, A, B, C);
+			if (fabs(sqrt(dd) - r) > 1e-9)
+				bad_ball += (dd <= r * r) != found;
+			k += found;
+		}
+		bad_ball += st != QAWS_STATUS_OK;
+		total += cnt;
+	}
+	{
+		/* a buffer too small: the count all the same */
+		qaws_scalar zlo[3] = { -2, -2, -2 }, zhi[3] = { 2, 2, 2 };
+		st = qaws_mesh_bvh_query_box(got, &cnt, b, zlo, zhi, 5);
+		small = st == QAWS_STATUS_BUFFER_TOO_SMALL && cnt == nt;
+	}
+	sprintf(msg, "box and ball queries on a sphere's %u triangles, 40 each: %u elements found, disagreeing with brute force %u (boxes) %u (balls); a short buffer counts all %d",
+		nt, total, bad_box, bad_ball, small);
+	printf("  %s\n", msg);
+	TEST_ASSERT(b && total > 0 && bad_box == 0 && bad_ball == 0 && small, msg);
+	qaws_mesh_bvh_destroy(b);
+	free(got);
+	free(x);
+	free(f);
+}
+
 int test_159_mesh_bvh_main(void)
 {
 	g_pass = 0;
@@ -781,6 +895,7 @@ int test_159_mesh_bvh_main(void)
 	test_watertight();
 	test_2d();
 	test_volume();
+	test_overlap();
 	test_refusals();
 	test_paths();
 	test_scale();

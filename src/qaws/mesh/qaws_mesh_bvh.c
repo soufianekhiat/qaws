@@ -2282,3 +2282,183 @@ qaws_status qaws_mesh_bvh_signed_distance(qaws_scalar* out, qaws_mesh_hit* out_h
 	j.hits = out_hits;
 	return bv_run(&j, executor);
 }
+
+/* ---- overlap queries ---------------------------------------------------- */
+
+/* the simplex of entry e against the box (c the centre, r the half sizes, absolute): no separating axis among the box's
+   axes, the simplex's face normals and its edges crossed with the box's axes (exact for convex sets) */
+static int bv_box_meets(qaws_mesh_bvh const* b, unsigned int e, double const* c, double const* r)
+{
+	static unsigned char const ed[6][2] = { { 0, 1 }, { 1, 2 }, { 2, 0 }, { 0, 3 }, { 1, 3 }, { 2, 3 } };
+	static unsigned char const fa[4][3] = { { 1, 2, 3 }, { 0, 3, 2 }, { 0, 1, 3 }, { 0, 2, 1 } };
+	double v[4][3], ax[3 + 4 + 18][3];
+	unsigned int k = b->k, na = 0, i, j, a, ne = k == 2 ? 1 : k == 3 ? 3 : 6;
+	for (j = 0; j < k; j++)
+		for (a = 0; a < 3; a++) v[j][a] = bv_pv(b, e, j)[a] - c[a];
+	for (a = 0; a < 3; a++)
+	{
+		ax[na][0] = ax[na][1] = ax[na][2] = 0;
+		ax[na++][a] = 1;
+	}
+	for (i = 0; k >= 3 && i < (k == 3 ? 1u : 4u); i++)
+	{
+		double const *p = v[k == 3 ? 0 : fa[i][0]], *q = v[k == 3 ? 1 : fa[i][1]], *s = v[k == 3 ? 2 : fa[i][2]];
+		double u[3], w[3];
+		bv_sub(q, p, u);
+		bv_sub(s, p, w);
+		bv_cross(u, w, ax[na++]);
+	}
+	for (i = 0; i < ne; i++)
+	{
+		double d[3];
+		bv_sub(v[ed[i][1]], v[ed[i][0]], d);
+		for (a = 0; a < 3; a++)
+		{
+			double bx[3] = { 0, 0, 0 };
+			bx[a] = 1;
+			bv_cross(d, bx, ax[na++]);
+		}
+	}
+	for (i = 0; i < na; i++)
+	{
+		double lo = HUGE_VAL, hi = -HUGE_VAL, rad = r[0] * fabs(ax[i][0]) + r[1] * fabs(ax[i][1]) + r[2] * fabs(ax[i][2]), l2 = bv_dot(ax[i], ax[i]);
+		if (!(l2 > 1e-300))
+			continue;
+		for (j = 0; j < k; j++)
+		{
+			double p = bv_dot(v[j], ax[i]);
+			lo = p < lo ? p : lo;
+			hi = p > hi ? p : hi;
+		}
+		if (lo > rad || hi < -rad)
+			return 0;
+	}
+	return 1;
+}
+
+static int bv_uint_cmp(void const* p, void const* q)
+{
+	unsigned int a = *(unsigned int const*)p, c = *(unsigned int const*)q;
+	return a < c ? -1 : a > c ? 1 : 0;
+}
+
+/* the elements met by a box (ball 0) or a ball (centre, radius: c, r[0]); sorted, each once */
+static qaws_status bv_overlap(unsigned int* out, unsigned int* out_count, qaws_mesh_bvh const* b, double const* c, double const* r, int ball,
+	unsigned int capacity)
+{
+	unsigned int *stk = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (bv_stack_len(b) * 4 + 8)), top = 0, n = 0, cap = 64, i;
+	unsigned int* got = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * cap);
+	float lo[3], hi[3], qc[3], r2 = (float)(r[0] * r[0]) * 1.0001f + 1e-30f;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!stk || !got)
+	{
+		qaws_internal_free(stk);
+		qaws_internal_free(got);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < 3; i++)
+	{
+		/* (the floats' query box rounded outward, as the node boxes are) */
+		lo[i] = bv_down(c[i] - (ball ? r[0] : r[i]) - b->c[i]);
+		hi[i] = bv_up(c[i] + (ball ? r[0] : r[i]) - b->c[i]);
+		qc[i] = (float)(c[i] - b->c[i]);
+	}
+	if (b->t.n4)
+		stk[top++] = 0;
+	while (top)
+	{
+		unsigned int node = stk[--top], s, j;
+		float const* nd = b->t.nf + (size_t)node * b->t.nst;
+		unsigned int const *ch = (unsigned int const*)(nd + 24), *cn = ch + 4;
+		float d2[4];
+		bv_slots_d2(b, nd, qc, d2);
+		for (s = 0; s < 4; s++)
+		{
+			int meets = 1;
+			unsigned int a;
+			if (ch[s] == QAWS_MESH_NONE)
+				continue;
+			for (a = 0; a < 3; a++) meets &= nd[a * 4 + s] <= hi[a] && nd[(3 + a) * 4 + s] >= lo[a];
+			if (!meets || (ball && d2[s] > r2))
+				continue;
+			if (!cn[s])
+			{
+				stk[top++] = ch[s];
+				continue;
+			}
+			for (j = 0; j < cn[s]; j++)
+			{
+				unsigned int e = ch[s] + j;
+				double w[4];
+				if (ball ? bv_entry_closest(b, e, c, w) > r[0] * r[0] : !bv_box_meets(b, e, c, r))
+					continue;
+				if (n == cap)
+				{
+					unsigned int* g2 = (unsigned int*)qaws_internal_realloc(got, sizeof(unsigned int) * (size_t)cap * 2);
+					if (!g2)
+					{
+						st = QAWS_STATUS_ALLOCATION_FAILURE;
+						goto done;
+					}
+					got = g2;
+					cap *= 2;
+				}
+				got[n++] = b->ee[e];
+			}
+		}
+	}
+	qsort(got, n, sizeof(unsigned int), bv_uint_cmp);
+	{
+		unsigned int m = 0;
+		for (i = 0; i < n; i++)
+			if (!m || got[i] != got[m - 1])
+				got[m++] = got[i];
+		n = m;
+	}
+	*out_count = n;
+	if (out)
+		memcpy(out, got, sizeof(unsigned int) * (n < capacity ? n : capacity));
+	st = n > capacity ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
+done:
+	qaws_internal_free(stk);
+	qaws_internal_free(got);
+	return st;
+}
+
+qaws_status qaws_mesh_bvh_query_box(unsigned int* out_elements, unsigned int* out_count, qaws_mesh_bvh const* bvh, qaws_scalar const* lo,
+	qaws_scalar const* hi, unsigned int capacity)
+{
+	double c[3], r[3];
+	unsigned int a;
+	if (!out_count || !bvh || !lo || !hi || (capacity && !out_elements))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	for (a = 0; a < 3; a++)
+	{
+		/* (2D: the plane's z = 0 inside) */
+		double l = a < bvh->dim ? (double)lo[a] : -1, h = a < bvh->dim ? (double)hi[a] : 1;
+		if (!isfinite(l) || !isfinite(h) || l > h)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		c[a] = 0.5 * (l + h);
+		r[a] = 0.5 * (h - l);
+	}
+	return bv_overlap(out_elements, out_count, bvh, c, r, 0, capacity);
+}
+
+qaws_status qaws_mesh_bvh_query_ball(unsigned int* out_elements, unsigned int* out_count, qaws_mesh_bvh const* bvh, qaws_scalar const* centre,
+	qaws_scalar radius, unsigned int capacity)
+{
+	double c[3] = { 0, 0, 0 }, r[3];
+	unsigned int a;
+	if (!out_count || !bvh || !centre || (capacity && !out_elements) || !(radius >= 0) || !isfinite((double)radius))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	for (a = 0; a < bvh->dim; a++)
+	{
+		if (!isfinite((double)centre[a]))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		c[a] = (double)centre[a];
+	}
+	r[0] = r[1] = r[2] = (double)radius;
+	return bv_overlap(out_elements, out_count, bvh, c, r, 1, capacity);
+}

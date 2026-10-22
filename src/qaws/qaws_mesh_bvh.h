@@ -122,4 +122,15 @@ qaws_status qaws_mesh_bvh_winding_number(qaws_scalar* out_winding, qaws_mesh_bvh
 qaws_status qaws_mesh_bvh_signed_distance(qaws_scalar* out_distances, qaws_mesh_hit* out_hits, qaws_mesh_bvh const* bvh, qaws_scalar const* points,
 	unsigned int count, qaws_batch_executor const* executor);
 
+/* The elements whose simplices meet a box (lo, hi: dimension each; in 2D
+   the plane's) or a ball (centre: dimension; radius), each once, ascending:
+   the box by exact separating axes against each segment, triangle or
+   tetrahedron, the ball by the closest point. out_count: how many there
+   are; BUFFER_TOO_SMALL when they pass capacity (the first capacity of them
+   written). */
+qaws_status qaws_mesh_bvh_query_box(unsigned int* out_elements, unsigned int* out_count, qaws_mesh_bvh const* bvh, qaws_scalar const* lo,
+	qaws_scalar const* hi, unsigned int capacity);
+qaws_status qaws_mesh_bvh_query_ball(unsigned int* out_elements, unsigned int* out_count, qaws_mesh_bvh const* bvh, qaws_scalar const* centre,
+	qaws_scalar radius, unsigned int capacity);
+
 #endif /* QAWS_MESH_BVH_H */
