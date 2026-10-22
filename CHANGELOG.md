@@ -59,6 +59,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Quad layouts (`QAWS_QUADS_LAYOUT`): GLOBAL's quads parted into grid patches by
+  their motorcycle graph, a face attribute "patch". Test 178, figure 46 (key K).
 - Quads from the input's own faces: `QAWS_QUADS_PAIRING` (triangles paired by a
   matching with augmenting paths, `pure` splitting the result) and
   `QAWS_QUADS_SPLIT` (every face split round its centre on the reference).

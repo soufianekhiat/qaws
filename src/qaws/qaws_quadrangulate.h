@@ -80,7 +80,17 @@
  *            one). The input's vertices stay.
  *            PAIRING and SPLIT ignore target_length, sweeps and the
  *            guidance; no relaxation or finishing follows.
- *   LAYOUT   reserved (UNSUPPORTED_OPERATION today): patch layouts.
+ *   LAYOUT   GLOBAL's quads (INSTANT's when GLOBAL falls back) parted into
+ *            patches by their motorcycle graph: from each vertex where the
+ *            grid is not regular (a valence other than 4 inside or on a
+ *            feature line, 3 on the border; a feature corner) a separatrix
+ *            along each of its edges, straight on through regular vertices,
+ *            until the border, a feature line, a singular vertex or a vertex
+ *            an earlier separatrix passed. Each patch is a grid of quads: a
+ *            rectangle, or periodic where no singularity bounds it (an
+ *            annulus between two creases, a torus). The patches: a face
+ *            attribute "patch" (their indices, NEAREST); the report's
+ *            `splits` counts them.
  *
  * As remeshing: footpoints kept, the reference mesh's attributes
  * transferred, the input unchanged. The report counts the singularities

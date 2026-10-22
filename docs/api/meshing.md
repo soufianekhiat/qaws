@@ -226,7 +226,8 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d** out, qaws_mesh_report* report
   mesh returned when no valid map comes out.
 - **PAIRING** quads from the input's own triangles. They are paired across their shared sides (none across a feature line, none folding past 40 degrees or not convex) by a greedy matching on each quad's worth (its corners' smallest sine, times the fold's cosine). Augmenting paths then pair the rest (Edmonds' search, without shrinking blossoms). `pure` splits the result round each face's centre (Blossom-Quad's way: all quads at half the size).
 - **SPLIT** splits every face into quads round its centre, the new points on the reference.
-- PAIRING and SPLIT keep the input's vertices and ignore the target and the guidance. `LAYOUT` is reserved.
+- PAIRING and SPLIT keep the input's vertices and ignore the target and the guidance.
+- **LAYOUT** parts GLOBAL's quads (INSTANT's when GLOBAL falls back) into patches by their motorcycle graph. Separatrices leave each vertex where the grid is not regular (valence other than 4 inside or on a crease, 3 on the border, or a feature corner) along every edge. They run straight on through regular vertices until they reach the border, a crease, a singular vertex or an earlier separatrix. Every patch is a grid: a rectangle, or periodic where no singularity bounds it (an annulus between two creases, a torus). The face attribute "patch" numbers the patches, and the report's `splits` counts them. Test 178: a box's 94 quads in its 6 faces, a blob's 123 in 18 rectangles, a torus in one periodic patch. Figure 46 (key K).
 
 | Check (test 177) | Result |
 |---|---|

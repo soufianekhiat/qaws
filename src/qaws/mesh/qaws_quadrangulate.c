@@ -975,6 +975,126 @@ done:
 	return st;
 }
 
+/* a vertex where the quads' grid is not regular: a feature corner, a feature line's or the border's (the separatrices end
+   there), or one inside whose valence is not 4 or round which a face is not a quad */
+static int qd_layout_stop(qaws_hm const* m, unsigned int v)
+{
+	unsigned int c;
+	if ((m->vflag[v] & HM_CORNER) || hm_is_border_vertex(m, v) || hm_feature_degree(m, v) || hm_valence(m, v) != 4)
+		return 1;
+	for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
+		if (m->fn[m->cf[c]] != 4)
+			return 1;
+	return 0;
+}
+
+static void qd_layout_cut(qaws_hm const* m, unsigned char* cut, unsigned int a, unsigned int b)
+{
+	unsigned int c = hm_find_edge(m, a, b);
+	if (c == HM_NONE)
+		return;
+	cut[c] = 1;
+	if (m->co[c] != HM_NONE)
+		cut[m->co[c]] = 1;
+}
+
+/* a separatrix from v through its neighbour w, straight on through regular vertices (marking them), until a vertex
+   already on one or where the grid is not regular */
+static void qd_layout_trace(qaws_hm const* m, unsigned char* cut, unsigned char* on, unsigned int v, unsigned int w)
+{
+	unsigned int prev = v, cur = w, steps;
+	qd_layout_cut(m, cut, prev, cur);
+	for (steps = 0; steps < m->nv; steps++)
+	{
+		unsigned int r2[4], j;
+		if (on[cur] || qd_layout_stop(m, cur) || hm_ring(m, cur, r2, 4) != 4)
+			break;
+		on[cur] = 2;
+		for (j = 0; j < 4 && r2[j] != prev; j++) {}
+		if (j == 4)
+			break;
+		prev = cur;
+		cur = r2[(j + 2) % 4];
+		qd_layout_cut(m, cut, prev, cur);
+	}
+}
+
+/* LAYOUT: the quads parted into patches by their motorcycle graph: from each vertex where the grid is not regular (a
+   valence other than 4 inside or on a feature line, 3 on the border; a feature corner) a separatrix along each of its
+   edges off the border and the features, straight on through regular vertices (the edge across), until it reaches the
+   border, a feature line, a singular vertex or one an earlier separatrix passed. The patches: faces joined across edges
+   no separatrix, feature line or border parts, each a grid of quads (a rectangle; or periodic where no singularity
+   bounds it: an annulus between two creases, a torus); their indices a face attribute "patch" (NEAREST); out_count, how
+   many. */
+static qaws_status qd_patches(qaws_mesh_3d* out, unsigned int* out_count)
+{
+	qaws_hm* m = &out->hm;
+	unsigned char *cut = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nc + 1, 1), *on = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, 1);
+	unsigned int *uf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)m->nf + 1)), v, f, c, n = 0, id;
+	qaws_scalar* val = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)m->nf + 1));
+	qaws_attribute_desc d;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!cut || !on || !uf || !val)
+		goto done;
+	/* the grid's singular vertices: a feature corner, or a valence not the regular one where the vertex is (3 on the border,
+	   4 inside or on a feature line), or a face round it not a quad */
+	for (v = 0; v < m->nv; v++)
+	{
+		unsigned int want = hm_is_border_vertex(m, v) ? 3 : 4, cc;
+		if (m->vc[v] == HM_NONE)
+			continue;
+		on[v] = (unsigned char)((m->vflag[v] & HM_CORNER) || hm_valence(m, v) != want);
+		for (cc = m->vc[v]; !on[v] && cc != HM_NONE; cc = hm_round(m, v, cc))
+			on[v] = (unsigned char)(m->fn[m->cf[cc]] != 4);
+	}
+	for (v = 0; v < m->nv; v++)
+	{
+		unsigned int ring[64], nr, i;
+		if (on[v] != 1)
+			continue;
+		nr = hm_ring(m, v, ring, 64);
+		for (i = 0; i < nr && i < 64; i++)
+		{
+			unsigned int ce = hm_find_edge(m, v, ring[i]);
+			if (ce == HM_NONE || m->co[ce] == HM_NONE || (m->cflag[ce] & HM_FEATURE))
+				continue;   /* (border and feature edges part patches already) */
+			qd_layout_trace(m, cut, on, v, ring[i]);
+		}
+	}
+	for (f = 0; f < m->nf; f++) uf[f] = f;
+	for (c = 0; c < m->nc; c++)
+	{
+		unsigned int a, b2;
+		if (m->cf[c] == HM_NONE || m->co[c] == HM_NONE || cut[c] || (m->cflag[c] & HM_FEATURE))
+			continue;
+		a = qd_find(uf, m->cf[c]);
+		b2 = qd_find(uf, m->cf[m->co[c]]);
+		if (a != b2)
+			uf[a] = b2;
+	}
+	for (f = 0; f < m->nf; f++) val[f] = (qaws_scalar)-1;
+	for (f = 0; f < m->nf; f++)
+	{
+		unsigned int r = qd_find(uf, f);
+		if (val[r] < 0)
+			val[r] = (qaws_scalar)n++;
+		val[f] = val[r];
+	}
+	memset(&d, 0, sizeof d);
+	d.name = "patch";
+	d.element = QAWS_MESH_FACE;
+	d.components = 1;
+	d.rule = QAWS_ATTRIBUTE_NEAREST;
+	st = qaws_mesh_3d_add_attribute(&id, out, val, &d);
+	*out_count = n;
+done:
+	qaws_internal_free(cut);
+	qaws_internal_free(on);
+	qaws_internal_free(uf);
+	qaws_internal_free(val);
+	return st;
+}
+
 /* The quad mesh at lattice spacing rho from the fields of the dense mesh dm (level 0 of h): the steps rounded, made
    consistent (qaws_quad_flow.h), the positions refitted to them, the mesh read off, its holes filled (the cones on
    lattice points their centres). T and K: room per corner of dm. */
@@ -1343,8 +1463,6 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	*out_mesh = NULL;
 	if (!mesh || !desc || (unsigned int)desc->method > QAWS_QUADS_LAYOUT || desc->target_length < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method == QAWS_QUADS_LAYOUT)
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	for (v = 0; v < desc->pinned_count; v++)
 		if (!desc->pinned || desc->pinned[v] >= mesh->hm.nv)
 			return QAWS_STATUS_INVALID_ARGUMENT;
@@ -1550,7 +1668,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		goto done;
 	}
 	st = qd_lattice(&dense->hm, &h, rf, T, K, r, &s, &o);
-	if (st == QAWS_STATUS_OK && desc->method == QAWS_QUADS_GLOBAL)
+	if (st == QAWS_STATUS_OK && (desc->method == QAWS_QUADS_GLOBAL || desc->method == QAWS_QUADS_LAYOUT))
 	{
 		/* GLOBAL: the integer-grid map of the same steps, its quads placed on the reference; INSTANT's kept when it gives
 		   none */
@@ -1719,6 +1837,8 @@ output:
 		rep.mean_deviation += (qaws_scalar)(d / out->hm.nf);
 	}
 	st = mx_transfer(&out->hm, r, fl);
+	if (st == QAWS_STATUS_OK && desc->method == QAWS_QUADS_LAYOUT)
+		st = qd_patches(out, &rep.splits);
 	if (st == QAWS_STATUS_OK)
 		qaws_mesh_3d_measure_quality(&rep.quality, out);
 done:

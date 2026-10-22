@@ -179,6 +179,7 @@ add_executable(
 175_tetrahedra_border.c
 176_hexahedra_polycube.c
 177_quads_pairing.c
+178_quad_layout.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
