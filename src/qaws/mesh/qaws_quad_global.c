@@ -1685,12 +1685,151 @@ static int qg_chol(double* A, unsigned int n, double* b)
 	return 1;
 }
 
+/* The handles' cuts of a closed surface without features: a tree over the vertices and a cotree over the faces across the
+   other edges (Eppstein 2003), the edges in neither one per handle side; each cut the edge and the cotree's path between
+   its faces (qg_path's walk), a whole step along each axis of it as a change of T (2 nc ints). Cuts whose frames turn
+   round them are left out. *out_dT: two changes per cut kept, *out_n of them; none (OK) for a border, a feature or a
+   sphere. */
+static qaws_status qg_generators(qaws_hm const* dm, unsigned char const* K, int** out_dT, unsigned int* out_n)
+{
+	unsigned int nf = dm->nf, nv = dm->nv, nc = dm->nc, f, i, j, k, head, tail, ng = 0, n = 0;
+	unsigned int *v0 = NULL, *vcs = NULL, *queue = NULL, *dpc = NULL, *par = NULL, *nodeof = NULL, *dep = NULL, *gen = NULL;
+	unsigned char *intree = NULL, *seen = NULL;
+	int *dT = NULL, *tmp = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	*out_dT = NULL;
+	*out_n = 0;
+	for (k = 0; k < nc; k++)
+		if (dm->cf[k] != HM_NONE && (dm->co[k] == HM_NONE || (dm->cflag[k] & HM_FEATURE)))
+			return QAWS_STATUS_OK;
+	v0 = (unsigned int*)qaws_internal_zalloc((size_t)nv + 2, sizeof(unsigned int));
+	vcs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nc + 1));
+	queue = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)(nv > nf ? nv : nf) + 1));
+	dpc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	dep = (unsigned int*)qaws_internal_zalloc((size_t)nf + 1, sizeof(unsigned int));
+	par = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	nodeof = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	gen = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nc + 1));
+	intree = (unsigned char*)qaws_internal_zalloc((size_t)nc + 1, 1);
+	seen = (unsigned char*)qaws_internal_zalloc((size_t)(nv > nf ? nv : nf) + 1, 1);
+	tmp = (int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(int), 4, (size_t)nc + 1));
+	if (!v0 || !vcs || !queue || !dpc || !dep || !par || !nodeof || !gen || !intree || !seen || !tmp)
+		goto done;
+	/* the tree: breadth first over the vertices (each vertex's corners in a CSR) */
+	for (k = 0; k < nc; k++)
+		if (dm->cf[k] != HM_NONE)
+			v0[dm->cv[k] + 1]++;
+	for (i = 0; i < nv; i++) v0[i + 1] += v0[i];
+	for (k = 0; k < nc; k++)
+		if (dm->cf[k] != HM_NONE)
+			vcs[v0[dm->cv[k]]++] = k;
+	for (i = nv; i > 0; i--) v0[i] = v0[i - 1];
+	v0[0] = 0;
+	head = tail = 0;
+	queue[tail++] = dm->cv[dm->fc[0]];
+	seen[queue[0]] = 1;
+	while (head < tail)
+	{
+		unsigned int v = queue[head++];
+		for (j = v0[v]; j < v0[v + 1]; j++)
+		{
+			unsigned int cc = vcs[j], w = dm->cv[dm->fc[dm->cf[cc]] + (cc - dm->fc[dm->cf[cc]] + 1) % 3];
+			if (seen[w])
+				continue;
+			seen[w] = 1;
+			intree[cc] = intree[dm->co[cc]] = 1;
+			queue[tail++] = w;
+		}
+	}
+	/* the cotree: breadth first over the faces across the edges not in the tree; dpc: a face's corner toward its parent */
+	memset(seen, 0, nf);
+	head = tail = 0;
+	queue[tail++] = 0;
+	seen[0] = 1;
+	dpc[0] = HM_NONE;
+	while (head < tail)
+	{
+		unsigned int g = queue[head++];
+		for (k = dm->fc[g]; k < dm->fc[g] + 3; k++)
+		{
+			unsigned int o = dm->co[k], hf = dm->cf[o];
+			if (intree[k] || seen[hf])
+				continue;
+			seen[hf] = 1;
+			intree[k] = intree[o] = 2;
+			dpc[hf] = o;
+			dep[hf] = dep[g] + 1;
+			queue[tail++] = hf;
+		}
+	}
+	for (k = 0; k < nc; k++)
+		if (dm->cf[k] != HM_NONE && !intree[k] && k < dm->co[k])
+			gen[ng++] = k;
+	if (!ng)
+	{
+		st = QAWS_STATUS_OK;
+		goto done;
+	}
+	dT = (int*)qaws_internal_zalloc(4 * (size_t)nc * ng + 1, sizeof(int));
+	if (!dT)
+		goto done;
+	/* each cut: from the generator's corner into the face across, the cotree's path back to the generator's face */
+	for (i = 0; i < ng; i++)
+	{
+		unsigned int fa = dm->cf[gen[i]], fb = dm->cf[dm->co[gen[i]]], x = fb, y = fa, last, ok = 1;
+		for (f = 0; f < nf; f++)
+		{
+			par[f] = HM_NONE;
+			nodeof[f] = HM_NONE;
+		}
+		nodeof[fa] = 0;
+		/* up from fb and from fa to their common ancestor: fb's side leaves by the parent corners, fa's side enters by them */
+		while (x != y)
+			if (dep[x] >= dep[y])
+			{
+				par[x] = dpc[x];
+				x = dm->cf[dm->co[dpc[x]]];
+			}
+			else
+			{
+				unsigned int up = dm->cf[dm->co[dpc[y]]];
+				par[up] = dm->co[dpc[y]];
+				y = up;
+			}
+		memset(tmp, 0, sizeof(int) * 4 * nc);
+		for (j = 0; j < 2 && ok; j++)
+		{
+			int delta[2], lastD[2], a[2], b[2];
+			delta[0] = j == 0;
+			delta[1] = j == 1;
+			qg_path(dm, K, gen[i], par, nodeof, delta, tmp + 2 * (size_t)nc * j, &last, lastD);
+			/* the generator's face closed: the change into it cancels the change out of it (else the frames turn round) */
+			qf_turn(lastD, qg_suffix(dm, K, last), a);
+			qf_turn(delta, qg_suffix(dm, K, gen[i]), b);
+			ok = dm->cf[last] == fa && a[0] + b[0] == 0 && a[1] + b[1] == 0;
+		}
+		if (!ok)
+			continue;
+		memcpy(dT + 2 * (size_t)nc * n, tmp, sizeof(int) * 4 * nc);
+		n += 2;
+	}
+	*out_dT = dT;
+	*out_n = n;
+	dT = NULL;
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(v0); qaws_internal_free(vcs); qaws_internal_free(queue); qaws_internal_free(dpc); qaws_internal_free(dep); qaws_internal_free(par);
+	qaws_internal_free(nodeof); qaws_internal_free(gen); qaws_internal_free(intree); qaws_internal_free(seen); qaws_internal_free(tmp); qaws_internal_free(dT);
+	return st;
+}
+
 /* one integer unknown: a whole step of its node's path, the triangles' translations it changes (dt, 6 per triangle) */
 typedef struct qg_var
 {
 	unsigned int node, first, count;    /* its triangles: at first in the lists, count of them */
 	unsigned int entry;                 /* the corner its path starts from */
 	int delta[2];
+	int const* dT;                      /* a handle's cut: its whole step as a change of T (2 nc); NULL: a node's path */
 } qg_var;
 
 typedef struct qg_node
@@ -1728,6 +1867,8 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 	unsigned int* fr = NULL;
 	qg_node* node = NULL;
 	qg_var* var = NULL;
+	int* gdT = NULL;
+	unsigned int ngd = 0;
 	qg_ctx c, c2;
 	qg_info info;
 	qaws_internal_ldlt fac;
@@ -1884,9 +2025,13 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 		goto done;
 	for (i = 0; i < c.nt; i++)
 		qg_uv(&c.tri[i], d);
-	/* the unknowns and the translations each changes */
+	/* the unknowns and the translations each changes; a closed surface's handles' cuts unknowns too (their periods, as MIQ
+	   rounds them with its cones) */
+	st = qg_generators(dm, K, &gdT, &ngd);
+	if (st != QAWS_STATUS_OK)
+		goto done;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	var = (qg_var*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_var), (4 * (size_t)nn + 1)));
+	var = (qg_var*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_var), (4 * (size_t)nn + ngd + 1)));
 	at = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)c.nt + 1)));
 	if (!var || !at)
 		goto done;
@@ -1912,19 +2057,32 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 				if (node[x].bnd[cl] == HM_NONE || dep[dm->cf[node[x].bnd[cl]]] > dep[f])
 					node[x].bnd[cl] = k;
 			}
-	for (i = 0; i < nn; i++)
+	for (i = 0; i < nn + ngd; i++)
 	{
-		unsigned int x = order[i], s;
-		int even = node[x].parent != HM_NONE && (node[x].R == 2 || node[node[x].parent].R == 2);
+		unsigned int x = i < nn ? order[i] : HM_NONE, s;
+		int even = x != HM_NONE && node[x].parent != HM_NONE && (node[x].R == 2 || node[node[x].parent].R == 2);
 		for (s = 0; s < 4; s++)
 		{
 			qg_var* w = &var[nz];
-			if (s < 2 && node[x].parent == HM_NONE)
+			w->dT = NULL;
+			if (x == HM_NONE)
+			{
+				if (s)
+					continue;
+				w->node = HM_NONE;
+				w->entry = HM_NONE;
+				w->delta[0] = w->delta[1] = 0;
+				w->dT = gdT + 2 * (size_t)dm->nc * (i - nn);
+			}
+			else if (s < 2 && node[x].parent == HM_NONE)
 				continue;
-			if (s >= 2 && node[x].bnd[s - 2] == HM_NONE)
+			else if (s >= 2 && node[x].bnd[s - 2] == HM_NONE)
 				continue;
-			w->node = x;
-			if (s < 2)
+			else
+				w->node = x;
+			if (w->dT)
+				;
+			else if (s < 2)
 			{
 				w->entry = node[x].entry;
 				w->delta[0] = even ? 2 * (1 - (int)s) : 1;
@@ -1939,7 +2097,11 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 			}
 			w->first = nl;
 			memcpy(Tw, T, sizeof(int) * 2 * dm->nc);
-			qg_path(dm, K, w->entry, par, nodeof, w->delta, Tw, NULL, NULL);
+			if (w->dT)
+				for (k = 0; k < 2 * dm->nc; k++)
+					Tw[k] += w->dT[k];
+			else
+				qg_path(dm, K, w->entry, par, nodeof, w->delta, Tw, NULL, NULL);
 			st = qg_build(dm, L, rho, Tw, K, &info, &c2, ct2, fix2, cone2, d2);
 			if (st != QAWS_STATUS_OK)
 				goto done;
@@ -2145,7 +2307,10 @@ static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho,
 		}
 	}
 	for (i = 0; i < nz; i++)
-		if (z[i] != 0)
+		if (z[i] != 0 && var[i].dT)
+			for (k = 0; k < 2 * dm->nc; k++)
+				T[k] += (int)z[i] * var[i].dT[k];
+		else if (z[i] != 0)
 		{
 			int dl[2];
 			dl[0] = (int)z[i] * var[i].delta[0];
@@ -2157,7 +2322,7 @@ done:
 	qaws_internal_ldlt_free(&fac);
 	qaws_internal_free(c.tri); qaws_internal_free(c2.tri); qaws_internal_free(ct); qaws_internal_free(ct2); qaws_internal_free(fix); qaws_internal_free(cone); qaws_internal_free(fix2); qaws_internal_free(cone2); qaws_internal_free(d); qaws_internal_free(d2);
 	qaws_internal_free(info.fbad); qaws_internal_free(info.sR); qaws_internal_free(info.sbad); qaws_internal_free(Tw); qaws_internal_free(nodeof); qaws_internal_free(par); qaws_internal_free(own); qaws_internal_free(queue); qaws_internal_free(faces); qaws_internal_free(vis); qaws_internal_free(star);
-	qaws_internal_free(node); qaws_internal_free(order); qaws_internal_free(dep); qaws_internal_free(var); qaws_internal_free(at); qaws_internal_free(dt); qaws_internal_free(lt); qaws_internal_free(D); qaws_internal_free(rhs); qaws_internal_free(Q); qaws_internal_free(A); qaws_internal_free(g); qaws_internal_free(z); qaws_internal_free(b); qaws_internal_free(fixed); qaws_internal_free(fr);
+	qaws_internal_free(node); qaws_internal_free(order); qaws_internal_free(dep); qaws_internal_free(var); qaws_internal_free(gdT); qaws_internal_free(at); qaws_internal_free(dt); qaws_internal_free(lt); qaws_internal_free(D); qaws_internal_free(rhs); qaws_internal_free(Q); qaws_internal_free(A); qaws_internal_free(g); qaws_internal_free(z); qaws_internal_free(b); qaws_internal_free(fixed); qaws_internal_free(fr);
 	return st;
 }
 
@@ -2198,9 +2363,9 @@ static double qg_energy(qaws_hm const* dm, mf_level const* L, double rho, int co
    shortcut: genus one only; higher genus would take 4 g steps, the same fit */
 static qaws_status qg_periods(qaws_hm const* dm, mf_level const* L, double rho, int* T, unsigned char const* K)
 {
-	unsigned int nf = dm->nf, nv = dm->nv, nc = dm->nc, f, i, j, k, head, tail, ng = 0, gen[2];
-	unsigned int *v0 = NULL, *vcs = NULL, *queue = NULL, *dpc = NULL, *par = NULL, *nodeof = NULL, *ct = NULL, *dep = NULL;
-	unsigned char *intree = NULL, *seen = NULL, *fix = NULL, *cone = NULL;
+	unsigned int nf = dm->nf, nv = dm->nv, nc = dm->nc, f, i, j, k, ng = 0;
+	unsigned int* ct = NULL;
+	unsigned char *fix = NULL, *cone = NULL;
 	int *dT = NULL, *Tw = NULL;
 	double *d = NULL, E[4][4], gr[4], e0, best, model;
 	int z[4], zb[4], zc[4];
@@ -2225,117 +2390,20 @@ static qaws_status qg_periods(qaws_hm const* dm, mf_level const* L, double rho, 
 		k += dm->vc[j] != HM_NONE;
 	if ((long)k - (long)(i / 2) + (long)nf != 0)
 		return QAWS_STATUS_OK;   /* (Euler characteristic 0: a torus) */
-	v0 = (unsigned int*)qaws_internal_zalloc((size_t)nv + 2, sizeof(unsigned int));
-	vcs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nc + 1));
-	queue = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)(nv > nf ? nv : nf) + 1));
-	dpc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
-	dep = (unsigned int*)qaws_internal_zalloc((size_t)nf + 1, sizeof(unsigned int));
-	par = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
-	nodeof = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
-	intree = (unsigned char*)qaws_internal_zalloc((size_t)nc + 1, 1);
-	seen = (unsigned char*)qaws_internal_zalloc((size_t)(nv > nf ? nv : nf) + 1, 1);
-	dT = (int*)qaws_internal_zalloc(8 * (size_t)nc + 1, sizeof(int));
 	Tw = (int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(int), 2 * (size_t)nc + 2));
 	c.tri = (qg_tri*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_tri), (3 * (size_t)nf + 1)));
 	ct = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nc + 1)));
 	fix = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
 	cone = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
 	d = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)nv + 2)));
-	if (!v0 || !vcs || !queue || !dpc || !dep || !par || !nodeof || !intree || !seen || !dT || !Tw || !c.tri || !ct || !fix || !cone || !d)
+	if (!Tw || !c.tri || !ct || !fix || !cone || !d)
 		goto done;
-	/* the tree: breadth first over the vertices from vertex 0 (each vertex's corners in a CSR) */
-	for (k = 0; k < nc; k++)
-		if (dm->cf[k] != HM_NONE)
-			v0[dm->cv[k] + 1]++;
-	for (i = 0; i < nv; i++) v0[i + 1] += v0[i];
-	for (k = 0; k < nc; k++)
-		if (dm->cf[k] != HM_NONE)
-			vcs[v0[dm->cv[k]]++] = k;
-	for (i = nv; i > 0; i--) v0[i] = v0[i - 1];
-	v0[0] = 0;
-	head = tail = 0;
-	queue[tail++] = dm->cv[dm->fc[0]];
-	seen[queue[0]] = 1;
-	while (head < tail)
-	{
-		unsigned int v = queue[head++];
-		for (j = v0[v]; j < v0[v + 1]; j++)
-		{
-			unsigned int cc = vcs[j], w = dm->cv[dm->fc[dm->cf[cc]] + (cc - dm->fc[dm->cf[cc]] + 1) % 3];
-			if (seen[w])
-				continue;
-			seen[w] = 1;
-			intree[cc] = intree[dm->co[cc]] = 1;
-			queue[tail++] = w;
-		}
-	}
-	/* the cotree: breadth first over the faces across the edges not in the tree; dpc: a face's corner toward its parent */
-	memset(seen, 0, nf);
-	head = tail = 0;
-	queue[tail++] = 0;
-	seen[0] = 1;
-	dpc[0] = HM_NONE;
-	while (head < tail)
-	{
-		unsigned int g = queue[head++];
-		for (k = dm->fc[g]; k < dm->fc[g] + 3; k++)
-		{
-			unsigned int o = dm->co[k], hf = dm->cf[o];
-			if (intree[k] || seen[hf])
-				continue;
-			seen[hf] = 1;
-			intree[k] = intree[o] = 2;
-			dpc[hf] = o;
-			dep[hf] = dep[g] + 1;
-			queue[tail++] = hf;
-		}
-	}
-	for (k = 0; k < nc; k++)
-		if (dm->cf[k] != HM_NONE && !intree[k] && k < dm->co[k])
-		{
-			if (ng == 2)
-				goto ok;   /* (not a torus after all) */
-			gen[ng++] = k;
-		}
-	if (ng != 2)
+	/* the two cuts (qg_generators), a whole step along each axis of each: dT, 4 changes of T */
+	st = qg_generators(dm, K, &dT, &ng);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	if (ng != 4)
 		goto ok;
-	/* each cut: from the generator's corner into the face across, the cotree's path back to the generator's face; a whole
-	   step along each axis (dT: 4 unit changes of T) */
-	for (i = 0; i < 2; i++)
-	{
-		unsigned int fa = dm->cf[gen[i]], fb = dm->cf[dm->co[gen[i]]], x = fb, y = fa, last;
-		for (f = 0; f < nf; f++)
-		{
-			par[f] = HM_NONE;
-			nodeof[f] = HM_NONE;
-		}
-		nodeof[fa] = 0;
-		/* up from fb and from fa to their common ancestor: fb's side leaves by the parent corners, fa's side enters by them */
-		while (x != y)
-			if (dep[x] >= dep[y])
-			{
-				par[x] = dpc[x];
-				x = dm->cf[dm->co[dpc[x]]];
-			}
-			else
-			{
-				unsigned int up = dm->cf[dm->co[dpc[y]]];
-				par[up] = dm->co[dpc[y]];
-				y = up;
-			}
-		for (j = 0; j < 2; j++)
-		{
-			int delta[2], lastD[2], a[2], b[2];
-			delta[0] = j == 0;
-			delta[1] = j == 1;
-			qg_path(dm, K, gen[i], par, nodeof, delta, dT + 2 * (size_t)nc * (2 * i + j), &last, lastD);
-			/* the generator's face closed: the change into it cancels the change out of it (else the frames turn round) */
-			qf_turn(lastD, qg_suffix(dm, K, last), a);
-			qf_turn(delta, qg_suffix(dm, K, gen[i]), b);
-			if (dm->cf[last] != fa || a[0] + b[0] != 0 || a[1] + b[1] != 0)
-				goto ok;
-		}
-	}
 	/* the quadratic: E(z) - E(0) = g . z + z^T H z / 2, from E(0), E(+-e_i), E(e_i + e_j) */
 	e0 = qg_energy(dm, L, rho, T, K, &c, ct, fix, cone, d, &fac);
 	if (e0 == HUGE_VAL)
@@ -2427,8 +2495,7 @@ static qaws_status qg_periods(qaws_hm const* dm, mf_level const* L, double rho, 
 ok:
 	st = QAWS_STATUS_OK;
 done:
-	qaws_internal_free(v0); qaws_internal_free(vcs); qaws_internal_free(queue); qaws_internal_free(dpc); qaws_internal_free(dep); qaws_internal_free(par);
-	qaws_internal_free(nodeof); qaws_internal_free(intree); qaws_internal_free(seen); qaws_internal_free(dT); qaws_internal_free(Tw); qaws_internal_free(c.tri);
+	qaws_internal_free(dT); qaws_internal_free(Tw); qaws_internal_free(c.tri);
 	qaws_internal_free(ct); qaws_internal_free(fix); qaws_internal_free(cone); qaws_internal_free(d);
 	qaws_internal_ldlt_free(&fac);
 	return st;

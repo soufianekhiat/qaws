@@ -11,7 +11,9 @@
  *     corners 2);
  *   - tori of radii 1 and 0.7 at 0.22, 1 and 0.5 at 0.3: their periods
  *     quantized together, every straight edge loop once round the hole or
- *     once round the tube (the flow's own periods made them spirals);
+ *     once round the tube (the flow's own periods made them spirals); a thin
+ *     torus (2 and 0.4) at 0.3, its field drawn to the curvature on a tie
+ *     (the smoothest turned round the tube);
  *   - every result valid, all quads, footpoints on the reference, scaled
  *     Jacobian above 0, made by the map (report iterations 1); against
  *     INSTANT (pure) on the same inputs: irregular and AD no higher. By
@@ -438,18 +440,18 @@ static void tg_windings(qaws_mesh_3d const* q, double R, unsigned int* loops, un
    together, every edge loop closes once round the hole or once round the tube */
 static void test_periods(void)
 {
-	static double const cases[2][3] = { { 0.7, 0.22, 0 }, { 0.5, 0.3, 0 } };
+	static double const cases[3][3] = { { 0.7, 0.22, 1 }, { 0.5, 0.3, 1 }, { 0.4, 0.3, 2 } };
 	unsigned int k;
-	for (k = 0; k < 2; k++)
+	for (k = 0; k < 3; k++)
 	{
-		qaws_mesh_3d* m = tg_torus(96, 48, 1, cases[k][0]);
+		qaws_mesh_3d* m = tg_torus(96, 48, cases[k][2], cases[k][0]);
 		tg_res s;
 		qaws_mesh_3d* q = tg_quads(m, cases[k][1], QAWS_QUADS_GLOBAL, &s);
 		unsigned int loops = 0, spirals = 1;
 		char msg[300];
 		if (q)
-			tg_windings(q, 1, &loops, &spirals);
-		sprintf(msg, "a torus of radii 1 and %.1f at %.2f: %u quads, irregular %u, %u edge loops, %u spiral", cases[k][0], cases[k][1], s.quads,
+			tg_windings(q, cases[k][2], &loops, &spirals);
+		sprintf(msg, "a torus of radii %.0f and %.1f at %.2f: %u quads, irregular %u, %u edge loops, %u spiral", cases[k][2], cases[k][0], cases[k][1], s.quads,
 			s.s.irregular, loops, spirals);
 		printf("  %s\n", msg);
 		TEST_ASSERT(q && s.made == 1 && s.s.irregular == 0 && loops > 10 && spirals == 0, msg);

@@ -642,9 +642,14 @@ Chen, Kobbelt 2013), on INSTANT's dense mesh and fields:
   integer point is kept when its solve agrees: the periods quantized
   together, as MIQ does with its cones. Tori of radius 1 and 0.3, 0.5,
   0.7 at 0.12 to 0.4: spirals in 14 of 20 meshes before, 2 after, at the
-  same time. The two left, and a torus of radii 2 and 0.4, follow the field:
-  INSTANT keeps the smoothest field on a tie, which may turn slowly round a
-  thin torus; pulled along the parallels (`guide_directions`) 17 of 20 close.
+  same time. For GLOBAL on a closed surface with a handle the field drawn to
+  the curvature is kept on a tie (the smoothest may turn slowly round a thin
+  tube): the torus of radii 2 and 0.4 closes at every size (it spiralled at
+  all five); 3 of 20 still spiral, on the fat torus (radii 1 and 0.7). With
+  cones (any genus) the handles' cuts are unknowns of the quantization too
+  (`qg_quantize`, two whole steps per cut whose frames do not turn round
+  it). A double torus (two tori united) still gets no map: a vertex beside a
+  cone wound twice round, the cones' placement, not the periods.
 - **Places**: one sparse LDL^T solve of sum A (|grad u - X/h|^2 +
   |grad v - Y/h|^2) over the triangles (the field turned into each
   triangle's plane), line vertices held on their whole isoline, corners

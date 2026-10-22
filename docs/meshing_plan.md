@@ -177,6 +177,11 @@ Larger:
    thinner and coarser tori (a zero map: singular curves round the hole), dents, speed (a 0.3 ball about a minute).
 2. **Torus periods, further:** higher genus (4 g steps, the same fit); the curvature-aligned field preferred on closed
    tubes. Check: a double torus with no spiral, the thin torus without guides.
+   Done (2026-10-22): the aligned field kept on a tie for GLOBAL on closed surfaces with a handle (the thin torus clean
+   at all five sizes, test 136; 3 of 20 tori still spiral, the fat one); the handles' cuts shared (`qg_generators`) and
+   made unknowns of `qg_quantize` (any genus, with cones). Left: the double torus gets no map at all (a vertex beside a
+   cone wound twice, a cone placement fault); a preference for an aligned period lattice when its energy is nearly as low
+   (the fat torus).
 3. **Polycube labels, further:** spikes (bumps past half the height) given their own patches; the atlas groups by the
    same cut. Check: the bump at 0.6 valid; atlas borders from the cut.
 4. **Atlas, further:** splits along the distortion's level lines, a skyline packing, groups by the graph cut. Check:

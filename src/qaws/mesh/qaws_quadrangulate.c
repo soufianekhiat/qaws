@@ -1568,6 +1568,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		double* init = (double*)qaws_internal_scratch_zalloc(3 * (size_t)dense->hm.nv + 3, sizeof(double));
 		double *keep = NULL, *cand = NULL;
 		unsigned int pulled = 0, s0, l, t, placed = 0;
+		int tube;
 		qaws_status fst = QAWS_STATUS_OK;
 		size_t at, total;
 		cf_system* sys = NULL;
@@ -1608,6 +1609,20 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		for (at = 0, l = 0; l < h.nl; at += 3 * (size_t)h.lv[l].n, l++)
 			memcpy(keep + at, h.lv[l].q, sizeof(double) * 3 * h.lv[l].n);
 		s0 = qd_singular(&dense->hm, &h.lv[0]);
+		/* GLOBAL on a closed surface with a handle (Euler characteristic 0 or less): the field drawn to the curvature kept on a tie,
+		   as the smoothest may turn slowly round a thin tube and the quads then spiral */
+		{
+			unsigned int nvu = 0, ncu = 0, nb = 0, z;
+			for (z = 0; z < dense->hm.nv; z++)
+				nvu += dense->hm.vc[z] != HM_NONE;
+			for (z = 0; z < dense->hm.nc; z++)
+				if (dense->hm.cf[z] != HM_NONE)
+				{
+					ncu++;
+					nb += dense->hm.co[z] == HM_NONE;
+				}
+			tube = (desc->method == QAWS_QUADS_GLOBAL || desc->method == QAWS_QUADS_LAYOUT) && !nb && (long)nvu - (long)(ncu / 2) + (long)dense->hm.nf <= 0;
+		}
 		/* each candidate: kept (into keep) when it has fewer singularities (the smoothest: no more), else undone */
 		for (t = 0; t < 3; t++)
 		{
@@ -1634,7 +1649,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 				memcpy(h.lv[0].q, cand, sizeof(double) * 3 * dense->hm.nv);
 			}
 			s1 = qd_singular(&dense->hm, &h.lv[0]);
-			better = t == 1 ? s1 <= s0 || dcone : s1 < s0;   /* (placed cones: the field with them, whatever it costs) */
+			better = t == 1 ? s1 <= s0 || dcone : s1 < s0 || (t == 2 && s1 == s0 && tube);   /* (placed cones: the field with them, whatever it costs) */
 			placed |= better && t;
 			if (better && t)
 				cf_restrict(&h);
