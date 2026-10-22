@@ -17,6 +17,7 @@
 #define OFS_CHUNK 4096u   /* points per distance query (bounds the hits' memory) */
 #define OFS_FALSI 5u      /* regula falsi rounds per crossing */
 #define OFS_MITRE 4.0     /* the largest mitre direction's length (needle tips) */
+#define OFS_NONE 0xFFFFFFFFu
 
 typedef struct ofs_field
 {
@@ -348,6 +349,693 @@ static qaws_status ofs_measure_mesh(qaws_mesh_offset_report* report, ofs_field c
 	return st;
 }
 
+/* ROUND's pieces: closed convex solids, their union the points within r of the input's surface */
+typedef struct ofs_soup
+{
+	double* x;
+	unsigned int nx, capx;
+	unsigned int* t;
+	unsigned int nt, capt;
+} ofs_soup;
+
+/* a point of the soup, its index; OFS_NONE on allocation failure */
+static unsigned int ofs_soup_point(ofs_soup* s, double const* p)
+{
+	if (s->nx == s->capx)
+	{
+		unsigned int cap = s->capx ? 2 * s->capx : 1024;
+		double* g = (double*)qaws_internal_realloc(s->x, sizeof(double) * 3 * (size_t)cap);
+		if (!g)
+			return OFS_NONE;
+		s->x = g;
+		s->capx = cap;
+	}
+	memcpy(s->x + 3 * (size_t)s->nx, p, sizeof(double) * 3);
+	return s->nx++;
+}
+
+static int ofs_soup_tri(ofs_soup* s, unsigned int a, unsigned int b, unsigned int c)
+{
+	if (a == OFS_NONE || b == OFS_NONE || c == OFS_NONE)
+		return 0;
+	if (s->nt == s->capt)
+	{
+		unsigned int cap = s->capt ? 2 * s->capt : 1024;
+		unsigned int* g = (unsigned int*)qaws_internal_realloc(s->t, sizeof(unsigned int) * 3 * (size_t)cap);
+		if (!g)
+			return 0;
+		s->t = g;
+		s->capt = cap;
+	}
+	s->t[3 * (size_t)s->nt] = a;
+	s->t[3 * (size_t)s->nt + 1] = b;
+	s->t[3 * (size_t)s->nt + 2] = c;
+	s->nt++;
+	return 1;
+}
+
+/* union-find root of x (paths halved) */
+static unsigned int ofs_root(unsigned int* up, unsigned int x)
+{
+	while (up[x] != x)
+	{
+		up[x] = up[up[x]];
+		x = up[x];
+	}
+	return x;
+}
+
+/* the cylinder of radius r round segment a b, m sides, its first side's direction along u (a unit vector across it), the
+   ends closed */
+static int ofs_cylinder(ofs_soup* s, double const* a, double const* b, double const* u, double r, unsigned int m)
+{
+	double e[3], w[3], l;
+	unsigned int base = s->nx, i, k;
+	for (k = 0; k < 3; k++) e[k] = b[k] - a[k];
+	l = sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+	if (!(l > 0))
+		return 1;
+	for (k = 0; k < 3; k++) e[k] /= l;
+	w[0] = e[1] * u[2] - e[2] * u[1];
+	w[1] = e[2] * u[0] - e[0] * u[2];
+	w[2] = e[0] * u[1] - e[1] * u[0];
+	for (i = 0; i < 2 * m; i++)
+	{
+		double q[3], th = 6.283185307179586 * (i % m) / m;
+		for (k = 0; k < 3; k++) q[k] = (i < m ? a[k] : b[k]) + r * (cos(th) * u[k] + sin(th) * w[k]);
+		if (ofs_soup_point(s, q) == OFS_NONE)
+			return 0;
+	}
+	/* (u, w, e right-handed: the rings run counterclockwise about e, the sides out, the ends fanned) */
+	for (i = 0; i < m; i++)
+	{
+		unsigned int j = (i + 1) % m;
+		if (!ofs_soup_tri(s, base + i, base + j, base + m + j) || !ofs_soup_tri(s, base + i, base + m + j, base + m + i))
+			return 0;
+	}
+	for (i = 1; i + 1 < m; i++)
+		if (!ofs_soup_tri(s, base, base + i + 1, base + i) || !ofs_soup_tri(s, base + m, base + m + i, base + m + i + 1))
+			return 0;
+	return 1;
+}
+
+/* the ball of radius r about c: m meridians, m / 2 bands */
+static int ofs_ball(ofs_soup* s, double const* c, double r, unsigned int m)
+{
+	unsigned int h = m / 2, base = s->nx, i, j;
+	double q[3];
+	q[0] = c[0];
+	q[1] = c[1];
+	q[2] = c[2] - r;
+	if (ofs_soup_point(s, q) == OFS_NONE)
+		return 0;
+	for (j = 1; j < h; j++)
+		for (i = 0; i < m; i++)
+		{
+			double ph = 3.141592653589793 * j / h - 1.5707963267948966, th = 6.283185307179586 * i / m;
+			q[0] = c[0] + r * cos(ph) * cos(th);
+			q[1] = c[1] + r * cos(ph) * sin(th);
+			q[2] = c[2] + r * sin(ph);
+			if (ofs_soup_point(s, q) == OFS_NONE)
+				return 0;
+		}
+	q[0] = c[0];
+	q[1] = c[1];
+	q[2] = c[2] + r;
+	if (ofs_soup_point(s, q) == OFS_NONE)
+		return 0;
+	/* (rings 1 .. h - 1 of m from base + 1, the poles first and last, outward) */
+	for (i = 0; i < m; i++)
+	{
+		unsigned int i1 = (i + 1) % m, top = base + 1 + (h - 1) * m;
+		if (!ofs_soup_tri(s, base, base + 1 + i1, base + 1 + i) || !ofs_soup_tri(s, top, base + 1 + (h - 2) * m + i, base + 1 + (h - 2) * m + i1))
+			return 0;
+		for (j = 1; j + 1 < h; j++)
+		{
+			unsigned int p0 = base + 1 + (j - 1) * m, p1 = base + 1 + j * m;
+			if (!ofs_soup_tri(s, p0 + i, p0 + i1, p1 + i1) || !ofs_soup_tri(s, p0 + i, p1 + i1, p1 + i))
+				return 0;
+		}
+	}
+	return 1;
+}
+
+typedef struct ofs_hkey
+{
+	unsigned int lo, hi, f;
+} ofs_hkey;
+
+static int ofs_hkey_cmp(void const* a, void const* b)
+{
+	ofs_hkey const *x = (ofs_hkey const*)a, *y = (ofs_hkey const*)b;
+	if (x->lo != y->lo)
+		return x->lo < y->lo ? -1 : 1;
+	if (x->hi != y->hi)
+		return x->hi < y->hi ? -1 : 1;
+	return x->f < y->f ? -1 : (x->f > y->f ? 1 : 0);
+}
+
+/* a triangle of a piece facing away from inside point o; 0 on allocation failure */
+static int ofs_soup_tri_out(ofs_soup* s, unsigned int a, unsigned int b, unsigned int c, double const* o)
+{
+	double const *p = s->x + 3 * (size_t)a, *q = s->x + 3 * (size_t)b, *w = s->x + 3 * (size_t)c;
+	double e1[3], e2[3], n[3], m[3];
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		e1[k] = q[k] - p[k];
+		e2[k] = w[k] - p[k];
+		m[k] = (p[k] + q[k] + w[k]) / 3 - o[k];
+	}
+	n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+	n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+	n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+	return n[0] * m[0] + n[1] * m[1] + n[2] * m[2] >= 0 ? ofs_soup_tri(s, a, b, c) : ofs_soup_tri(s, a, c, b);
+}
+
+/* the wedge of the cylinder of radius r round segment a b over the directions cos(phi) e0 + sin(phi) e1 (e0, e1 unit,
+   across it), phi from -widen to th + widen, steps of step at most: the points within r of the segment that lie that way */
+static int ofs_wedge(ofs_soup* s, double const* a, double const* b, double const* e0, double const* e1, double th, double widen, double r, double step)
+{
+	double span = th + 2 * widen, mid[3], o[3];
+	unsigned int k = (unsigned int)ceil(span / step), base, i, j;
+	if (k < 1)
+		k = 1;
+	base = s->nx;
+	if (ofs_soup_point(s, a) == OFS_NONE || ofs_soup_point(s, b) == OFS_NONE)
+		return 0;
+	for (i = 0; i <= k; i++)
+	{
+		double ph = -widen + span * i / k, pa[3], pb[3];
+		for (j = 0; j < 3; j++)
+		{
+			double u = cos(ph) * e0[j] + sin(ph) * e1[j];
+			pa[j] = a[j] + r * u;
+			pb[j] = b[j] + r * u;
+		}
+		if (ofs_soup_point(s, pa) == OFS_NONE || ofs_soup_point(s, pb) == OFS_NONE)
+			return 0;
+	}
+	/* (an inside point: on the middle of the wedge's middle direction, half way out; the wedge spans less than a full turn) */
+	for (j = 0; j < 3; j++)
+	{
+		double u = cos(0.5 * th) * e0[j] + sin(0.5 * th) * e1[j];
+		mid[j] = 0.5 * (a[j] + b[j]);
+		o[j] = mid[j] + 0.5 * r * u * (span < 3.14159 ? 1 : 0.2);
+	}
+	for (i = 0; i < k; i++)
+	{
+		unsigned int A0 = base + 2 + 2 * i, B0 = A0 + 1, A1 = A0 + 2, B1 = A0 + 3;
+		if (!ofs_soup_tri_out(s, A0, A1, B1, o) || !ofs_soup_tri_out(s, A0, B1, B0, o) || !ofs_soup_tri_out(s, base, A0, A1, o)
+			|| !ofs_soup_tri_out(s, base + 1, B0, B1, o))
+			return 0;
+	}
+	return ofs_soup_tri_out(s, base, base + 1, base + 3, o) && ofs_soup_tri_out(s, base, base + 3, base + 2, o)
+		&& ofs_soup_tri_out(s, base, base + 1, base + 3 + 2 * k, o) && ofs_soup_tri_out(s, base, base + 3 + 2 * k, base + 2 + 2 * k, o);
+}
+
+/* unit d turned away from unit c by angle a (d itself when along c) */
+static void ofs_turn_away(double* out, double const* d, double const* c, double a)
+{
+	double t[3], dc = d[0] * c[0] + d[1] * c[1] + d[2] * c[2], l;
+	unsigned int k;
+	for (k = 0; k < 3; k++) t[k] = d[k] - dc * c[k];
+	l = sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
+	/* (in the plane of c and d: d = cos(al) c + sin(al) t / l, turned to al + a) */
+	a += atan2(l, dc);
+	for (k = 0; k < 3; k++) out[k] = l > 1e-12 ? cos(a) * c[k] + sin(a) * t[k] / l : d[k];
+}
+
+/* unit direction from a to b, the fraction f of the way along the great arc */
+static void ofs_slerp(double* out, double const* a, double const* b, double f)
+{
+	double cr[3], th, sn;
+	unsigned int k;
+	cr[0] = a[1] * b[2] - a[2] * b[1];
+	cr[1] = a[2] * b[0] - a[0] * b[2];
+	cr[2] = a[0] * b[1] - a[1] * b[0];
+	th = atan2(sqrt(cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]), a[0] * b[0] + a[1] * b[1] + a[2] * b[2]);
+	sn = sin(th);
+	for (k = 0; k < 3; k++) out[k] = sn > 1e-12 ? (sin((1 - f) * th) * a[k] + sin(f * th) * b[k]) / sn : a[k];
+}
+
+static double ofs_angle(double const* a, double const* b)
+{
+	double cr[3];
+	cr[0] = a[1] * b[2] - a[2] * b[1];
+	cr[1] = a[2] * b[0] - a[0] * b[2];
+	cr[2] = a[0] * b[1] - a[1] * b[0];
+	return atan2(sqrt(cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]), a[0] * b[0] + a[1] * b[1] + a[2] * b[2]);
+}
+
+/* a convex corner's piece: the cone from v over the directions in the spherical convex hull of its faces' normals D (n of
+   them), widened by widen, radius r: the points within r of v nearest to v. 2 when the hull is too wide for a cone (the
+   caller then puts a ball), 3 when it is a single arc (nothing to add), 0 on allocation failure */
+static int ofs_cone(ofs_soup* s, double const* v, double const* D, unsigned int n, double widen, double r, double step)
+{
+	double c[3] = { 0, 0, 0 }, t1[3], t2[3], l, o[3], *q = NULL;
+	unsigned int i, j, k, nh = 0, *ord = NULL, nb = 0, Q, base, *row = NULL;
+	int ok = 0;
+	double* g = (double*)qaws_internal_scratch_malloc(sizeof(double) * (2 * (size_t)n + 1));
+	ord = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (2 * (size_t)n + 2));
+	if (!g || !ord)
+		goto done;
+	for (i = 0; i < n; i++)
+		for (k = 0; k < 3; k++) c[k] += D[3 * (size_t)i + k];
+	l = sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+	if (!(l > 1e-9))
+	{
+		ok = 2;
+		goto done;
+	}
+	for (k = 0; k < 3; k++) c[k] /= l;
+	/* the gnomonic projection on the plane touching at c: great circles lines, the spherical hull the plane's */
+	t1[0] = fabs(c[0]) < 0.9 ? 1 : 0;
+	t1[1] = 1 - t1[0];
+	t1[2] = 0;
+	l = t1[0] * c[0] + t1[1] * c[1];
+	for (k = 0; k < 3; k++) t1[k] -= l * c[k];
+	l = sqrt(t1[0] * t1[0] + t1[1] * t1[1] + t1[2] * t1[2]);
+	for (k = 0; k < 3; k++) t1[k] /= l;
+	t2[0] = c[1] * t1[2] - c[2] * t1[1];
+	t2[1] = c[2] * t1[0] - c[0] * t1[2];
+	t2[2] = c[0] * t1[1] - c[1] * t1[0];
+	for (i = 0; i < n; i++)
+	{
+		double const* d = D + 3 * (size_t)i;
+		double dc = d[0] * c[0] + d[1] * c[1] + d[2] * c[2];
+		if (!(dc > 0.2))
+		{
+			ok = 2;   /* (a normal past about 78 degrees from the middle: no cone) */
+			goto done;
+		}
+		g[2 * i] = (d[0] * t1[0] + d[1] * t1[1] + d[2] * t1[2]) / dc;
+		g[2 * i + 1] = (d[0] * t2[0] + d[1] * t2[1] + d[2] * t2[2]) / dc;
+		ord[i] = i;
+	}
+	/* (Andrew's monotone chain, counterclockwise in (t1, t2): the directions' order about c) */
+	for (i = 1; i < n; i++)
+		for (j = i; j > 0 && (g[2 * ord[j]] < g[2 * ord[j - 1]] || (g[2 * ord[j]] == g[2 * ord[j - 1]] && g[2 * ord[j] + 1] < g[2 * ord[j - 1] + 1])); j--)
+		{
+			unsigned int x = ord[j];
+			ord[j] = ord[j - 1];
+			ord[j - 1] = x;
+		}
+	row = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (2 * (size_t)n + 2));
+	if (!row)
+		goto done;
+	for (j = 0; j < 2 * n - 1; j++)
+	{
+		unsigned int p = ord[j < n ? j : 2 * n - 2 - j], low = j < n ? 2 : nb + 1;
+		if (j == n)
+			nb = nh;   /* (the lower chain's length: the upper may not eat it) */
+		low = j < n ? 2 : nb + 1;
+		while (nh >= low && (g[2 * row[nh - 1]] - g[2 * row[nh - 2]]) * (g[2 * p + 1] - g[2 * row[nh - 2] + 1]) -
+			(g[2 * row[nh - 1] + 1] - g[2 * row[nh - 2] + 1]) * (g[2 * p] - g[2 * row[nh - 2]]) <= 1e-12)
+			nh--;
+		row[nh++] = p;
+	}
+	nh--;   /* (the chain ends on its first point) */
+	nb = 0;
+	if (nh < 3)
+	{
+		ok = 3;
+		goto done;
+	}
+	/* the hull's directions widened, their arcs sampled */
+	q = (double*)qaws_internal_scratch_malloc(sizeof(double) * 3 * ((size_t)nh * ((size_t)ceil(3.2 / step) + 2) + 1));
+	if (!q)
+		goto done;
+	for (i = 0; i < nh; i++)
+	{
+		double a0[3], a1[3];
+		unsigned int m;
+		ofs_turn_away(a0, D + 3 * (size_t)row[i], c, widen);
+		ofs_turn_away(a1, D + 3 * (size_t)row[(i + 1) % nh], c, widen);
+		m = (unsigned int)ceil(ofs_angle(a0, a1) / step);
+		if (m < 1)
+			m = 1;
+		for (j = 0; j < m; j++) ofs_slerp(q + 3 * (size_t)nb++, a0, a1, (double)j / m);
+	}
+	/* the cap: rings from c out to the boundary's points, Q steps */
+	for (i = 0, l = 0; i < nb; i++) l = fmax(l, ofs_angle(c, q + 3 * (size_t)i));
+	Q = (unsigned int)ceil(l / step);
+	if (Q < 1)
+		Q = 1;
+	base = s->nx;
+	{
+		double p[3];
+		for (k = 0; k < 3; k++) p[k] = v[k];
+		if (ofs_soup_point(s, p) == OFS_NONE)
+			goto done;
+		for (k = 0; k < 3; k++) p[k] = v[k] + r * c[k];
+		if (ofs_soup_point(s, p) == OFS_NONE)
+			goto done;
+	}
+	for (j = 1; j <= Q; j++)
+		for (i = 0; i < nb; i++)
+		{
+			double d[3], p[3];
+			ofs_slerp(d, c, q + 3 * (size_t)i, (double)j / Q);
+			for (k = 0; k < 3; k++) p[k] = v[k] + r * d[k];
+			if (ofs_soup_point(s, p) == OFS_NONE)
+				goto done;
+		}
+	for (k = 0; k < 3; k++) o[k] = v[k] + 0.5 * r * c[k];
+	for (i = 0; i < nb; i++)
+	{
+		unsigned int i1 = (i + 1) % nb, last = base + 2 + (Q - 1) * nb;
+		if (!ofs_soup_tri_out(s, base + 1, base + 2 + i, base + 2 + i1, v) || !ofs_soup_tri_out(s, base, last + i, last + i1, o))
+			goto done;
+		for (j = 1; j < Q; j++)
+		{
+			unsigned int r0 = base + 2 + (j - 1) * nb, r1 = base + 2 + j * nb;
+			if (!ofs_soup_tri_out(s, r0 + i, r1 + i, r1 + i1, v) || !ofs_soup_tri_out(s, r0 + i, r1 + i1, r0 + i1, v))
+				goto done;
+		}
+	}
+	ok = 1;
+done:
+	qaws_internal_free(g);
+	qaws_internal_free(ord);
+	qaws_internal_free(row);
+	qaws_internal_free(q);
+	return ok;
+}
+
+/* ROUND: the points within r of the triangles' surface on the given sides (1 along the normals, 2 against them, 3 both) as
+   closed pieces whose union they are, a soup for the Boolean: each triangle's slab +-r; at each edge whose faces turn,
+   the cylinder's wedge between their normals on the side it is convex to (the side it is concave to the slabs cover); a
+   border or non-manifold edge's whole cylinder; at each vertex the cone over its normals' spherical hull where all its
+   turning edges are convex to a side, a ball where they turn both ways or a cylinder ends there. Wedges and cones are
+   widened by a quarter step so no two pieces share a plane. 0 on allocation failure */
+static int ofs_pieces(ofs_soup* s, double const* P, unsigned int nv, unsigned int const* t, unsigned int nt, double r, double step, unsigned int sides)
+{
+	ofs_hkey* key = (ofs_hkey*)qaws_internal_scratch_malloc(sizeof(ofs_hkey) * (3 * (size_t)nt + 1));
+	double* N = (double*)qaws_internal_scratch_malloc(sizeof(double) * (3 * (size_t)nt + 1));
+	unsigned char* vf = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nv + 1, 1);   /* 1, 2 convex to side 1, 2; 4, 8 concave; 16 ball */
+	unsigned char* flat = (unsigned char*)qaws_internal_scratch_zalloc(3 * (size_t)nt + 1, 1);   /* per corner: its edge flat */
+	unsigned int* mate = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));   /* the face across it */
+	unsigned int *co = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 2, sizeof(unsigned int)), *cf = NULL, *fill = NULL;
+	double* D = NULL;
+	double widen = 0.25 * step;
+	unsigned int f, i, k, m = (unsigned int)ceil(6.283185307179586 / step), side;
+	int ok = 0;
+	if (m < 8)
+		m = 8;
+	m += m & 1;
+	if (!key || !N || !vf || !co || !flat || !mate)
+		goto done;
+	for (f = 0; f < nt; f++)
+	{
+		double const *a = P + 3 * (size_t)t[3 * f], *b = P + 3 * (size_t)t[3 * f + 1], *c = P + 3 * (size_t)t[3 * f + 2];
+		double e1[3], e2[3], *n = N + 3 * (size_t)f, l;
+		for (k = 0; k < 3; k++)
+		{
+			e1[k] = b[k] - a[k];
+			e2[k] = c[k] - a[k];
+		}
+		n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+		n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+		n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		for (k = 0; k < 3; k++) n[k] = l > 0 ? n[k] / l : 0;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int u = t[3 * f + k], w = t[3 * f + (k + 1) % 3];
+			key[3 * f + k].lo = u < w ? u : w;
+			key[3 * f + k].hi = u < w ? w : u;
+			key[3 * f + k].f = f;
+			co[t[3 * f + k] + 1]++;
+		}
+	}
+	qsort(key, 3 * (size_t)nt, sizeof(ofs_hkey), ofs_hkey_cmp);
+	for (i = 0; i < 3 * nt;)
+	{
+		unsigned int j = i, g, lo = key[i].lo, hi = key[i].hi, a, b, cg = 0;
+		double const *nf, *ng;
+		double dt, e0[3], e1[3], l, side_dot = 0;
+		while (j < 3 * nt && key[j].lo == lo && key[j].hi == hi) j++;
+		f = key[i].f;
+		nf = N + 3 * (size_t)f;
+		/* a and b as they run in f */
+		for (k = 0; k < 3 && !(t[3 * f + k] == lo && (t[3 * f + (k + 1) % 3] == hi)); k++)
+			;
+		a = k < 3 ? lo : hi;
+		b = k < 3 ? hi : lo;
+		if (j - i != 2)
+		{
+			/* a border (or a non-manifold edge): its whole cylinder, balls at its ends */
+			double u[3], e[3], d = 0, el = 0;
+			for (k = 0; k < 3; k++) e[k] = P[3 * (size_t)b + k] - P[3 * (size_t)a + k];
+			for (k = 0; k < 3; k++) { d += nf[k] * e[k]; el += e[k] * e[k]; }
+			for (k = 0; k < 3; k++) u[k] = nf[k] - (el > 0 ? d / el : 0) * e[k];
+			l = sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+			if (l > 0)
+			{
+				for (k = 0; k < 3; k++) u[k] /= l;
+				if (!ofs_cylinder(s, P + 3 * (size_t)a, P + 3 * (size_t)b, u, r, m))
+					goto done;
+			}
+			vf[a] |= 16;
+			vf[b] |= 16;
+			i = j;
+			continue;
+		}
+		g = key[i + 1].f;
+		ng = N + 3 * (size_t)g;
+		dt = nf[0] * ng[0] + nf[1] * ng[1] + nf[2] * ng[2];
+		if (dt >= 1 - 1e-12)
+		{
+			/* flat: one slab for both faces (below) covers it */
+			unsigned int hf = OFS_NONE, hg = OFS_NONE;
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int u = t[3 * f + k], w = t[3 * f + (k + 1) % 3], x = t[3 * g + k], y = t[3 * g + (k + 1) % 3];
+				if ((u == lo && w == hi) || (u == hi && w == lo))
+					hf = 3 * f + k;
+				if ((x == lo && y == hi) || (x == hi && y == lo))
+					hg = 3 * g + k;
+			}
+			if (hf != OFS_NONE && hg != OFS_NONE)
+			{
+				flat[hf] = flat[hg] = 1;
+				mate[hf] = g;
+				mate[hg] = f;
+			}
+			i = j;
+			continue;
+		}
+		/* convex to side 1 when g's third vertex lies behind f's plane */
+		for (k = 0; k < 3; k++)
+			if (t[3 * g + k] != lo && t[3 * g + k] != hi)
+				cg = t[3 * g + k];
+		for (k = 0; k < 3; k++) side_dot += nf[k] * (P[3 * (size_t)cg + k] - P[3 * (size_t)a + k]);
+		side = side_dot < 0 ? 1u : 2u;
+		vf[a] |= (unsigned char)(side == 1 ? 1 | 8 : 2 | 4);
+		vf[b] |= (unsigned char)(side == 1 ? 1 | 8 : 2 | 4);
+		if (!(sides & side))
+		{
+			i = j;
+			continue;
+		}
+		/* the wedge from n_f to n_g on that side (both turned for side 2) */
+		for (k = 0; k < 3; k++)
+		{
+			e0[k] = side == 1 ? nf[k] : -nf[k];
+			e1[k] = (side == 1 ? ng[k] : -ng[k]) - dt * e0[k];
+		}
+		l = sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+		if (l > 0)
+		{
+			for (k = 0; k < 3; k++) e1[k] /= l;
+			if (!ofs_wedge(s, P + 3 * (size_t)a, P + 3 * (size_t)b, e0, e1, acos(dt < -1 ? -1 : dt), widen, r, step))
+				goto done;
+		}
+		i = j;
+	}
+	{
+		/* the slabs: the triangles joined across flat edges into planar groups, each group's points moved -r and +r along
+		   its normal (a prism, its sides on the group's border only: no two slabs share a side) */
+		unsigned int *up = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+		unsigned int *at = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nt + 2, sizeof(unsigned int));
+		unsigned int *byg = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+		unsigned int *stamp = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nv + 1));
+		unsigned int *pt = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (2 * (size_t)nv + 1)), q;
+		int fine = up && at && byg && stamp && pt;
+		if (fine)
+		{
+			for (f = 0; f < nt; f++) up[f] = f;
+			for (f = 0; f < 3 * nt; f++)
+				if (flat[f])
+				{
+					unsigned int x = ofs_root(up, f / 3), y = ofs_root(up, mate[f]);
+					if (x != y)
+						up[x] = y;
+				}
+			/* (the faces by their group: counted, then placed) */
+			for (f = 0; f < nt; f++)
+			{
+				up[f] = ofs_root(up, f);
+				at[up[f] + 1]++;
+			}
+			for (f = 0; f < nt; f++) at[f + 1] += at[f];
+			for (f = 0; f < nt; f++) byg[at[up[f]]++] = f;
+			for (i = 0; i < nv; i++) stamp[i] = OFS_NONE;
+		}
+		for (q = 0; fine && q < nt; q++)
+		{
+			unsigned int ff = byg[q], gr = up[ff], v3[6];
+			double const* n = N + 3 * (size_t)gr;
+			if (n[0] == 0 && n[1] == 0 && n[2] == 0)
+				continue;
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int v = t[3 * ff + k];
+				if (stamp[v] != gr)
+				{
+					double x[3];
+					unsigned int c2;
+					stamp[v] = gr;
+					for (c2 = 0; c2 < 3; c2++) x[c2] = P[3 * (size_t)v + c2] - r * n[c2];
+					pt[2 * v] = ofs_soup_point(s, x);
+					for (c2 = 0; c2 < 3; c2++) x[c2] = P[3 * (size_t)v + c2] + r * n[c2];
+					pt[2 * v + 1] = ofs_soup_point(s, x);
+				}
+				v3[k] = pt[2 * v];
+				v3[3 + k] = pt[2 * v + 1];
+			}
+			fine = ofs_soup_tri(s, v3[3], v3[4], v3[5]) && ofs_soup_tri(s, v3[0], v3[2], v3[1]);
+			for (k = 0; k < 3 && fine; k++)
+				if (!flat[3 * ff + k])
+					fine = ofs_soup_tri(s, v3[k], v3[(k + 1) % 3], v3[3 + (k + 1) % 3]) && ofs_soup_tri(s, v3[k], v3[3 + (k + 1) % 3], v3[3 + k]);
+		}
+		qaws_internal_free(up);
+		qaws_internal_free(at);
+		qaws_internal_free(byg);
+		qaws_internal_free(stamp);
+		qaws_internal_free(pt);
+		if (!fine)
+			goto done;
+	}
+	/* the vertices: their faces' normals */
+	cf = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));
+	fill = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 1, sizeof(unsigned int));
+	D = (double*)qaws_internal_scratch_malloc(sizeof(double) * (9 * (size_t)nt + 1));
+	if (!cf || !fill || !D)
+		goto done;
+	for (i = 0; i < nv; i++) co[i + 1] += co[i];
+	for (f = 0; f < nt; f++)
+		for (k = 0; k < 3; k++) cf[co[t[3 * f + k]] + fill[t[3 * f + k]]++] = f;
+	for (i = 0; i < nv; i++)
+	{
+		int ball = (vf[i] & 16) != 0;
+		for (side = 1; side <= 2 && !ball; side++)
+		{
+			unsigned int q, nd = 0;
+			int res;
+			if (!(sides & side) || !(vf[i] & side))
+				continue;   /* (no edge convex to this side: nothing nearest to the vertex there) */
+			if (vf[i] & (side == 1 ? 4 : 8))
+			{
+				ball = 1;   /* (a saddle: turning both ways) */
+				break;
+			}
+			for (q = co[i]; q < co[i + 1]; q++, nd++)
+				for (k = 0; k < 3; k++) D[3 * (size_t)nd + k] = (side == 1 ? 1 : -1) * N[3 * (size_t)cf[q] + k];
+			res = ofs_cone(s, P + 3 * (size_t)i, D, nd, widen, r, step);
+			if (!res)
+				goto done;
+			ball = res == 2;   /* (3: the normals on one great circle, a straight crease the wedges cover) */
+		}
+		if (ball && !ofs_ball(s, P + 3 * (size_t)i, r, m))
+			goto done;
+	}
+	ok = 1;
+done:
+	qaws_internal_free(key);
+	qaws_internal_free(N);
+	qaws_internal_free(vf);
+	qaws_internal_free(flat);
+	qaws_internal_free(mate);
+	qaws_internal_free(co);
+	qaws_internal_free(cf);
+	qaws_internal_free(fill);
+	qaws_internal_free(D);
+	return ok;
+}
+
+/* ROUND: SURFACE outward the input united with the pieces at d, inward the input less the pieces at |d|; SHELL the input
+   meeting the pieces at |d|; THICKEN the pieces at |d| / 2 alone. The pieces' circles split every step at most */
+static qaws_status ofs_round(qaws_mesh_3d** out, qaws_boolean_report* br, double const* P, qaws_scalar const* ps, unsigned int nv,
+	unsigned int const* t, unsigned int nt, qaws_mesh_offset_kind kind, double d, double step)
+{
+	ofs_soup s;
+	unsigned int i;
+	double r = kind == QAWS_MESH_OFFSET_THICKEN ? 0.5 * fabs(d) : fabs(d);
+	qaws_scalar* xs = NULL;
+	qaws_mesh_3d_desc a, b;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(&s, 0, sizeof s);
+	if (!ofs_pieces(&s, P, nv, t, nt, r, step, kind == QAWS_MESH_OFFSET_THICKEN ? 3u : d > 0 ? 1u : 2u))
+		goto done;
+	xs = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)s.nx + 1));
+	if (!xs)
+		goto done;
+	for (i = 0; i < 3 * s.nx; i++) xs[i] = (qaws_scalar)s.x[i];
+	memset(&a, 0, sizeof a);
+	a.positions = ps;
+	a.vertex_count = nv;
+	a.face_vertices = t;
+	a.face_count = nt;
+	memset(&b, 0, sizeof b);
+	b.positions = xs;
+	b.vertex_count = s.nx;
+	b.face_vertices = s.t;
+	b.face_count = s.nt;
+	if (kind == QAWS_MESH_OFFSET_THICKEN)
+		st = qaws_mesh_boolean(out, br, &b, NULL, QAWS_BOOLEAN_UNION, NULL);
+	else
+		st = qaws_mesh_boolean(out, br, &a, &b, kind == QAWS_MESH_OFFSET_SHELL ? QAWS_BOOLEAN_INTERSECTION : d > 0 ? QAWS_BOOLEAN_UNION : QAWS_BOOLEAN_DIFFERENCE, NULL);
+done:
+	qaws_internal_free(s.x);
+	qaws_internal_free(s.t);
+	qaws_internal_free(xs);
+	return st;
+}
+
+/* SHELL: the input's triangles, then the inner surface c's turned inward, into out (c destroyed) */
+static qaws_status ofs_shell(qaws_mesh_3d** out, qaws_scalar const* ps, unsigned int nv, unsigned int const* t, unsigned int nt, qaws_mesh_3d* c)
+{
+	unsigned int cv = qaws_mesh_3d_get_vertex_count(c), ct = qaws_mesh_3d_get_triangle_count(c), i;
+	qaws_mesh_3d_desc md;
+	qaws_scalar* Ys = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + cv + 1));
+	unsigned int* T = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + ct + 1));
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (Ys && T)
+	{
+		memcpy(Ys, ps, sizeof(qaws_scalar) * 3 * nv);
+		qaws_mesh_3d_get_positions(Ys + 3 * (size_t)nv, c);
+		memcpy(T, t, sizeof(unsigned int) * 3 * nt);
+		qaws_mesh_3d_get_triangles(T + 3 * (size_t)nt, c);
+		for (i = nt; i < nt + ct; i++)
+		{
+			unsigned int a = T[3 * i + 1];
+			T[3 * i] += nv; T[3 * i + 1] = T[3 * i + 2] + nv; T[3 * i + 2] = a + nv;
+		}
+		memset(&md, 0, sizeof md);
+		md.positions = Ys;
+		md.vertex_count = nv + cv;
+		md.face_vertices = T;
+		md.face_count = nt + ct;
+		st = qaws_mesh_3d_create(out, &md);
+	}
+	qaws_mesh_3d_destroy(c);
+	qaws_internal_free(Ys);
+	qaws_internal_free(T);
+	return st;
+}
+
 qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* report, qaws_mesh_3d const* mesh, qaws_mesh_offset_desc const* desc)
 {
 	qaws_mesh_offset_report local;
@@ -365,7 +1053,8 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
 	if (!mesh || !desc || !(qaws_mesh_3d_get_triangle_count(mesh) > 0) || !isfinite((double)desc->distance) || desc->distance == 0 ||
-		(unsigned int)desc->kind > QAWS_MESH_OFFSET_THICKEN || (unsigned int)desc->method > QAWS_MESH_OFFSET_MOVE)
+		(unsigned int)desc->kind > QAWS_MESH_OFFSET_THICKEN || (unsigned int)desc->method > QAWS_MESH_OFFSET_ROUND ||
+		!(desc->round_angle == 0 || (desc->round_angle >= 0.01 && desc->round_angle <= 1.6)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	d = (double)desc->distance;
 	nv = qaws_mesh_3d_get_vertex_count(mesh);
@@ -418,34 +1107,30 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 				*out = c;
 			goto done;
 		}
+		st = ofs_shell(out, ps, nv, t, nt, c);
+		goto done;
+	}
+	if (desc->method == QAWS_MESH_OFFSET_ROUND)
+	{
+		/* SURFACE at d, SHELL's inner surface at -|d| (then joined to the input), THICKEN within |d| / 2, the border rounded */
+		qaws_mesh_3d* c = NULL;
+		qaws_boolean_report br;
+		memset(&br, 0, sizeof br);
+		st = ofs_round(&c, &br, P, ps, nv, t, nt, desc->kind == QAWS_MESH_OFFSET_THICKEN ? QAWS_MESH_OFFSET_THICKEN : QAWS_MESH_OFFSET_SURFACE,
+			desc->kind == QAWS_MESH_OFFSET_SHELL ? -fabs(d) : d, desc->round_angle > 0 ? (double)desc->round_angle : 3.14159265358979323846 / 8);
+		report->intersect = br.intersect;
+		report->closed = br.closed;
+		if (st == QAWS_STATUS_OK && c)
+			st = ofs_measure_mesh(report, &f, c);
+		if (st != QAWS_STATUS_OK || !c || desc->kind != QAWS_MESH_OFFSET_SHELL)
 		{
-			/* the shell: the input's triangles, then the inner surface's turned inward */
-			unsigned int cv = qaws_mesh_3d_get_vertex_count(c), ct = qaws_mesh_3d_get_triangle_count(c);
-			qaws_mesh_3d_desc md;
-			Ys = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + cv + 1));
-			T = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + ct + 1));
-			if (!Ys || !T)
-			{
+			if (st != QAWS_STATUS_OK)
 				qaws_mesh_3d_destroy(c);
-				goto oom;
-			}
-			memcpy(Ys, ps, sizeof(qaws_scalar) * 3 * nv);
-			qaws_mesh_3d_get_positions(Ys + 3 * (size_t)nv, c);
-			memcpy(T, t, sizeof(unsigned int) * 3 * nt);
-			qaws_mesh_3d_get_triangles(T + 3 * (size_t)nt, c);
-			for (i = nt; i < nt + ct; i++)
-			{
-				unsigned int a = T[3 * i + 1];
-				T[3 * i] += nv; T[3 * i + 1] = T[3 * i + 2] + nv; T[3 * i + 2] = a + nv;
-			}
-			qaws_mesh_3d_destroy(c);
-			memset(&md, 0, sizeof md);
-			md.positions = Ys;
-			md.vertex_count = nv + cv;
-			md.face_vertices = T;
-			md.face_count = nt + ct;
-			st = qaws_mesh_3d_create(out, &md);
+			else
+				*out = c;
+			goto done;
 		}
+		st = ofs_shell(out, ps, nv, t, nt, c);
 		goto done;
 	}
 	/* MOVE: the mitred vertices; SURFACE one copy at d, SHELL the input and a copy at -|d| turned, THICKEN copies at +-|d|/2 */

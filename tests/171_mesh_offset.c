@@ -14,7 +14,11 @@
  *   - a slab 0.1 thick offset inward by 0.1: nothing left;
  *   - refusals: distance 0, an unknown kind;
  *   - a distance per vertex (MOVE): the cube's top out by 0.2, its bottom by
- *     0.1, the faces between them tilted; all alike, the uniform result.
+ *     0.1, the faces between them tilted; all alike, the uniform result;
+ *   - ROUND: the cube out by 0.1 the rounded cube (its volume, every vertex
+ *     within the chords' depth of 0.1), in by 0.1 the cube of side 0.8
+ *     exactly; the U's slot closed; a sheet thickened with rounded rims;
+ *     refused for a step of 0.001.
  */
 
 #include "test_common.h"
@@ -386,6 +390,63 @@ static void test_varying(void)
 	qaws_mesh_3d_destroy(cube);
 }
 
+/* ROUND: the points within the distance, as a union of slabs, wedges and cones (steps of pi / 8: the chords inside by
+   1 - cos(pi / 16)^2 of the distance at most) */
+static void test_round(void)
+{
+	static double const lo[3] = { 0, 0, 0 }, hi[3] = { 1, 1, 1 };
+	qaws_mesh_3d *c = ot_box(lo, hi), *u = ot_u(), *sh = ot_sheet(4), *o = NULL;
+	qaws_mesh_offset_report r;
+	qaws_mesh_offset_desc d;
+	char msg[300];
+	double v, ve = 1 + 0.6 + 0.3 * OT_PI * 0.1 + 4.0 / 3 * OT_PI * 0.001, vt = 0.2 + 4 * 0.5 * OT_PI * 0.01 + 4.0 / 3 * OT_PI * 0.001, chord = 1 - cos(OT_PI / 16) * cos(OT_PI / 16);
+	qaws_status st, s2;
+	st = ot_offset(&o, &r, c, QAWS_MESH_OFFSET_SURFACE, QAWS_MESH_OFFSET_ROUND, 0.1, 0);
+	v = ot_volume(o);
+	sprintf(msg, "cube rounded out by 0.1: volume %.5f (the offset's %.5f), its vertices %.6f to %.12f away, closed %d", v, ve,
+		(double)r.min_distance, (double)r.max_distance, r.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && r.closed && v < ve && v > ve - 0.006 && (double)r.min_distance > 0.1 * (1 - chord) - 1e-9 &&
+		(double)r.max_distance < 0.1 + 1e-9, msg);
+	qaws_mesh_3d_destroy(o);
+	o = NULL;
+	st = ot_offset(&o, &r, c, QAWS_MESH_OFFSET_SURFACE, QAWS_MESH_OFFSET_ROUND, -0.1, 0);
+	v = ot_volume(o);
+	sprintf(msg, "cube rounded in by 0.1: volume %.12f (0.512), closed %d", v, r.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && r.closed && fabs(v - 0.512) < 1e-9, msg);
+	qaws_mesh_3d_destroy(o);
+	o = NULL;
+	st = ot_offset(&o, &r, u, QAWS_MESH_OFFSET_SURFACE, QAWS_MESH_OFFSET_ROUND, 0.25, 0);
+	sprintf(msg, "a U rounded out by 0.25, its slot closed: distances %.4f to %.12f (0.25, the chords and the saddles' balls inside by 5%% at most), closed %d",
+		(double)r.min_distance, (double)r.max_distance, r.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && r.closed && (double)r.min_distance > 0.95 * 0.25 && (double)r.max_distance < 0.25 + 1e-9, msg);
+	qaws_mesh_3d_destroy(o);
+	o = NULL;
+	st = ot_offset(&o, &r, sh, QAWS_MESH_OFFSET_THICKEN, QAWS_MESH_OFFSET_ROUND, 0.2, 0);
+	v = ot_volume(o);
+	sprintf(msg, "a sheet thickened by 0.2, rounded: volume %.5f (%.5f), its vertices %.6f to %.12f away, closed %d", v, vt,
+		(double)r.min_distance, (double)r.max_distance, r.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && r.closed && v < vt && v > vt - 0.004 && (double)r.min_distance > 0.1 * (1 - chord) - 1e-9 &&
+		(double)r.max_distance < 0.1 + 1e-9, msg);
+	qaws_mesh_3d_destroy(o);
+	o = NULL;
+	memset(&d, 0, sizeof d);
+	d.kind = QAWS_MESH_OFFSET_SURFACE;
+	d.method = QAWS_MESH_OFFSET_ROUND;
+	d.distance = (qaws_scalar)0.1;
+	d.round_angle = (qaws_scalar)0.001;
+	s2 = qaws_mesh_3d_offset(&o, NULL, c, &d);
+	sprintf(msg, "ROUND refused for a step of 0.001 (%d)", (int)s2);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s2 == QAWS_STATUS_INVALID_ARGUMENT && !o, msg);
+	qaws_mesh_3d_destroy(c);
+	qaws_mesh_3d_destroy(u);
+	qaws_mesh_3d_destroy(sh);
+}
+
 int test_171_mesh_offset_main(void)
 {
 	g_pass = 0;
@@ -397,6 +458,7 @@ int test_171_mesh_offset_main(void)
 	test_u();
 	test_empty();
 	test_varying();
+	test_round();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

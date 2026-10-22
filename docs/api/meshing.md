@@ -1232,6 +1232,7 @@ Figure 35 (key z) shows two tubes at an angle joined in quads and smoothed, and 
   - `THICKEN`: any surface, open sheets too, made a solid |d| thick (the points within |d|/2 of it).
 - **CONTOUR:** the offset is a level set of the exact distance to the input (the BVH's, signed by winding numbers), contoured on a grid by dual contouring. Crossings along the grid's edges are found by regula falsi on the distance, and their normals are the distance's gradient (from the closest point). This is the true offset: rounded about convex edges and corners and a sheet's border, sharp where it meets itself (concave edges, inward corners). Detail below the cell is lost; `resolution` sets the cells along the longest side. The contouring is the watertight surfaces' (`wt_dual_contour`, shared).
 - **MOVE:** the vertices are moved. Each moves along the direction m that moves its faces' planes by one (the least squares solution of n_f . m = 1, weighted by the faces' angles there), times d, so flat faces offset exactly and edges and corners are mitred: a cube stays a cube. `THICKEN` joins the two sides along the border by quads. Overlaps and folds (inward offsets past the thickness, outward ones closing a gap) are resolved by the self-union. At convex corners the mitre lies farther from the input than d (up to |m| |d|).
+- **ROUND:** the true offset of the triangles as they are: the points within |d| of the surface, built as a union of closed pieces by the mesh Booleans. Each group of coplanar triangles gets a slab |d| to either side. Each edge whose faces turn gets the wedge of its cylinder between the two normals, on the side it is convex to. Each corner gets the cone over its normals' spherical hull (a ball at a saddle or a border vertex). The pieces are united with the input outward and taken from it inward. Convex edges and corners come out as cylinders and spheres, and the offset is sharp where it meets itself. `round_angle` sets the arcs' steps (π/8 by default): the vertices lie within |d| and the chords cut inside by at most |d|(1 − cos²(round_angle/2)), more at a saddle's ball. Inward offsets of flat solids are exact (the cube eroded by 0.1 is the cube of side 0.8 to 1e-12). The cost is that of the Boolean: a cube in 0.6 s, the U of figure 52 in 0.8 s.
 - **A distance per vertex** (`distances`, MOVE): each vertex moves along its mitre by its own distance (test 171: a cube's top out by 0.2 and its bottom by 0.1, exactly). With CONTOUR it is refused for now.
 - **Report:** the offset surface's vertices' distances to the input (for MOVE, as moved), the grid, the crossings and sharp vertices (CONTOUR), the self-intersections resolved (MOVE), and whether the result is closed. An inward offset past the input's thickness gives OK and no mesh.
 
@@ -1244,7 +1245,11 @@ Figure 35 (key z) shows two tubes at an angle joined in quads and smoothed, and 
 | A unit square sheet thickened by 0.2: moved, the box's volume; contoured, the slab with round rims (0.2670) | 0.2 exact; 0.2676 |
 | A U moved out by 0.25 across its 0.4 slot: crossings resolved, closed, the slot's middle's winding | 83 pairs; closed; 1.000 |
 | A slab 0.1 thick offset in by 0.1 (both methods) | nothing left |
+| ROUND: the unit cube out by 0.1: volume against 1.6984, vertices' distances; in by 0.1: volume | 1.6963, 0.0963 to 0.1; 0.512 exact |
+| ROUND: the U out by 0.25 (slot closed); the sheet thickened by 0.2 against the rounded slab's 0.2670 | closed, 0.240 to 0.25; 0.2652, closed |
 | Refusals: distance 0, an unknown kind | INVALID_ARGUMENT |
+
+Figure 52 (key Q) sets the U moved out by 0.12 (mitred) beside it rounded out by 0.12 and rounded in by 0.08.
 
 Figure 39 (key D): a U offset outward by contouring (rounded, the slot narrowed), moved outward past half its slot (mitred, the slot shut), a sphere's shell cut open, and a wavy sheet thickened.
 

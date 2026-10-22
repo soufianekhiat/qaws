@@ -59,6 +59,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Rounded offsets (`QAWS_MESH_OFFSET_ROUND`): the true offset of the triangles,
+  cylinders at convex edges and spheres at convex corners, as a union of
+  slabs, wedges and cones; inward offsets of flat solids exact. Test 171,
+  figure 52 (key Q).
 - Attributes in the decimation's quadric (`attribute_weight`, Hoppe 1999): vertex
   colours and other LINEAR attributes steer the collapses and are placed by the
   same solve. Test 167, figure 51 (key P).

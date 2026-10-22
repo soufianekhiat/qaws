@@ -56,6 +56,18 @@
  *            region its winding number covers by at least 1/2, inverted
  *            folds gone. The mitre is not the true offset at convex
  *            corners (farther from the input, up to |m| |d|).
+ *   ROUND    the true offset of the triangles as they are: the points
+ *            within |d| of the surface, the union of closed convex pieces
+ *            (each triangle's slab |d| to either side, a cylinder round each
+ *            edge whose faces turn or which is on the border, a ball at each
+ *            of their vertices), united with the input outward, taken from it
+ *            inward, by the mesh Booleans. Cylinders where the faces turn
+ *            outward, spheres at convex corners, sharp where the offset meets
+ *            itself; the circles split every round_angle at most, their
+ *            points at |d| exactly and the chords between them inside by at
+ *            most |d| (1 - cos(round_angle / 2)). SURFACE and SHELL want a
+ *            closed mesh (the inside is read by winding numbers); THICKEN
+ *            takes sheets, their border rounded.
  *
  * distances (MOVE): a distance per vertex, each vertex moved along its
  * mitre by its own; distance must still be nonzero and finite (its sign
@@ -85,7 +97,8 @@ typedef enum qaws_mesh_offset_kind
 typedef enum qaws_mesh_offset_method
 {
 	QAWS_MESH_OFFSET_CONTOUR = 0,
-	QAWS_MESH_OFFSET_MOVE
+	QAWS_MESH_OFFSET_MOVE,
+	QAWS_MESH_OFFSET_ROUND
 } qaws_mesh_offset_method;
 #endif
 
@@ -96,6 +109,7 @@ typedef struct qaws_mesh_offset_desc
 	qaws_scalar distance;               /* d (SHELL and THICKEN: its size) */
 	unsigned int resolution;            /* CONTOUR: cells along the result's box's longest side; 0: 64 */
 	qaws_scalar const* distances;       /* MOVE: per input vertex its own distance (signed for SURFACE, its size for SHELL and THICKEN); NULL: distance everywhere */
+	qaws_scalar round_angle;            /* ROUND: the arcs' largest step, radians, 0.01 to 1.6; 0: pi / 8 */
 } qaws_mesh_offset_desc;
 
 typedef struct qaws_mesh_offset_report
