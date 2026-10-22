@@ -59,6 +59,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Subdivision of meshes (`qaws_mesh_3d_subdivide`, `qaws_mesh_subdivide.h`): Loop
+  and Catmull-Clark levels on a `qaws_mesh_3d`, the feature edges creases
+  (semi-sharp by a sharpness per edge), corners kept, attributes carried by
+  their rules. Test 172, figure 40 (key E).
 - Offsets of meshes (`qaws_mesh_3d_offset`, `qaws_mesh_offset.h`): the surface
   at a signed distance, shells and thickened sheets, by contouring the exact
   distance (dual contouring, shared with the watertight surfaces) or by

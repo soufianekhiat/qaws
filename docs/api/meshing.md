@@ -1197,6 +1197,33 @@ Figure 35 (key z) shows two tubes at an angle joined in quads and smoothed, and 
 
 Figure 39 (key D): a U offset outward by contouring (rounded, the slot narrowed), moved outward past half its slot (mitred, the slot shut), a sphere's shell cut open, and a wavy sheet thickened.
 
+## Subdivision
+
+`qaws_mesh_3d_subdivide` (`qaws_mesh_subdivide.h`) runs Loop (triangles) or Catmull-Clark (any polygons, quads out) levels on a mesh, and the result is a mesh again.
+
+- **Creases (Hoppe et al. 1994):** the feature edges are creases. Their new points are midpoints, and a vertex on two creases moves as a cubic B-spline curve (1/8, 6/8, 1/8). On three or more creases a vertex stays, and feature corners stay while a crease at them is sharp. Border edges are always creases, and a border vertex of one face stays. The end of a lone feature line (a dart) is smooth.
+- **Semi-sharp creases (DeRose et al. 1998):** `sharpness` per feature edge keeps it sharp for that many levels. A fraction blends the sharp and smooth rules, and a vertex is blended by its creases' mean sharpness. NULL means infinitely sharp.
+- **Attributes:**
+  - per vertex, LINEAR and NORMALIZED attributes follow the scheme's own rules (as the positions do);
+  - per corner, attributes are linear within each face, so UVs keep their seams;
+  - per face, the parent's value is kept;
+  - NEAREST takes its value from the first source.
+- **Features:** the crease halves are kept while they are sharp, and so are the corners. The result has no footpoints.
+- **Order:** old vertices keep their indices. Then comes one vertex per edge (ordered by its smaller vertex index, then the larger), then one per face (Catmull-Clark). Children follow their parent face.
+
+| Check (test 172) | Result |
+|---|---|
+| Catmull-Clark, the cube [-1, 1]^3: counts, a corner at 5/9, an edge point at (3/4, 3/4, 0) | 26 vertices, 24 quads; exact |
+| A tetrahedron: counts, Euler | 14, 12 quads, 2 |
+| Loop, the octahedron: a valence 4 vertex at 0.515625, an edge point at (3/8, 3/8, 0); creased, two levels | exact; volume 4/3 exact |
+| The cube creased, two levels: volume, vertices on the cube, creases, corners | 8 exact; 0; 48; 8 |
+| Semi-sharp (sharpness 0, 0.5, 1, 2, infinite), three levels: volumes | 2.665 < 4.284 < 6.389 < 7.646 < 8 |
+| A sheet of 2 x 2 quads: corners and border | fixed; on the border |
+| Attributes: linear in the position, normalized, corner UVs, face ids, labels | 4e-16; unit; exact; kept; kept |
+| Refusals: Loop on quads, a negative sharpness, an unknown scheme | INVALID_ARGUMENT |
+
+Figure 40 (key E) shows a voxel cage (a ring with a post and a stub), its Catmull-Clark surface, the same with semi-sharp creases, and Loop on the triangulated cage with the base rim sharp and a colour carried.
+
 ## Spatial queries: qaws_mesh_bvh
 
 `qaws_mesh_bvh.h` answers point and ray queries on any mesh, broken or not.

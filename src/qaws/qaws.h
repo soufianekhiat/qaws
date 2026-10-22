@@ -94,6 +94,7 @@
 #include "qaws_mesh_decimate.h"
 #include "qaws_mesh_connect.h"
 #include "qaws_mesh_offset.h"
+#include "qaws_mesh_subdivide.h"
 #include "qaws_mesh_intersect.h"
 #include "qaws_mesh_boolean.h"
 #include "qaws_volume_mesh.h"
