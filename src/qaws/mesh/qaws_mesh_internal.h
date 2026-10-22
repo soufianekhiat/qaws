@@ -203,6 +203,10 @@ extern unsigned char const vm_corners[4], vm_facets[4];
 unsigned char const* vm_facet(unsigned int type, unsigned int f, unsigned int* n);
 /* a mesh from its arrays (the facets matched here); INVALID_ARGUMENT for a bad index or type, INVALID_TOPOLOGY for unmatched facets */
 qaws_status vm_create(double const* x, unsigned int nv, unsigned int const* cv, unsigned char const* type, unsigned int nc, qaws_volume_mesh** out);
+/* the border points the tetrahedra's recovery added (steiner, per vertex) moved inside where they can be, their border
+   triangles merged back: out_moved of them, out_left not (qaws_volume_improve.c) */
+qaws_status vim_unsplit_border(qaws_volume_mesh** out_mesh, unsigned int* out_moved, unsigned int* out_left, qaws_volume_mesh const* mesh,
+	unsigned char const* steiner);
 /* a hexahedron's smallest scaled Jacobian over its corners (1 for a cube, negative when a corner turns over) */
 double vm_hex_quality(double const* x, unsigned int const* v);
 

@@ -1389,6 +1389,22 @@ it), and the volume equals the surface's to rounding. `border_only` keeps
 the border's vertices alone. `ENVELOPE` (triangle soups, fTetWild) and
 `STUFFING` are reserved.
 
+`keep_border` keeps the border as given, using TetGen's Steiner point suppression rather than a constrained Delaunay recovery. Each point the recovery added to the border is moved inside afterwards:
+
+1. its border triangles are merged (its link re-triangulated in its plane, or in each of two planes along a crease);
+2. its star is coned from the point inside where the worst cell is best;
+3. the result is improved with `qaws_volume_mesh_improve`.
+
+The report's `collapses` counts the points moved; `splits - collapses` stay on the border (a star no inside point sees whole). Coplanar border triangles may come back with other diagonals.
+
+| Check (test 175) | Result |
+|---|---|
+| Schonhardt's polyhedron (no tetrahedralization of its own vertices) | the recovery adds 3 border points (14 triangles); kept: 3 moved inside, the 8 triangles and 6 vertices as given, the volume exact, valid |
+| The convex twist (other diagonals) | no points added |
+| A sphere's rings, filled | 256 border triangles -> the 224 given; 16 points moved inside; dihedral >= 22.4 |
+
+Figure 43 (key H) shows Schonhardt's polyhedron, its cells recovered (points on the border) and with the border kept (points moved inside), and a sphere's rings filled with the border kept.
+
 ## Improving tetrahedra
 
 `qaws_volume_mesh_improve` (`qaws_volume_improve.h`) removes slivers and other poor tetrahedra from any tetrahedral mesh (Klingner and Shewchuk 2007), keeping the border exactly. A tetrahedron's quality is the smallest sine of its dihedral angles, which is negative when it is inverted. Each pass works on the tetrahedra whose angles fall outside [t, 180 - t], with t = `target_dihedral` (default 40 degrees):

@@ -16,6 +16,7 @@
  */
 
 #include "qaws_mesh_internal.h"
+#include "../qaws_volume_improve.h"
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_tetrahedralize.h"
 #include "../internal/qaws_internal_wide.h"
@@ -1720,6 +1721,37 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_me
 		nin++;
 	}
 	st = vm_create(xo, ninv, cells, ctype, nin, out_mesh);
+	if (st == QAWS_STATUS_OK && desc->keep_border && rep.splits)
+	{
+		/* the recovery's border points (on the border, not the input's) moved inside, then the cells improved */
+		unsigned char *in = (unsigned char*)qaws_internal_scratch_zalloc((size_t)m->nv + 1, 1), *steiner = (unsigned char*)qaws_internal_scratch_zalloc((size_t)ninv + 1, 1);
+		qaws_volume_mesh *u = NULL, *w = NULL;
+		unsigned int left = 0;
+		if (!in || !steiner)
+		{
+			qaws_internal_free(in);
+			qaws_internal_free(steiner);
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (i = 0; i < h->nv; i++)
+			if (map[i] != HM_NONE)
+				in[map[i]] = 1;
+		for (i = 0; i < 3 * t.nbt; i++)
+			if (!in[t.bt[i]] && vmap[t.bt[i]] != HM_NONE)
+				steiner[vmap[t.bt[i]]] = 1;
+		st = vim_unsplit_border(&u, &rep.collapses, &left, *out_mesh, steiner);
+		if (st == QAWS_STATUS_OK)
+			st = qaws_volume_mesh_improve(&w, NULL, u, NULL);
+		qaws_volume_mesh_destroy(u);
+		qaws_internal_free(in);
+		qaws_internal_free(steiner);
+		if (st == QAWS_STATUS_OK)
+		{
+			qaws_volume_mesh_destroy(*out_mesh);
+			*out_mesh = w;
+		}
+	}
 	if (st == QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d* b = NULL;

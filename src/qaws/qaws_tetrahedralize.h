@@ -42,9 +42,19 @@
  * the recovery stops short (sharp angles between border triangles);
  * INVALID_ARGUMENT for vertices closer than the lattice step.
  *
- * The report: splits, the border's added vertices; flips, its diagonals
- * flipped; moves, the vertices added inside; iterations, the recovery's
- * passes; quality, the result's border.
+ * keep_border: the points the recovery added to the border moved inside
+ * after (TetGen's Steiner point suppression): each one's border triangles
+ * merged (its link re-triangulated in its plane, or in each of two planes
+ * along a crease), its star coned from the point inside where the worst
+ * cell is best; then the result improved (qaws_volume_mesh_improve). The
+ * border is then the input's surface triangulated by its own vertices, but
+ * for points that could not be moved (a star no point inside sees whole).
+ * Coplanar border triangles may come back with other diagonals.
+ *
+ * The report: splits, the border's added vertices; collapses, those moved
+ * inside again (keep_border); flips, its diagonals flipped; moves, the
+ * vertices added inside; iterations, the recovery's passes; quality, the
+ * result's border.
  */
 
 #ifndef QAWS_ENUM_QAWS_TETRAHEDRALIZE_METHOD
@@ -63,6 +73,7 @@ typedef struct qaws_tetrahedralize_desc
 	qaws_scalar target_length;          /* inside; 0: the border's mean edge */
 	qaws_scalar radius_edge;            /* refinement bound (circumradius over shortest edge); 0: 2; negative: no refinement */
 	int border_only;                    /* 1: no vertex added inside (the border's vertices' cells, flipped) */
+	int keep_border;                    /* 1: the recovery's border points moved inside where they can be, the border's triangles merged back */
 } qaws_tetrahedralize_desc;
 
 qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* boundary,

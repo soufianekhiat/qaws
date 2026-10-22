@@ -59,6 +59,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Tetrahedra keeping the border (`qaws_tetrahedralize_desc.keep_border`): the
+  recovery's border points moved inside (Steiner point suppression), the
+  border's triangles merged back, the cells improved after; Schonhardt's
+  polyhedron filled with its 8 triangles. Test 175, figure 43 (key H).
 - Curved volume elements (`qaws_volume_mesh_quadratic_nodes`,
   `qaws_volume_curve.h`): P2 tetrahedra and triquadratic hexahedra, the
   border's nodes on a mesh reference, the displacement spread inside, elements

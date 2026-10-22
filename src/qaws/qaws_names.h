@@ -1635,6 +1635,7 @@
 #define sm_system_factor QAWS_SFX(sm_system_factor)
 #define sm_system_free QAWS_SFX(sm_system_free)
 #define sm_system_solve QAWS_SFX(sm_system_solve)
+#define vim_unsplit_border QAWS_SFX(vim_unsplit_border)
 #define vm_corners QAWS_SFX(vm_corners)
 #define vm_create QAWS_SFX(vm_create)
 #define vm_facet QAWS_SFX(vm_facet)
