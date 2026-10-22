@@ -5,9 +5,11 @@
  * the plane of the triangle the window enters; windows are propagated
  * cheapest first, each triangle's far edges taking the part of the window's
  * rays that crosses them; a saddle vertex (its angles summing to more than
- * 2 pi) or a border vertex reached is a new pseudo-source. A window is
- * dropped when one of the three vertices round it already reaches both its
- * ends shorter.
+ * 2 pi) or a border vertex reached is a new pseudo-source, expanded once
+ * when the queue reaches its distance. A window is dropped when one of the
+ * three vertices round it already reaches both its ends shorter; a window
+ * splitting at a vertex no sooner than an earlier one through the same edge
+ * keeps only the child away from that one (one angle, one split).
  */
 
 #include "../internal/qaws_internal_memory.h"
@@ -38,6 +40,7 @@ typedef struct gx_ctx
 	unsigned int *v0, *vc;  /* per vertex its corners (3 t + k) */
 	unsigned char* saddle;  /* per vertex: angles summing to more than 2 pi, or on the border */
 	double* d;              /* per vertex its distance */
+	double *split_d, *split_t; /* per triangle edge: the shortest distance a window entering there gave the third vertex, where its ray crossed */
 	gx_win* w;
 	unsigned int nw, capw;
 	unsigned int *heap, nh, caph;
@@ -179,16 +182,28 @@ static int gx_emit_across(gx_ctx* c, unsigned int f, unsigned int k, double cons
 	return gx_emit(c, o / 3, o % 3, L - u, -v, sigma, L - tf1, L - tf0);
 }
 
-/* vertex v reached at distance dist: kept if shorter; a saddle or border vertex then a pseudo-source, its windows across
-   the edges facing it in its triangles. 0 on allocation failure. */
+/* vertex v reached at distance dist: kept if shorter; a saddle or border vertex then a pseudo-source, its expansion queued
+   at its distance (f GX_NONE, k the vertex) so that a vertex reached shorter before then is expanded once. 0 on allocation
+   failure. */
 static int gx_reach(gx_ctx* c, unsigned int v, double dist)
 {
-	unsigned int j;
+	gx_win w;
 	if (!(dist < c->d[v] - GX_EPS * (1 + dist)))
 		return 1;
 	c->d[v] = dist;
 	if (!c->saddle[v])
 		return 1;
+	memset(&w, 0, sizeof w);
+	w.f = GX_NONE;
+	w.k = v;
+	w.sigma = w.key = dist;
+	return gx_push(c, &w);
+}
+
+/* a pseudo-source: its windows across the edges facing it in its triangles */
+static int gx_expand(gx_ctx* c, unsigned int v, double dist)
+{
+	unsigned int j;
 	for (j = c->v0[v]; j < c->v0[v + 1]; j++)
 	{
 		/* (the facing edge's ends are reached when its window is, in order: reaching them here would cascade) */
@@ -203,7 +218,7 @@ static int gx_reach(gx_ctx* c, unsigned int v, double dist)
 static int gx_propagate(gx_ctx* c, gx_win const* w)
 {
 	double U[3], e[3], n[3], L, wx, wy, S[3], sy = w->sy < -GX_EPS * 1e-3 ? w->sy : -GX_EPS * 1e-3;
-	unsigned int f = w->f, k = w->k, i, ce;
+	unsigned int f = w->f, k = w->k, i, ce, drop = 0;
 	gx_frame(c, f, k, U, e, n, &L, &wx, &wy);
 	/* the source back in space (unfolded into this triangle's plane) */
 	for (i = 0; i < 3; i++) S[i] = U[i] + w->sx * e[i] + w->sy * n[i];
@@ -217,7 +232,17 @@ static int gx_propagate(gx_ctx* c, gx_win const* w)
 		double tw = w->sx + (wx - w->sx) * (-sy) / (wy - sy);
 		if (tw >= w->t0 - GX_EPS * L && tw <= w->t1 + GX_EPS * L)
 		{
+			/* one angle, one split (Xin and Wang): a window reaching the third vertex no shorter than an earlier one through
+			   this edge keeps only its child on the side away from that one's ray (the other's paths would cross it) */
 			double dw = w->sigma + sqrt((wx - w->sx) * (wx - w->sx) + (wy - w->sy) * (wy - w->sy));
+			size_t a = 3 * (size_t)f + k;
+			if (dw < c->split_d[a])
+			{
+				c->split_d[a] = dw;
+				c->split_t[a] = tw;
+			}
+			else if (dw > c->split_d[a] + GX_EPS * (1 + dw))
+				drop = tw < c->split_t[a] ? 1u : tw > c->split_t[a] ? 2u : 0u;
 			if (!gx_reach(c, c->t[3 * f + (k + 2) % 3], dw))
 				return 0;
 		}
@@ -227,6 +252,8 @@ static int gx_propagate(gx_ctx* c, gx_win const* w)
 	{
 		double P[2], Q[2], dx, dy, lam[2], lo, hi;
 		unsigned int q;
+		if (ce == drop)
+			continue;
 		if (ce == 1) { P[0] = L; P[1] = 0; Q[0] = wx; Q[1] = wy; }
 		else { P[0] = wx; P[1] = wy; Q[0] = 0; Q[1] = 0; }
 		dx = Q[0] - P[0];
@@ -287,15 +314,22 @@ qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d
 	c.vc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)c.nt + 1));
 	c.saddle = (unsigned char*)qaws_internal_zalloc((size_t)c.nv + 1, 1);
 	c.d = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)c.nv + 1));
+	c.split_d = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.nt + 1));
+	c.split_t = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.nt + 1));
 	p = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)c.nv + 1));
 	ang = (double*)qaws_internal_scratch_zalloc((size_t)c.nv + 1, sizeof(double));
-	if (!c.x || !c.t || !c.adj || !c.v0 || !c.vc || !c.saddle || !c.d || !p || !ang)
+	if (!c.x || !c.t || !c.adj || !c.v0 || !c.vc || !c.saddle || !c.d || !c.split_d || !c.split_t || !p || !ang)
 		goto done;
 	qaws_mesh_3d_get_positions(p, mesh);
 	for (i = 0; i < 3 * c.nv; i++) c.x[i] = (double)p[i];
 	qaws_mesh_3d_get_triangles(c.t, mesh);
 	/* the neighbours: each directed edge's (smaller, larger) vertex pair and corner sorted, pairs of two matched */
-	for (i = 0; i < 3 * c.nt; i++) c.adj[i] = GX_NONE;
+	for (i = 0; i < 3 * c.nt; i++)
+	{
+		c.adj[i] = GX_NONE;
+		c.split_d[i] = HUGE_VAL;
+		c.split_t[i] = 0;
+	}
 	{
 		unsigned long long* kc = (unsigned long long*)qaws_internal_scratch_malloc(sizeof(unsigned long long) * 2 * (3 * (size_t)c.nt + 1));
 		if (!kc)
@@ -378,14 +412,14 @@ qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d
 	while (c.nh)
 	{
 		gx_win w = c.w[gx_pop(&c)];
-		if (!gx_propagate(&c, &w))
+		if (w.f == GX_NONE ? w.sigma == c.d[w.k] && !gx_expand(&c, w.k, w.sigma) : !gx_propagate(&c, &w))
 			goto done;
 	}
 	for (i = 0; i < c.nv; i++) out_distances[i] = (qaws_scalar)c.d[i];
 	st = QAWS_STATUS_OK;
 done:
 	qaws_internal_free(c.x); qaws_internal_free(c.t); qaws_internal_free(c.adj); qaws_internal_free(c.v0); qaws_internal_free(c.vc);
-	qaws_internal_free(c.saddle); qaws_internal_free(c.d); qaws_internal_free(c.w); qaws_internal_free(c.heap);
+	qaws_internal_free(c.saddle); qaws_internal_free(c.d); qaws_internal_free(c.split_d); qaws_internal_free(c.split_t); qaws_internal_free(c.w); qaws_internal_free(c.heap);
 	qaws_internal_free(p); qaws_internal_free(ang);
 	return st;
 }

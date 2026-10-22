@@ -88,9 +88,11 @@ qaws_status qaws_mesh_geodesic_path(qaws_scalar* out_points, qaws_mesh_location*
    from a source unfolded into the plane of the triangle it enters; windows
    go cheapest first, each triangle's far edges taking the part its rays
    cross; a saddle vertex (its angles summing to more than 2 pi) or a border
-   vertex reached becomes a pseudo-source. Without a factor or a solve: no
-   object needed. HUGE_VAL where no source reaches. The cost grows with the
-   windows (about n sqrt n on smooth meshes, n^2 at worst). */
+   vertex reached becomes a pseudo-source, expanded once at its distance; a
+   window splitting at a vertex no sooner than an earlier one through the
+   same edge keeps one child (one angle, one split). Without a factor or a
+   solve: no object needed. HUGE_VAL where no source reaches. The cost grows
+   with the windows (about n sqrt n on smooth meshes, n^2 at worst). */
 qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources,
 	unsigned int source_count);
 
