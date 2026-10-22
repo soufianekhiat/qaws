@@ -186,6 +186,7 @@ extern int test_169_mesh_connect_main(void);
 extern int test_170_repulsive_mesh_curves_main(void);
 extern int test_171_mesh_offset_main(void);
 extern int test_172_mesh_subdivide_main(void);
+extern int test_173_volume_improve_main(void);
 
 /* Test registry */
 typedef struct {
@@ -367,6 +368,7 @@ static test_suite const g_test_suites[] = {
 	{"170_repulsive_mesh_curves", test_170_repulsive_mesh_curves_main},
 	{"171_mesh_offset", test_171_mesh_offset_main},
 	{"172_mesh_subdivide", test_172_mesh_subdivide_main},
+	{"173_volume_improve", test_173_volume_improve_main},
 };
 
 int main(void) {

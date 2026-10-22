@@ -59,6 +59,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Improvement of tetrahedral meshes (`qaws_volume_mesh_improve`,
+  `qaws_volume_improve.h`): smoothing up the worst quality's gradient, edge
+  removal by the ring's best triangulation and face removal (Klingner and
+  Shewchuk), the border kept exactly. Test 173, figure 41 (key F).
 - Subdivision of meshes (`qaws_mesh_3d_subdivide`, `qaws_mesh_subdivide.h`): Loop
   and Catmull-Clark levels on a `qaws_mesh_3d`, the feature edges creases
   (semi-sharp by a sharpness per edge), corners kept, attributes carried by

@@ -174,6 +174,7 @@ add_executable(
 170_repulsive_mesh_curves.c
 171_mesh_offset.c
 172_mesh_subdivide.c
+173_volume_improve.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

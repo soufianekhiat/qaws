@@ -1389,6 +1389,29 @@ it), and the volume equals the surface's to rounding. `border_only` keeps
 the border's vertices alone. `ENVELOPE` (triangle soups, fTetWild) and
 `STUFFING` are reserved.
 
+## Improving tetrahedra
+
+`qaws_volume_mesh_improve` (`qaws_volume_improve.h`) removes slivers and other poor tetrahedra from any tetrahedral mesh (Klingner and Shewchuk 2007), keeping the border exactly. A tetrahedron's quality is the smallest sine of its dihedral angles, which is negative when it is inverted. Each pass works on the tetrahedra whose angles fall outside [t, 180 - t], with t = `target_dihedral` (default 40 degrees):
+
+- **Smoothing:** each free vertex is tried at its neighbours' centre and halfway there. It then steps up the gradient of the worst quality round it (the point of the active gradients' convex hull nearest zero, with a line search).
+- **Flips, where smoothing stalls:**
+  - edge removal: an inside edge's ring of 3 to 10 tetrahedra is replaced by the ring polygon's best triangulation (Shewchuk's dynamic program; the 3-2 flip is the ring of 3);
+  - face removal: the 2-3 flip.
+
+Smoothing comes first because a flip can leave a tetrahedron of border vertices only, which smoothing cannot reach. Every operation is kept only when it raises the worst quality of what it replaces.
+
+Border facets, their vertices and the other cells (and their vertices) do not move. The result's border is the input's, and its volume is the same. The report gives the passes, the operations, the quality before and after, and the result's `qaws_volume_quality`.
+
+| Check (test 173) | Result |
+|---|---|
+| Three flat wedges round a long edge | 3-2 flip: 0.198 -> 0.874, border's 6 triangles the same |
+| A cap on a tetrahedron | 2-3 flip: 0.196 -> 0.632 |
+| A cube's Kuhn grid (384 tetrahedra) shaken | worst dihedral 0.80 -> 40.0 degrees; the border's 192 triangles and vertices the same; volume 1 |
+| Smoothing alone / flips alone / both | 0.643 / 0.328 / 0.643 (from 0.014) |
+| Refusals: no tetrahedra | INVALID_ARGUMENT |
+
+Figure 41 (key F) shows a shaken grid (worst dihedral 1.6 -> 35.0 degrees), the blob's tetrahedra from `qaws_volume_mesh_tetrahedralize` improved further (18.7 -> 37.9), and the histograms of the smallest dihedral angle per cell.
+
 ## Hexahedra
 
 ```c
