@@ -499,7 +499,7 @@ static void test_exact(void)
 	qaws_mesh_location src;
 	qaws_scalar *dg, *dc, *d2;
 	unsigned int i, ng = qaws_mesh_3d_get_vertex_count(g), nc = qaws_mesh_3d_get_vertex_count(cube), n2 = qaws_mesh_3d_get_vertex_count(two), far = 0;
-	double eg = 0, ec = 0, corner = 0, sp[3];
+	double eg = 0, ec = 0, corner = 0, sp[3], plen = 0, perr = 1;
 	qaws_status s1, s2, s3;
 	char msg[400];
 	dg = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ng);
@@ -543,14 +543,41 @@ static void test_exact(void)
 		if (q.x == 1 && q.y == 1 && q.z == 1)
 			corner = (double)dc[i];
 	}
+	/* the path down the exact distances from (1, 2/3, 1/3) on the far face: as long as the unfolding's segment */
+	{
+		qaws_mesh_geodesic* geo = NULL;
+		qaws_scalar pts[3 * 256];
+		unsigned int count = 0, k;
+		double want = 0;
+		qaws_mesh_location from;
+		for (i = 0; i < nc; i++)
+		{
+			qaws_vec3 q = qaws_mesh_3d_get_vertex(cube, i);
+			if (q.x == 1 && fabs((double)q.y - 2.0 / 3) < 1e-6 && fabs((double)q.z - 1.0 / 3) < 1e-6)
+			{
+				double pp[3] = { q.x, q.y, q.z };
+				want = gd_cube_distance(pp);
+				break;
+			}
+		}
+		from = gd_at_vertex(cube, i);
+		qaws_mesh_geodesic_create(&geo, cube, NULL);
+		if (geo && qaws_mesh_geodesic_path(pts, NULL, &count, geo, dc, &src, 1, from, 256) == QAWS_STATUS_OK)
+			for (k = 1; k < count; k++)
+				plen += sqrt(((double)pts[3 * k] - (double)pts[3 * k - 3]) * ((double)pts[3 * k] - (double)pts[3 * k - 3]) +
+					((double)pts[3 * k + 1] - (double)pts[3 * k - 2]) * ((double)pts[3 * k + 1] - (double)pts[3 * k - 2]) +
+					((double)pts[3 * k + 2] - (double)pts[3 * k - 1]) * ((double)pts[3 * k + 2] - (double)pts[3 * k - 1]));
+		perr = fabs(plen - want);
+		qaws_mesh_geodesic_destroy(geo);
+	}
 	/* two grids apart: the second not reached */
 	src = gd_at_vertex(two, 0);
 	s3 = qaws_mesh_3d_geodesic_exact(d2, two, &src, 1);
 	for (i = 0; i < n2; i++) far += (double)d2[i] == HUGE_VAL;
-	sprintf(msg, "exact geodesics: a flat grid from inside a triangle, off Euclid by %.1e; the cube from a corner, off its unfoldings by %.1e, the far corner at %.12f (sqrt 5 = 2.236067977500); two grids apart, %u of %u unreached",
-		eg, ec, corner, far, n2);
+	sprintf(msg, "exact geodesics: a flat grid from inside a triangle, off Euclid by %.1e; the cube from a corner, off its unfoldings by %.1e, the far corner at %.12f (sqrt 5 = 2.236067977500), a path down them %.12f long, off the unfolding by %.1e; two grids apart, %u of %u unreached",
+		eg, ec, corner, plen, perr, far, n2);
 	printf("  %s\n", msg);
-	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_OK && eg < 1e-12 && ec < 1e-12 && fabs(corner - sqrt(5.0)) < 1e-12 &&
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_OK && eg < 1e-12 && ec < 1e-12 && fabs(corner - sqrt(5.0)) < 1e-12 && perr < 1e-9 &&
 		far == n2 / 2, msg);
 	free(dg);
 	free(dc);

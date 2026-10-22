@@ -75,9 +75,9 @@ void qaws_mesh_geodesic_destroy(qaws_mesh_geodesic* geodesic);
 qaws_status qaws_mesh_geodesic_distance(qaws_scalar* out_distances, qaws_mesh_geodesic const* geodesic, qaws_mesh_location const* sources,
 	unsigned int source_count);
 
-/* the path from a location down the distances (from qaws_mesh_geodesic_distance with these sources) to the nearest source: its
-   points (3 each) and locations, from the start to the source; either output may be NULL. BUFFER_TOO_SMALL with the count when
-   capacity is short */
+/* the path from a location down the distances (from qaws_mesh_geodesic_distance or qaws_mesh_3d_geodesic_exact with these
+   sources) to the nearest source: its points (3 each) and locations, from the start to the source; either output may be NULL.
+   BUFFER_TOO_SMALL with the count when capacity is short */
 qaws_status qaws_mesh_geodesic_path(qaws_scalar* out_points, qaws_mesh_location* out_locations, unsigned int* out_count,
 	qaws_mesh_geodesic const* geodesic, qaws_scalar const* distances, qaws_mesh_location const* sources, unsigned int source_count,
 	qaws_mesh_location from, unsigned int capacity);
