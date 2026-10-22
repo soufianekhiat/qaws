@@ -179,6 +179,16 @@ Larger:
    stretch bound met with fewer charts, fill above 0.6.
 5. **BFF, further:** prescribed border angles (cone points), the inside by the conjugate harmonic. Check: a square
    chart from a disc with four corners, angles kept.
+6. **Weights per edge on every skeleton** (asked 2026-10-22). Today `qaws_skeleton` weighs its lines only
+   (`weight_fn`); arcs and the circles opened at reflex vertices move at speed 1, so the medial axis mode (splice angle
+   pi) is unweighted; the surface regions' `qaws_surface_region_medial_axis` and `qaws_surface_region_mitered_skeleton`
+   take no weights. To do: a weight for arcs (the space-time cone |p - m| = r -+ w t, its events still linear or one
+   quadratic), for the splice circles (by default the larger of the reflex vertex's two edges' weights, or a weight per
+   vertex given), so the weighted medial axis (each feature's distance divided by its weight) comes out of the same
+   events; on surfaces, a weight per boundary piece and per corner in the labels (the least weighted geodesic distance)
+   and in the crossings and junctions (Newton on the weighted equalities). Check: a rectangle with one side at weight 2
+   (the roof's known faces); a square's weighted medial axis against the weighted bisectors; a planar surface region
+   equal to the 2D skeleton with the same weights.
 
 Smaller (each with its check): Zorin's refined butterfly border rules; Kobbelt's ternary sqrt(3) border; Catmull-Clark
 adaptive levels; geodesic regions' borders inside triangles; fewer saddle windows; corner attributes in decimation (UV
