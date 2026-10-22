@@ -55,6 +55,15 @@
  *              vertices are held still with QAWS_DECIMATE_LOCK_BORDER.
  *   shape      a collapse turning a face by more than max_normal_angle is
  *              refused.
+ * attributes  with attribute_weight, the per vertex LINEAR and NORMALIZED
+ *              attributes join the quadric (Hoppe 1999): over each triangle
+ *              each component is the linear function through its corners'
+ *              values, and a vertex is charged its squared difference from
+ *              it, a unit of attribute counting as attribute_weight of
+ *              distance. A collapse places the position and the attributes
+ *              together where the sum is least; collapses that would
+ *              smear an attribute's change cost, so its edges are kept.
+ *              The error then reads in the same units.
  * Attributes follow the collapses by their rules (qaws_mesh.h). Their seams
  * stay: an inside edge whose faces' corner attributes differ at either end
  * (UVs cut apart, split normals) or whose faces' attributes differ
@@ -86,6 +95,8 @@ typedef struct qaws_decimate_desc
 	qaws_scalar silhouette_weight;      /* the given views' planes against the faces' (per squared edge length), the octahedral
 	                                       views' factor; 0: 100 */
 	qaws_scalar feature_weight;         /* the border's and features' planes, the same way; 0: 100 */
+	qaws_scalar attribute_weight;       /* a unit of the vertex attributes (LINEAR, NORMALIZED) as this distance in the quadric
+	                                       (Hoppe 1999); 0: the attributes not in it */
 } qaws_decimate_desc;
 
 typedef struct qaws_decimate_report

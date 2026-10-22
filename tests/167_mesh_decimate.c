@@ -15,6 +15,8 @@
  *     unseen);
  *   - creases found by angle on a cube without features; importance 0 keeps
  *     vertices; a tight bound on the faces' turn stops earlier;
+ *   - attributes in the quadric: a sheet's colour step kept where plain
+ *     quadrics smear it, a linear colour exact at the vertices left;
  *   - refusals: no mesh, a negative error bound.
  */
 
@@ -604,6 +606,92 @@ static void test_refusals(void)
 	qaws_mesh_3d_destroy(m);
 }
 
+/* a flat sheet's vertex attribute at (px, py), linear over the triangle holding it; -1e30 outside */
+static double dm_value_at(qaws_mesh_3d const* m, qaws_scalar const* s, double px, double py)
+{
+	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), f, t[3];
+	for (f = 0; f < nt; f++)
+	{
+		qaws_vec3 a, b, c;
+		double d, l1, l2;
+		qaws_mesh_3d_get_triangle(t, m, f);
+		a = qaws_mesh_3d_get_vertex(m, t[0]);
+		b = qaws_mesh_3d_get_vertex(m, t[1]);
+		c = qaws_mesh_3d_get_vertex(m, t[2]);
+		d = ((double)b.x - a.x) * ((double)c.y - a.y) - ((double)c.x - a.x) * ((double)b.y - a.y);
+		if (d == 0)
+			continue;
+		l1 = ((px - a.x) * ((double)c.y - a.y) - ((double)c.x - a.x) * (py - a.y)) / d;
+		l2 = (((double)b.x - a.x) * (py - a.y) - (px - a.x) * ((double)b.y - a.y)) / d;
+		if (l1 >= -1e-9 && l2 >= -1e-9 && l1 + l2 <= 1 + 1e-9)
+			return (1 - l1 - l2) * (double)s[t[0]] + l1 * (double)s[t[1]] + l2 * (double)s[t[2]];
+	}
+	return -1e30;
+}
+
+/* a flat sheet's colour stepping from 0 to 1 along x = 0.5: plain quadrics see no cost and smear it, the attribute's
+   quadric keeps the step; a colour linear in the position stays exact at the vertices left */
+static void test_attributes(void)
+{
+	unsigned int n = 16, nv = (n + 1) * (n + 1), r, i, id, faces[3] = { 0, 0, 0 };
+	double rms[2] = { 0, 0 }, lin = 0;
+	char msg[300];
+	for (r = 0; r < 3; r++)
+	{
+		qaws_mesh_3d* m = dm_grid(n);
+		qaws_scalar* s0 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+		qaws_scalar* s1 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+		qaws_attribute_desc ad;
+		qaws_decimate_desc d;
+		unsigned int m1;
+		for (i = 0; i < nv; i++)
+		{
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(m, i);
+			s0[i] = (qaws_scalar)(r == 2 ? 0.3 * (double)p.x - 0.7 * (double)p.y + 2 : ((double)p.x > 0.5 + 1e-9 ? 1 : 0));
+		}
+		memset(&ad, 0, sizeof ad);
+		ad.name = "colour";
+		ad.element = QAWS_MESH_VERTEX;
+		ad.components = 1;
+		ad.rule = QAWS_ATTRIBUTE_LINEAR;
+		qaws_mesh_3d_add_attribute(&id, m, s0, &ad);
+		memset(&d, 0, sizeof d);
+		d.target_faces = 2 * n * n / 6;
+		d.attribute_weight = (qaws_scalar)(r ? 1 : 0);
+		{
+			qaws_decimate_report rep;
+			qaws_mesh_3d_decimate(&rep, m, &d);
+			faces[r] = rep.faces_after;
+		}
+		m1 = qaws_mesh_3d_get_vertex_count(m);
+		qaws_mesh_3d_find_attribute(&id, m, "colour");
+		qaws_mesh_3d_get_attribute(s1, m, id);
+		if (r < 2)
+		{
+			/* the original vertices' colours against the decimated sheet's */
+			for (i = 0; i < nv; i++)
+			{
+				double px = (double)(i % (n + 1)) / n, py = (double)(i / (n + 1)) / n, want = px > 0.5 + 1e-9 ? 1 : 0, got = dm_value_at(m, s1, px, py);
+				rms[r] += (got - want) * (got - want);
+			}
+			rms[r] = sqrt(rms[r] / nv);
+		}
+		else
+			for (i = 0; i < m1; i++)
+			{
+				qaws_vec3 p = qaws_mesh_3d_get_vertex(m, i);
+				lin = fmax(lin, fabs((double)s1[i] - (0.3 * (double)p.x - 0.7 * (double)p.y + 2)));
+			}
+		qaws_mesh_3d_destroy(m);
+		free(s0);
+		free(s1);
+	}
+	sprintf(msg, "attributes in the quadric: a colour step on a sheet decimated to %u and %u faces, rms %.3f plain, %.3f with the attribute; a linear colour off by %.1e",
+		faces[0], faces[1], rms[0], rms[1], lin);
+	printf("  %s\n", msg);
+	TEST_ASSERT(faces[1] <= 2 * n * n / 6 + 1 && faces[0] <= 2 * n * n / 6 + 1 && rms[1] < 0.25 * rms[0] && lin < 1e-12, msg);
+}
+
 int test_167_mesh_decimate_main(void)
 {
 	g_pass = 0;
@@ -615,6 +703,7 @@ int test_167_mesh_decimate_main(void)
 	test_silhouette();
 	test_options();
 	test_seams();
+	test_attributes();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

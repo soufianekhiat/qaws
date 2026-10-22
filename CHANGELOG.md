@@ -59,6 +59,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Attributes in the decimation's quadric (`attribute_weight`, Hoppe 1999): vertex
+  colours and other LINEAR attributes steer the collapses and are placed by the
+  same solve. Test 167, figure 51 (key P).
 - Exact geodesics in bounded memory: processed windows' slots reused (59 MB at
   100k vertices, was 460 MB at 20k); times measured to 100k vertices.
 - Exact geodesic distances anywhere (`qaws_mesh_3d_geodesic_exact_at`): at

@@ -12,14 +12,76 @@
 #include <string.h>
 #include <math.h>
 
-/* a quadric: the symmetric 4 x 4 [a b c d]^T [a b c d] summed, its 10 entries a2 ab ac ad b2 bc bd c2 cd d2 */
-static void dc_plane(double* Q, double const* n, double d, double w)
+/* a quadric over the augmented point (x, y, z, the attributes scaled, 1) of n1 coordinates: the symmetric n1 x n1 sum of
+   v v^T, packed by rows above the diagonal (without attributes the 10 entries a2 ab ac ad b2 bc bd c2 cd d2); entry (i, j),
+   i <= j */
+static size_t dc_at(unsigned int n1, unsigned int i, unsigned int j)
+{
+	return (size_t)i * n1 - (size_t)i * (i ? i - 1 : 0) / 2 + (j - i);
+}
+
+/* the plane n . x + d = 0, its squared distance weighted by w */
+static void dc_plane(double* Q, unsigned int n1, double const* n, double d, double w)
 {
 	double p[4] = { n[0], n[1], n[2], d };
-	unsigned int i, j, k = 0;
+	unsigned int at[4] = { 0, 1, 2 }, i, j;
+	at[3] = n1 - 1;
 	for (i = 0; i < 4; i++)
 		for (j = i; j < 4; j++)
-			Q[k++] += w * p[i] * p[j];
+			Q[dc_at(n1, at[i], at[j])] += w * p[i] * p[j];
+}
+
+/* Q's value at the augmented point z (n1 coordinates, the last 1) */
+static double dc_eval_n(double const* Q, double const* z, unsigned int n1)
+{
+	unsigned int i, j;
+	double e = 0;
+	for (i = 0; i < n1; i++)
+		for (j = i; j < n1; j++)
+			e += (i == j ? 1 : 2) * Q[dc_at(n1, i, j)] * z[i] * z[j];
+	return e;
+}
+
+/* M r' = r for n unknowns (M n x n by rows, overwritten; r the solution), partial pivoting; 0 when near singular */
+static int dc_solve(double* M, double* r, unsigned int n)
+{
+	unsigned int i, j, k;
+	double big = 0;
+	for (i = 0; i < n * n; i++) big = fmax(big, fabs(M[i]));
+	for (k = 0; k < n; k++)
+	{
+		unsigned int piv = k;
+		for (i = k + 1; i < n; i++)
+			if (fabs(M[i * n + k]) > fabs(M[piv * n + k]))
+				piv = i;
+		if (!(fabs(M[piv * n + k]) > 1e-12 * big))
+			return 0;
+		if (piv != k)
+		{
+			double t;
+			for (j = 0; j < n; j++)
+			{
+				t = M[k * n + j];
+				M[k * n + j] = M[piv * n + j];
+				M[piv * n + j] = t;
+			}
+			t = r[k];
+			r[k] = r[piv];
+			r[piv] = t;
+		}
+		for (i = k + 1; i < n; i++)
+		{
+			double f = M[i * n + k] / M[k * n + k];
+			for (j = k; j < n; j++) M[i * n + j] -= f * M[k * n + j];
+			r[i] -= f * r[k];
+		}
+	}
+	for (k = n; k-- > 0;)
+	{
+		for (j = k + 1; j < n; j++) r[k] -= M[k * n + j] * r[j];
+		r[k] /= M[k * n + k];
+	}
+	return 1;
 }
 
 static double dc_eval(double const* Q, double const* x)
@@ -96,6 +158,10 @@ static void dc_pop(dc_heap* H, dc_entry* out)
 typedef struct dc_work
 {
 	qaws_hm* m;
+	unsigned int n1, K;             /* the augmented coordinates (4 + the attributes' components), a quadric's entries */
+	unsigned int *ca, *ck;          /* per attribute component in the quadric: its attribute and component */
+	double alpha;                   /* the attributes' scale: a unit of them as this distance */
+	double *q, *M, *r, *z;          /* scratch: a quadric, a system, its right side, an augmented point */
 	double *Q, *W;
 	unsigned int* stamp;
 	unsigned char* border;
@@ -103,18 +169,36 @@ typedef struct dc_work
 	double cosmax;                  /* the cosine of the largest turn of a face a collapse may make */
 } dc_work;
 
-/* a merged into b: allowed, and where b goes and the error there; 0 when refused */
-static int dc_candidate(dc_work const* w, unsigned int a, unsigned int b, double* x, double* cost)
+/* the attributes (scaled) least for Q at position z[0..2], into z[3..n1 - 2]; where Q gives none, a's and b's mean */
+static void dc_attributes(dc_work const* w, double const* Q, double* z, unsigned int a, unsigned int b)
+{
+	unsigned int n1 = w->n1, na = n1 - 4, i, j;
+	for (i = 0; i < na; i++)
+	{
+		for (j = 0; j < na; j++) w->M[i * na + j] = Q[dc_at(n1, 3 + (i < j ? i : j), 3 + (i < j ? j : i))];
+		w->r[i] = -Q[dc_at(n1, 3 + i, n1 - 1)];
+		for (j = 0; j < 3; j++) w->r[i] -= Q[dc_at(n1, j, 3 + i)] * z[j];
+	}
+	if (dc_solve(w->M, w->r, na))
+		memcpy(z + 3, w->r, sizeof(double) * na);
+	else
+		for (i = 0; i < na; i++)
+			z[3 + i] = 0.5 * w->alpha * (hm_attr_at(w->m, w->ca[i], a)[w->ck[i]] + hm_attr_at(w->m, w->ca[i], b)[w->ck[i]]);
+}
+
+/* a merged into b: allowed, and where b goes (and its attributes, scaled, into s when given) and the error there; 0 when
+   refused */
+static int dc_candidate(dc_work const* w, unsigned int a, unsigned int b, double* x, double* s, double* cost)
 {
 	qaws_hm const* m = w->m;
-	unsigned int c = hm_find_edge(m, a, b), k;
-	double Q[10], best = HUGE_VAL, tries[4][3], wsum = w->W[a] + w->W[b];
+	unsigned int c = hm_find_edge(m, a, b), k, n1 = w->n1;
+	double *Q = w->q, best = HUGE_VAL, tries[4][3], wsum = w->W[a] + w->W[b];
 	int fixed, nt = 0, i;
 	if (c == HM_NONE || (m->vflag[a] & HM_CORNER) || (hm_feature_degree(m, a) && !(m->cflag[c] & HM_FEATURE)) || w->locked[a]
 		|| !hm_can_collapse(m, c, a))
 		return 0;
-	for (k = 0; k < 10; k++)
-		Q[k] = w->Q[10 * (size_t)a + k] + w->Q[10 * (size_t)b + k];
+	for (k = 0; k < w->K; k++)
+		Q[k] = w->Q[w->K * (size_t)a + k] + w->Q[w->K * (size_t)b + k];
 	/* b stays where it is when it may not leave its place: a corner, a locked border vertex, a feature vertex the edge leaves */
 	fixed = (m->vflag[b] & HM_CORNER) || w->locked[b] || (hm_feature_degree(m, b) && !(m->cflag[c] & HM_FEATURE));
 	memcpy(tries[nt++], m->x + 3 * (size_t)b, 3 * sizeof(double));
@@ -124,16 +208,39 @@ static int dc_candidate(dc_work const* w, unsigned int a, unsigned int b, double
 		for (k = 0; k < 3; k++)
 			tries[nt][k] = 0.5 * (m->x[3 * (size_t)a + k] + m->x[3 * (size_t)b + k]);
 		nt++;
-		if (dc_optimal(Q, tries[nt]))
+		if (n1 == 4 ? dc_optimal(Q, tries[nt]) : 0)
 			nt++;
+		else if (n1 > 4)
+		{
+			/* (with attributes: the position and the attributes least together) */
+			unsigned int D = n1 - 1, j;
+			for (k = 0; k < D; k++)
+			{
+				for (j = 0; j < D; j++) w->M[k * D + j] = Q[dc_at(n1, k < j ? k : j, k < j ? j : k)];
+				w->r[k] = -Q[dc_at(n1, k, D)];
+			}
+			if (dc_solve(w->M, w->r, D))
+				memcpy(tries[nt++], w->r, 3 * sizeof(double));
+		}
 	}
 	for (i = 0; i < nt; i++)
 	{
-		double e = dc_eval(Q, tries[i]);
+		double e;
+		if (n1 == 4)
+			e = dc_eval(Q, tries[i]);
+		else
+		{
+			memcpy(w->z, tries[i], 3 * sizeof(double));
+			dc_attributes(w, Q, w->z, a, b);
+			w->z[n1 - 1] = 1;
+			e = dc_eval_n(Q, w->z, n1);
+		}
 		if (e < best)
 		{
 			best = e;
 			memcpy(x, tries[i], 3 * sizeof(double));
+			if (s && n1 > 4)
+				memcpy(s, w->z + 3, sizeof(double) * (n1 - 4));
 		}
 	}
 	*cost = (best > 0 ? best : 0) / (wsum > 0 ? wsum : 1);
@@ -200,7 +307,7 @@ static int dc_push_edges(dc_work const* w, dc_heap* H, unsigned int v, unsigned 
 			double x[3];
 			e.a = s ? u : v;
 			e.b = s ? v : u;
-			if (!dc_candidate(w, e.a, e.b, x, &e.cost))
+			if (!dc_candidate(w, e.a, e.b, x, NULL, &e.cost))
 				continue;
 			e.sa = w->stamp[e.a];
 			e.sb = w->stamp[e.b];
@@ -397,8 +504,8 @@ static unsigned int dc_silhouettes(dc_work* w, double const* views, unsigned int
 				for (k = 0; k < 3; k++)
 					pl[k] /= ls;
 				d = -(pl[0] * pa[0] + pl[1] * pa[1] + pl[2] * pa[2]);
-				dc_plane(w->Q + 10 * (size_t)a, pl, d, weight * l2 / nviews);
-				dc_plane(w->Q + 10 * (size_t)b, pl, d, weight * l2 / nviews);
+				dc_plane(w->Q + w->K * (size_t)a, w->n1, pl, d, weight * l2 / nviews);
+				dc_plane(w->Q + w->K * (size_t)b, w->n1, pl, d, weight * l2 / nviews);
 				n++;
 			}
 		}
@@ -421,7 +528,8 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	qaws_hm* m;
 	dc_work w;
 	dc_heap H;
-	unsigned int *ring = NULL, rcap = 64, f, v, k, c, live, target;
+	unsigned int *ring = NULL, rcap = 64, f, v, k, c, live, target, na = 0, a0;
+	double* sopt = NULL;
 	double bound2, *views = NULL, *share = NULL, *seen = NULL, sweight = desc && desc->silhouette_weight > 0 ? (double)desc->silhouette_weight : 100;
 	unsigned int nviews = 0;
 	int failed = 0;
@@ -430,7 +538,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		report = &local;
 	memset(report, 0, sizeof *report);
 	if (!mesh || (desc && (!(desc->max_error >= 0) || !(desc->crease_angle >= 0) || !(desc->max_normal_angle >= 0) || !(desc->silhouette_weight >= 0)
-		|| !(desc->feature_weight >= 0) || (desc->view_count && !desc->views))))
+		|| !(desc->feature_weight >= 0) || !(desc->attribute_weight >= 0) || (desc->view_count && !desc->views))))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = &mesh->hm;
 	memset(&w, 0, sizeof w);
@@ -459,7 +567,30 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	if (desc && desc->crease_angle > 0)
 		report->creases = dc_creases(m, (double)desc->crease_angle);
 	report->seams = dc_seams(m);
-	w.Q = (double*)qaws_internal_zalloc(qaws_internal_mul2(10, (size_t)m->nv + 1), sizeof(double));
+	/* the vertex attributes in the quadric (Hoppe 1999): LINEAR and NORMALIZED ones, with attribute_weight */
+	w.alpha = desc ? (double)desc->attribute_weight : 0;
+	for (a0 = 0; w.alpha > 0 && a0 < m->na; a0++)
+		if (m->attr[a0].element == QAWS_MESH_VERTEX && (m->attr[a0].rule == QAWS_ATTRIBUTE_LINEAR || m->attr[a0].rule == QAWS_ATTRIBUTE_NORMALIZED))
+			na += m->attr[a0].n;
+	w.n1 = 4 + na;
+	w.K = w.n1 * (w.n1 + 1) / 2;
+	w.ca = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)na + 1));
+	w.ck = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)na + 1));
+	w.q = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)w.K + 1));
+	w.M = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)w.n1 * w.n1 + 1));
+	w.r = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)w.n1 + 1));
+	w.z = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)w.n1 + 1));
+	sopt = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)na + 1));
+	if (!w.ca || !w.ck || !w.q || !w.M || !w.r || !w.z || !sopt)
+		goto done;
+	for (a0 = 0, k = 0; na && a0 < m->na; a0++)
+		if (m->attr[a0].element == QAWS_MESH_VERTEX && (m->attr[a0].rule == QAWS_ATTRIBUTE_LINEAR || m->attr[a0].rule == QAWS_ATTRIBUTE_NORMALIZED))
+			for (c = 0; c < m->attr[a0].n; c++, k++)
+			{
+				w.ca[k] = a0;
+				w.ck[k] = c;
+			}
+	w.Q = (double*)qaws_internal_zalloc(qaws_internal_mul2(w.K, (size_t)m->nv + 1), sizeof(double));
 	w.W = (double*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(double));
 	w.stamp = (unsigned int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(unsigned int));
 	w.border = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
@@ -514,7 +645,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		e = m->fc[f] + m->fn[f];
 		for (c = m->fc[f]; c < e; c++)
 		{
-			dc_plane(w.Q + 10 * (size_t)m->cv[c], n, d, a * (desc && desc->importance && desc->importance[m->cv[c]] > 0 ? (double)desc->importance[m->cv[c]] : 1)
+			dc_plane(w.Q + w.K * (size_t)m->cv[c], w.n1, n, d, a * (desc && desc->importance && desc->importance[m->cv[c]] > 0 ? (double)desc->importance[m->cv[c]] : 1)
 				* (share ? share[m->cv[c]] * seen[f] : 1));
 			w.W[m->cv[c]] += a;
 			if (m->co[c] == HM_NONE || (m->cflag[c] & HM_FEATURE))
@@ -532,9 +663,72 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 					{
 					double ds = -(s[0] * p[0] + s[1] * p[1] + s[2] * p[2]);
 					double fw = desc && desc->feature_weight > 0 ? (double)desc->feature_weight : 100;
-					dc_plane(w.Q + 10 * (size_t)m->cv[c], s, ds, fw * l2);
-					dc_plane(w.Q + 10 * (size_t)hm_to(m, c), s, ds, fw * l2);
+					dc_plane(w.Q + w.K * (size_t)m->cv[c], w.n1, s, ds, fw * l2);
+					dc_plane(w.Q + w.K * (size_t)hm_to(m, c), w.n1, s, ds, fw * l2);
 					}
+				}
+			}
+		}
+	}
+	for (f = 0; na && f < m->nf; f++)
+	{
+		/* each fan triangle's attributes as linear functions over its plane: (g . x + d - s)^2 by its area on its corners */
+		unsigned int c0 = m->fc[f], i;
+		double n[3], an;
+		if (m->fflag[f] & HM_DELETED)
+			continue;
+		hm_face_normal(m, f, n);
+		an = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		if (!(an > 0))
+			continue;
+		for (k = 0; k < 3; k++)
+			n[k] /= an;
+		for (i = 1; i + 1 < m->fn[f]; i++)
+		{
+			unsigned int tv[3], j, q;
+			double const* P[3];
+			double e1[3], e2[3], cr[3], area;
+			tv[0] = m->cv[c0];
+			tv[1] = m->cv[c0 + i];
+			tv[2] = m->cv[c0 + i + 1];
+			for (j = 0; j < 3; j++) P[j] = m->x + 3 * (size_t)tv[j];
+			for (k = 0; k < 3; k++)
+			{
+				e1[k] = P[1][k] - P[0][k];
+				e2[k] = P[2][k] - P[0][k];
+			}
+			cr[0] = e1[1] * e2[2] - e1[2] * e2[1];
+			cr[1] = e1[2] * e2[0] - e1[0] * e2[2];
+			cr[2] = e1[0] * e2[1] - e1[1] * e2[0];
+			area = 0.5 * sqrt(cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]);
+			if (!(area > 0))
+				continue;
+			for (q = 0; q < na; q++)
+			{
+				double M4[16], r4[4];
+				for (j = 0; j < 3; j++)
+				{
+					for (k = 0; k < 3; k++) M4[4 * j + k] = P[j][k];
+					M4[4 * j + 3] = 1;
+					r4[j] = w.alpha * hm_attr_at(m, w.ca[q], tv[j])[w.ck[q]];
+				}
+				for (k = 0; k < 3; k++) M4[12 + k] = n[k];
+				M4[15] = 0;
+				r4[3] = 0;
+				if (!dc_solve(M4, r4, 4))
+					continue;
+				for (k = 0; k < w.n1; k++) w.z[k] = 0;
+				for (k = 0; k < 3; k++) w.z[k] = r4[k];
+				w.z[3 + q] = -1;
+				w.z[w.n1 - 1] = r4[3];
+				for (j = 0; j < 3; j++)
+				{
+					double imp = desc->importance && desc->importance[tv[j]] > 0 ? (double)desc->importance[tv[j]] : 1;
+					unsigned int u, t2;
+					double* Qv = w.Q + w.K * (size_t)tv[j];
+					for (u = 0; u < w.n1; u++)
+						for (t2 = u; t2 < w.n1; t2++)
+							Qv[dc_at(w.n1, u, t2)] += area * imp * w.z[u] * w.z[t2];
 				}
 			}
 		}
@@ -557,7 +751,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 			continue;   /* (stale) */
 		if (e.cost > bound2)
 			break;
-		if (!dc_candidate(&w, a, b, x, &cost) || !dc_no_fold(m, a, b, x, w.cosmax))
+		if (!dc_candidate(&w, a, b, x, sopt, &cost) || !dc_no_fold(m, a, b, x, w.cosmax))
 			continue;
 		/* the faces of the edge that go: its triangles */
 		for (c = m->vc[a]; c != HM_NONE; c = hm_round(m, a, c))
@@ -581,8 +775,18 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 			failed = 1;   /* (out of memory: what was done stays, compacted) */
 			break;
 		}
-		for (k = 0; k < 10; k++)
-			w.Q[10 * (size_t)b + k] += w.Q[10 * (size_t)a + k];
+		for (k = 0; k < na; k++)
+			hm_attr_at(m, w.ca[k], b)[w.ck[k]] = sopt[k] / w.alpha;
+		for (a0 = 0; na && a0 < m->na; a0++)
+			if (m->attr[a0].element == QAWS_MESH_VERTEX && m->attr[a0].rule == QAWS_ATTRIBUTE_NORMALIZED)
+			{
+				double* y = hm_attr_at(m, a0, b), l = 0;
+				for (k = 0; k < m->attr[a0].n; k++) l += y[k] * y[k];
+				l = sqrt(l);
+				for (k = 0; l > 1e-300 && k < m->attr[a0].n; k++) y[k] /= l;
+			}
+		for (k = 0; k < w.K; k++)
+			w.Q[w.K * (size_t)b + k] += w.Q[w.K * (size_t)a + k];
 		w.W[b] += w.W[a];
 		w.border[b] |= w.border[a];
 		w.stamp[a]++;
@@ -606,5 +810,7 @@ done:
 	qaws_mesh_reference_destroy(ref);
 	qaws_internal_free(w.Q); qaws_internal_free(w.W); qaws_internal_free(w.stamp); qaws_internal_free(w.border); qaws_internal_free(w.locked); qaws_internal_free(views); qaws_internal_free(share); qaws_internal_free(seen);
 	qaws_internal_free(ring); qaws_internal_free(H.e);
+	qaws_internal_free(w.ca); qaws_internal_free(w.ck); qaws_internal_free(w.q); qaws_internal_free(w.M); qaws_internal_free(w.r); qaws_internal_free(w.z);
+	qaws_internal_free(sopt);
 	return st;
 }
