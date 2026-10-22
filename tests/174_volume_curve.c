@@ -209,6 +209,30 @@ static void test_hex(void)
 	qaws_mesh_3d_destroy(sph);
 }
 
+/* a quadratic tetrahedron's Jacobian determinant at barycentric l (nodes x: 10, VTK's order) */
+static double vc_tet_det(double const (*x)[3], double const* l)
+{
+	static unsigned char const ed[6][2] = { { 0, 1 }, { 1, 2 }, { 2, 0 }, { 0, 3 }, { 1, 3 }, { 2, 3 } };
+	double g[10][4], col[3][3];
+	unsigned int n, k, d;
+	memset(g, 0, sizeof g);
+	for (k = 0; k < 4; k++) g[k][k] = 4 * l[k] - 1;
+	for (n = 0; n < 6; n++)
+	{
+		g[4 + n][ed[n][0]] = 4 * l[ed[n][1]];
+		g[4 + n][ed[n][1]] = 4 * l[ed[n][0]];
+	}
+	for (k = 0; k < 3; k++)
+		for (d = 0; d < 3; d++)
+		{
+			double s = 0;
+			for (n = 0; n < 10; n++) s += x[n][d] * (g[n][k + 1] - g[n][0]);
+			col[k][d] = s;
+		}
+	return col[0][0] * (col[1][1] * col[2][2] - col[1][2] * col[2][1]) - col[0][1] * (col[1][0] * col[2][2] - col[1][2] * col[2][0]) +
+		col[0][2] * (col[1][0] * col[2][1] - col[1][1] * col[2][0]);
+}
+
 static void test_relax(void)
 {
 	static unsigned int const t[4] = { 0, 1, 2, 3 };
@@ -219,7 +243,8 @@ static void test_relax(void)
 	qaws_volume_curve_report r, r0;
 	qaws_scalar p[30], q[30];
 	unsigned int en[10], i, k;
-	double mid = 0;
+	double mid = 0, sampled = 0;
+	int bound_ok = 0;
 	qaws_status st, s0;
 	char msg[300];
 	/* the small sphere at the tetrahedron's centroid */
@@ -240,10 +265,35 @@ static void test_relax(void)
 		static unsigned char const ed[6][2] = { { 0, 1 }, { 1, 2 }, { 2, 0 }, { 0, 3 }, { 1, 3 }, { 2, 3 } };
 		for (k = 0; k < 3; k++) mid = fmax(mid, fabs((double)q[3 * en[4 + i] + k] - 0.5 * ((double)x[3 * ed[i][0] + k] + (double)x[3 * ed[i][1] + k])));
 	}
-	sprintf(msg, "a tetrahedron on a small sphere inside it: relaxed %u, min Jacobian %.3f, its nodes left %.3f off the reference (straight %.3f); no reference: middles off %.1e, Jacobian %.3f",
-		r.relaxed, (double)r.min_jacobian, (double)r.max_distance, (double)r.max_sagitta, mid, (double)r0.min_jacobian);
+	{
+		/* the bound under the determinant: sampled at 2000 points, never below it */
+		double xc[10][3], straight, worst = HUGE_VAL;
+		unsigned int s, seed = 7;
+		static double const cen[4] = { 0.25, 0.25, 0.25, 0.25 };
+		for (i = 0; i < 10; i++)
+			for (k = 0; k < 3; k++) xc[i][k] = (double)q[3 * en[i] + k];
+		straight = vc_tet_det((double const(*)[3])xc, cen);
+		for (i = 0; i < 10; i++)
+			for (k = 0; k < 3; k++) xc[i][k] = (double)p[3 * en[i] + k];
+		for (s = 0; s < 2000; s++)
+		{
+			double l[4], tot = 0;
+			for (k = 0; k < 4; k++)
+			{
+				seed = seed * 1664525u + 1013904223u;
+				l[k] = -log(((seed >> 8) + 1) / 16777217.0);
+				tot += l[k];
+			}
+			for (k = 0; k < 4; k++) l[k] /= tot;
+			worst = fmin(worst, vc_tet_det((double const(*)[3])xc, l) / straight);
+		}
+		bound_ok = worst >= (double)r.min_jacobian - 1e-12;
+		sampled = worst;
+	}
+	sprintf(msg, "a tetrahedron on a small sphere inside it: relaxed %u, min Jacobian bound %.3f (sampled at 2000 points: %.3f), its nodes left %.3f off the reference (straight %.3f); no reference: middles off %.1e, Jacobian %.3f",
+		r.relaxed, (double)r.min_jacobian, sampled, (double)r.max_distance, (double)r.max_sagitta, mid, (double)r0.min_jacobian);
 	printf("  %s\n", msg);
-	TEST_ASSERT(st == QAWS_STATUS_OK && r.relaxed == 1 && r.min_jacobian >= 0.1 && r.max_distance > 0 && r.max_distance < r.max_sagitta && s0 == QAWS_STATUS_OK &&
+	TEST_ASSERT(st == QAWS_STATUS_OK && bound_ok && r.relaxed == 1 && r.min_jacobian >= 0.1 && r.max_distance > 0 && r.max_distance < r.max_sagitta && s0 == QAWS_STATUS_OK &&
 		mid < 1e-15 && fabs((double)r0.min_jacobian - 1) < 1e-12, msg);
 	qaws_volume_mesh_destroy(v);
 	qaws_mesh_reference_destroy(ref);

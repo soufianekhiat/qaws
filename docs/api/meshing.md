@@ -1471,7 +1471,7 @@ Placement:
 
 1. **Border nodes:** a border edge's node goes to the reference's closest point to its middle. A border face's node goes to the closest point to its Coons point (the curved edges' blend).
 2. **Inside nodes:** the border's displacement is spread inside by Jacobi averaging over the elements, with the vertices' displacement held at zero.
-3. **Jacobian check:** each element's Jacobian is sampled relative to the straight element's at the same points: a tetrahedron at its corners and the middles of its edges, its faces and itself, a hexahedron at its 27 nodes. An element below `min_jacobian` (default 0.1) has its nodes' displacements halved until it passes, down to straight at worst.
+3. **Jacobian check:** each element's Jacobian is checked relative to the straight element's. A tetrahedron's is bounded from below over the whole element (its cubic determinant's 20 Bernstein coefficients, Johnen et al. 2013), so a tetrahedron that passes is certified valid; a hexahedron's is sampled at its 27 nodes. An element below `min_jacobian` (default 0.1) has its nodes' displacements halved until it passes, down to straight at worst.
 
 The report gives the border nodes, the relaxed elements, the smallest Jacobian, and the border nodes' largest distance to the reference, straight (the sagitta) and placed.
 
@@ -1626,8 +1626,8 @@ those alone (1 to 9, then a to i for figures 10 to 18: `5c` draws 5 and
   the straight element's (not equally spaced along the curve; no check of
   the curved element's Jacobian); a node on an edge between two faces lies
   on the face of the element that numbered it; meshes on a mesh reference
-  (remeshed, not generated) get none. Volume elements: quadratic only, the
-  Jacobian sampled (not bounded), cells with two border facets at a flat
+  (remeshed, not generated) get none. Volume elements: quadratic only, a
+  hexahedron's Jacobian sampled (a tetrahedron's bounded), cells with two border facets at a flat
   angle relaxed toward straight.
 - Tetrahedra: improvement (`qaws_volume_mesh_improve`) keeps the border, so
   cells with two border facets stay; no vertex insertion or sliver exudation; no protection of sharp angles between border

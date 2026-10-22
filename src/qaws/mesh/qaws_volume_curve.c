@@ -107,7 +107,58 @@ static double vcu_hex_det(double const (*x)[3], double s, double t, double u)
 	return vcu_det(col[0], col[1], col[2]);
 }
 
-/* an element's smallest sampled Jacobian over its straight self's (nodes en, positions X straight + D) */
+/* A quadratic tetrahedron's Jacobian determinant (cubic in the barycentrics) in the cubic Bernstein basis: its values at
+   the 20 points (i, j, k, l) / 3 solved for the 20 coefficients (Gaussian elimination); their least, a lower bound of the
+   determinant over the whole element (Johnen, Remacle, Geuzaine 2013): positive, the element is valid */
+static double vcu_tet_bound(double const (*x)[3])
+{
+	static double const fact[4] = { 1, 1, 2, 6 };
+	double M[20][21], lo = HUGE_VAL;
+	unsigned int ix[20][4], n = 0, i, j, k, l, p, q, r;
+	for (i = 0; i <= 3; i++)
+		for (j = 0; i + j <= 3; j++)
+			for (k = 0; i + j + k <= 3; k++)
+			{
+				ix[n][0] = i; ix[n][1] = j; ix[n][2] = k; ix[n][3] = 3 - i - j - k;
+				n++;
+			}
+	for (p = 0; p < 20; p++)
+	{
+		double lam[4];
+		for (l = 0; l < 4; l++) lam[l] = ix[p][l] / 3.0;
+		for (q = 0; q < 20; q++)
+		{
+			double b = 6;
+			for (l = 0; l < 4; l++) b *= pow(lam[l], (double)ix[q][l]) / fact[ix[q][l]];
+			M[p][q] = b;
+		}
+		M[p][20] = vcu_tet_det(x, lam);
+	}
+	for (q = 0; q < 20; q++)
+	{
+		unsigned int piv = q;
+		for (p = q + 1; p < 20; p++)
+			if (fabs(M[p][q]) > fabs(M[piv][q]))
+				piv = p;
+		if (piv != q)
+			for (r = 0; r <= 20; r++)
+			{
+				double t = M[q][r];
+				M[q][r] = M[piv][r];
+				M[piv][r] = t;
+			}
+		for (p = 0; p < 20; p++)
+			if (p != q && M[p][q] != 0)
+			{
+				double f = M[p][q] / M[q][q];
+				for (r = q; r <= 20; r++) M[p][r] -= f * M[q][r];
+			}
+	}
+	for (q = 0; q < 20; q++) lo = fmin(lo, M[q][20] / M[q][q]);
+	return lo;
+}
+
+/* an element's smallest Jacobian over its straight self's (a tetrahedron's bounded, a hexahedron's sampled) (nodes en, positions X straight + D) */
 static double vcu_ratio(unsigned int const* en, unsigned int nn, double const* X, double const* D)
 {
 	double xc[27][3], xs[27][3], r = HUGE_VAL;
@@ -120,14 +171,10 @@ static double vcu_ratio(unsigned int const* en, unsigned int nn, double const* X
 		}
 	if (nn == 10)
 	{
-		static double const samp[15][4] = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 }, { 0, 0, 0, 1 }, { 0.5, 0.5, 0, 0 }, { 0, 0.5, 0.5, 0 },
-			{ 0.5, 0, 0.5, 0 }, { 0.5, 0, 0, 0.5 }, { 0, 0.5, 0, 0.5 }, { 0, 0, 0.5, 0.5 }, { 0, 1.0 / 3, 1.0 / 3, 1.0 / 3 }, { 1.0 / 3, 0, 1.0 / 3, 1.0 / 3 },
-			{ 1.0 / 3, 1.0 / 3, 0, 1.0 / 3 }, { 1.0 / 3, 1.0 / 3, 1.0 / 3, 0 }, { 0.25, 0.25, 0.25, 0.25 } };
-		for (n = 0; n < 15; n++)
-		{
-			double ds = vcu_tet_det((double const(*)[3])xs, samp[n]), dc = vcu_tet_det((double const(*)[3])xc, samp[n]);
-			r = fmin(r, ds > 0 ? dc / ds : (dc > 0 ? 1 : -1));
-		}
+		/* (the straight tetrahedron's determinant is constant: the bound over it) */
+		static double const mid[4] = { 0.25, 0.25, 0.25, 0.25 };
+		double ds = vcu_tet_det((double const(*)[3])xs, mid), dc = vcu_tet_bound((double const(*)[3])xc);
+		r = ds > 0 ? dc / ds : (dc > 0 ? 1 : -1);
 	}
 	else
 		for (n = 0; n < 27; n++)

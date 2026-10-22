@@ -39,14 +39,16 @@
  * face's node to the closest point to its Coons point (the bilinear blend of
  * its curved edges). The inside nodes take the border's displacement,
  * spread through the elements (Jacobi averaging over the elements' nodes,
- * the vertices' displacement zero: it fades inward). Then each element's Jacobian is sampled (a
- * tetrahedron at its corners, edges' and faces' middles and centroid; a
- * hexahedron at its 27 nodes), relative to the straight element's at the
- * same point: an element below min_jacobian has its nodes' displacements
- * halved, until it passes (straight at worst, valid when the straight
- * element is).
- * shortcut: the Jacobian is sampled, not bounded; Bezier bounds (Johnen et
- * al. 2013) would certify it.
+ * the vertices' displacement zero: it fades inward). Then each element's
+ * Jacobian is checked relative to the straight element's: a tetrahedron's
+ * bounded from below over the whole element (its determinant, cubic, in the
+ * Bernstein basis: the least of its 20 coefficients; Johnen, Remacle,
+ * Geuzaine 2013), so a tetrahedron that passes is certified valid; a
+ * hexahedron's sampled at its 27 nodes. An element below min_jacobian has
+ * its nodes' displacements halved, until it passes (straight at worst,
+ * valid when the straight element is).
+ * shortcut: a hexahedron's Jacobian is sampled, not bounded; its
+ * triquintic determinant's Bernstein coefficients (216) would certify it.
  *
  * The vertices stay where they are: the reference should pass through the
  * border's vertices (a reference made from the volume's border, or a finer
