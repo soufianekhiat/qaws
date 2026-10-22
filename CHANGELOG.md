@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- GLOBAL quads quantize a torus's two periods together (tree-cotree cuts, the map's energy
+  fitted over the four steps): tori whose flow's grid spiralled across a seam close once round
+  each loop. Test 136, figure 58 (key W).
 - Polycube labels by an alpha-expansion graph cut (normals against the axes, short label
   borders): a box with a bump hexahedralized at scaled Jacobian 0.68 (0.36 before).
   Test 176, figure 57 (key V).

@@ -622,7 +622,8 @@ static int qg_mb(mf_level const* L, double rho, qg_tri const* T, double (*M)[3],
 
 /* The places d (2 per dense vertex) minimizing the map's energy (qg_mb), the steps fixed; held components (fix, bits 1
    and 2) kept at 0; the rest pulled toward d by a millionth of a typical weight (the torus's free shift). keep (may be
-   NULL): the factor kept, for more right-hand sides. */
+   NULL): the factor kept, for more right-hand sides; one already there (rows nonzero: the same triangles and holds, other
+   steps) reused, only the right-hand side assembled. */
 static qaws_status qg_solve(qaws_hm const* dm, mf_level const* L, double rho, qg_tri const* tri, unsigned int nt, unsigned char const* fix,
 	double* d, qaws_internal_ldlt* keep)
 {
@@ -745,6 +746,12 @@ static qaws_status qg_solve(qaws_hm const* dm, mf_level const* L, double rho, qg
 				val[p] += mean;
 		}
 		rhs[v] = held ? 0 : rhs[v] + mean * d[v];
+	}
+	if (keep && keep->n)
+	{
+		qaws_internal_ldlt_solve(d, keep, rhs);
+		st = QAWS_STATUS_OK;
+		goto done;
 	}
 	st = qaws_internal_ldlt_factor(&f, rp, col, val, xyz, 2 * n, 0);
 	if (st == QAWS_STATUS_OK)
@@ -1706,7 +1713,7 @@ typedef struct qg_node
    rest solved again), then whole steps down E from the rounding or from the flow's integers, whichever is lower. T
    changed in place; INVALID_TOPOLOGY (T as given) when it cannot: no cone, a dislocation, a cone off the lattice, more
    than QG_VARS unknowns.
-   shortcut: the isovalues of feature lines (creases) and the torus's periods stay the flow's, paths cross no crease;
+   shortcut: the isovalues of feature lines (creases) stay the flow's (a torus's periods: qg_periods), paths cross no crease;
    quantize those too (a node per line, paths along it) when parallel creases come out a step too close or too far */
 static qaws_status qg_quantize(qaws_hm const* dm, mf_level const* L, double rho, int* T, unsigned char const* K)
 {
@@ -2154,6 +2161,279 @@ done:
 	return st;
 }
 
+/* the map's energy (qg_mb) with the steps T: the places solved (on fac, factored by the first call), the sum over the
+   triangles; HUGE_VAL when there is no map */
+static double qg_energy(qaws_hm const* dm, mf_level const* L, double rho, int const* T, unsigned char const* K, qg_ctx* c, unsigned int* ct,
+	unsigned char* fix, unsigned char* cone, double* d, qaws_internal_ldlt* fac)
+{
+	double e = 0;
+	unsigned int i, k, a;
+	if (qg_build(dm, L, rho, T, K, NULL, c, ct, fix, cone, d) != QAWS_STATUS_OK || qg_solve(dm, L, rho, c->tri, c->nt, fix, d, fac) != QAWS_STATUS_OK)
+		return HUGE_VAL;
+	for (i = 0; i < c->nt; i++)
+	{
+		double M[3][3], B[3][2];
+		qg_uv(&c->tri[i], d);
+		if (!qg_mb(L, rho, &c->tri[i], M, B))
+			continue;
+		for (a = 0; a < 2; a++)
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int l;
+				e -= 2 * B[k][a] * c->tri[i].U[2 * k + a];
+				for (l = 0; l < 3; l++)
+					e += c->tri[i].U[2 * k + a] * M[k][l] * c->tri[i].U[2 * l + a];
+			}
+	}
+	return e;
+}
+
+/* The periods of a torus quantized together (as MIQ quantizes them with its cones): the flow rounds each edge's steps on
+   its own, and its grid may close round the hole only after shifting along the tube (or the reverse), a seam the quads
+   spiral across. The two loops of the dense mesh come from a tree and a cotree (Eppstein 2003): the edges in neither,
+   each with a cut across it (it and the cotree's path between its faces, qg_path's walk). A whole step added along a
+   cut changes one loop's period only, every face kept closed; the map's energy over the four steps is quadratic (the
+   places stationary), fitted from 15 solves on one factor, its least integer point near the real one taken when its solve agrees.
+   Only a closed torus whose frames do not turn round it, without cones, features or pins; T kept otherwise.
+   shortcut: genus one only; higher genus would take 4 g steps, the same fit */
+static qaws_status qg_periods(qaws_hm const* dm, mf_level const* L, double rho, int* T, unsigned char const* K)
+{
+	unsigned int nf = dm->nf, nv = dm->nv, nc = dm->nc, f, i, j, k, head, tail, ng = 0, gen[2];
+	unsigned int *v0 = NULL, *vcs = NULL, *queue = NULL, *dpc = NULL, *par = NULL, *nodeof = NULL, *ct = NULL, *dep = NULL;
+	unsigned char *intree = NULL, *seen = NULL, *fix = NULL, *cone = NULL;
+	int *dT = NULL, *Tw = NULL;
+	double *d = NULL, E[4][4], gr[4], e0, best, model;
+	int z[4], zb[4], zc[4];
+	qg_ctx c;
+	qaws_internal_ldlt fac;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(&c, 0, sizeof c);
+	memset(&fac, 0, sizeof fac);
+	/* closed, no cone, no feature (pins stay on their lattice points: the cuts' steps are whole) */
+	for (f = 0; f < nf; f++)
+		if ((K[dm->fc[f]] + K[dm->fc[f] + 1] + K[dm->fc[f] + 2]) & 3)
+			return QAWS_STATUS_OK;
+	for (k = 0, i = 0; k < nc; k++)
+	{
+		if (dm->cf[k] == HM_NONE)
+			continue;
+		if (dm->co[k] == HM_NONE || (dm->cflag[k] & HM_FEATURE))
+			return QAWS_STATUS_OK;
+		i++;
+	}
+	for (j = 0, k = 0; j < nv; j++)
+		k += dm->vc[j] != HM_NONE;
+	if ((long)k - (long)(i / 2) + (long)nf != 0)
+		return QAWS_STATUS_OK;   /* (Euler characteristic 0: a torus) */
+	v0 = (unsigned int*)qaws_internal_zalloc((size_t)nv + 2, sizeof(unsigned int));
+	vcs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nc + 1));
+	queue = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)(nv > nf ? nv : nf) + 1));
+	dpc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	dep = (unsigned int*)qaws_internal_zalloc((size_t)nf + 1, sizeof(unsigned int));
+	par = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	nodeof = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	intree = (unsigned char*)qaws_internal_zalloc((size_t)nc + 1, 1);
+	seen = (unsigned char*)qaws_internal_zalloc((size_t)(nv > nf ? nv : nf) + 1, 1);
+	dT = (int*)qaws_internal_zalloc(8 * (size_t)nc + 1, sizeof(int));
+	Tw = (int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(int), 2 * (size_t)nc + 2));
+	c.tri = (qg_tri*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qg_tri), (3 * (size_t)nf + 1)));
+	ct = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)nc + 1)));
+	fix = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
+	cone = (unsigned char*)qaws_internal_malloc((size_t)nv + 1);
+	d = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (2 * (size_t)nv + 2)));
+	if (!v0 || !vcs || !queue || !dpc || !dep || !par || !nodeof || !intree || !seen || !dT || !Tw || !c.tri || !ct || !fix || !cone || !d)
+		goto done;
+	/* the tree: breadth first over the vertices from vertex 0 (each vertex's corners in a CSR) */
+	for (k = 0; k < nc; k++)
+		if (dm->cf[k] != HM_NONE)
+			v0[dm->cv[k] + 1]++;
+	for (i = 0; i < nv; i++) v0[i + 1] += v0[i];
+	for (k = 0; k < nc; k++)
+		if (dm->cf[k] != HM_NONE)
+			vcs[v0[dm->cv[k]]++] = k;
+	for (i = nv; i > 0; i--) v0[i] = v0[i - 1];
+	v0[0] = 0;
+	head = tail = 0;
+	queue[tail++] = dm->cv[dm->fc[0]];
+	seen[queue[0]] = 1;
+	while (head < tail)
+	{
+		unsigned int v = queue[head++];
+		for (j = v0[v]; j < v0[v + 1]; j++)
+		{
+			unsigned int cc = vcs[j], w = dm->cv[dm->fc[dm->cf[cc]] + (cc - dm->fc[dm->cf[cc]] + 1) % 3];
+			if (seen[w])
+				continue;
+			seen[w] = 1;
+			intree[cc] = intree[dm->co[cc]] = 1;
+			queue[tail++] = w;
+		}
+	}
+	/* the cotree: breadth first over the faces across the edges not in the tree; dpc: a face's corner toward its parent */
+	memset(seen, 0, nf);
+	head = tail = 0;
+	queue[tail++] = 0;
+	seen[0] = 1;
+	dpc[0] = HM_NONE;
+	while (head < tail)
+	{
+		unsigned int g = queue[head++];
+		for (k = dm->fc[g]; k < dm->fc[g] + 3; k++)
+		{
+			unsigned int o = dm->co[k], hf = dm->cf[o];
+			if (intree[k] || seen[hf])
+				continue;
+			seen[hf] = 1;
+			intree[k] = intree[o] = 2;
+			dpc[hf] = o;
+			dep[hf] = dep[g] + 1;
+			queue[tail++] = hf;
+		}
+	}
+	for (k = 0; k < nc; k++)
+		if (dm->cf[k] != HM_NONE && !intree[k] && k < dm->co[k])
+		{
+			if (ng == 2)
+				goto ok;   /* (not a torus after all) */
+			gen[ng++] = k;
+		}
+	if (ng != 2)
+		goto ok;
+	/* each cut: from the generator's corner into the face across, the cotree's path back to the generator's face; a whole
+	   step along each axis (dT: 4 unit changes of T) */
+	for (i = 0; i < 2; i++)
+	{
+		unsigned int fa = dm->cf[gen[i]], fb = dm->cf[dm->co[gen[i]]], x = fb, y = fa, last;
+		for (f = 0; f < nf; f++)
+		{
+			par[f] = HM_NONE;
+			nodeof[f] = HM_NONE;
+		}
+		nodeof[fa] = 0;
+		/* up from fb and from fa to their common ancestor: fb's side leaves by the parent corners, fa's side enters by them */
+		while (x != y)
+			if (dep[x] >= dep[y])
+			{
+				par[x] = dpc[x];
+				x = dm->cf[dm->co[dpc[x]]];
+			}
+			else
+			{
+				unsigned int up = dm->cf[dm->co[dpc[y]]];
+				par[up] = dm->co[dpc[y]];
+				y = up;
+			}
+		for (j = 0; j < 2; j++)
+		{
+			int delta[2], lastD[2], a[2], b[2];
+			delta[0] = j == 0;
+			delta[1] = j == 1;
+			qg_path(dm, K, gen[i], par, nodeof, delta, dT + 2 * (size_t)nc * (2 * i + j), &last, lastD);
+			/* the generator's face closed: the change into it cancels the change out of it (else the frames turn round) */
+			qf_turn(lastD, qg_suffix(dm, K, last), a);
+			qf_turn(delta, qg_suffix(dm, K, gen[i]), b);
+			if (dm->cf[last] != fa || a[0] + b[0] != 0 || a[1] + b[1] != 0)
+				goto ok;
+		}
+	}
+	/* the quadratic: E(z) - E(0) = g . z + z^T H z / 2, from E(0), E(+-e_i), E(e_i + e_j) */
+	e0 = qg_energy(dm, L, rho, T, K, &c, ct, fix, cone, d, &fac);
+	if (e0 == HUGE_VAL)
+		goto ok;
+	for (i = 0; i < 4; i++)
+	{
+		double ep, em;
+		for (k = 0; k < 2 * nc; k++) Tw[k] = T[k] + dT[2 * (size_t)nc * i + k];
+		ep = qg_energy(dm, L, rho, Tw, K, &c, ct, fix, cone, d, &fac);
+		for (k = 0; k < 2 * nc; k++) Tw[k] = T[k] - dT[2 * (size_t)nc * i + k];
+		em = qg_energy(dm, L, rho, Tw, K, &c, ct, fix, cone, d, &fac);
+		gr[i] = 0.5 * (ep - em);
+		E[i][i] = ep + em - 2 * e0;
+		zb[i] = 0;
+	}
+	for (i = 0; i < 4; i++)
+		for (j = i + 1; j < 4; j++)
+		{
+			double eij;
+			for (k = 0; k < 2 * nc; k++) Tw[k] = T[k] + dT[2 * (size_t)nc * i + k] + dT[2 * (size_t)nc * j + k];
+			eij = qg_energy(dm, L, rho, Tw, K, &c, ct, fix, cone, d, &fac);
+			/* E(e_i + e_j) - E(0) = g_i + g_j + (H_ii + H_jj) / 2 + H_ij */
+			E[i][j] = E[j][i] = eij - e0 - gr[i] - gr[j] - 0.5 * (E[i][i] + E[j][j]);
+		}
+	/* the real least (H z = -g, by elimination with pivoting), then the model's least over the integers within 2 of its
+	   rounding */
+	{
+		double A[4][5], zr[4];
+		int ok = 1;
+		for (i = 0; i < 4; i++)
+		{
+			for (j = 0; j < 4; j++) A[i][j] = E[i][j];
+			A[i][4] = -gr[i];
+		}
+		for (i = 0; i < 4 && ok; i++)
+		{
+			unsigned int pv = i;
+			for (j = i + 1; j < 4; j++)
+				if (fabs(A[j][i]) > fabs(A[pv][i]))
+					pv = j;
+			if (!(fabs(A[pv][i]) > 1e-12 * (fabs(E[0][0]) + fabs(E[3][3]))))
+				ok = 0;
+			for (k = 0; ok && k < 5; k++)
+			{
+				double s = A[i][k];
+				A[i][k] = A[pv][k];
+				A[pv][k] = s;
+			}
+			for (j = 0; ok && j < 4; j++)
+				if (j != i)
+				{
+					double m = A[j][i] / A[i][i];
+					for (k = i; k < 5; k++) A[j][k] -= m * A[i][k];
+				}
+		}
+		for (i = 0; i < 4; i++)
+		{
+			zr[i] = ok ? A[i][4] / A[i][i] : 0;
+			zc[i] = fabs(zr[i]) < 1e6 ? (int)floor(zr[i] + 0.5) : 0;
+		}
+	}
+	best = 0;
+	for (z[0] = zc[0] - 2; z[0] <= zc[0] + 2; z[0]++)
+		for (z[1] = zc[1] - 2; z[1] <= zc[1] + 2; z[1]++)
+			for (z[2] = zc[2] - 2; z[2] <= zc[2] + 2; z[2]++)
+				for (z[3] = zc[3] - 2; z[3] <= zc[3] + 2; z[3]++)
+				{
+					model = 0;
+					for (i = 0; i < 4; i++)
+					{
+						model += gr[i] * z[i];
+						for (j = 0; j < 4; j++) model += 0.5 * z[i] * E[i][j] * z[j];
+					}
+					if (model < best - 1e-9 * fabs(e0))
+					{
+						best = model;
+						memcpy(zb, z, sizeof zb);
+					}
+				}
+	if (zb[0] || zb[1] || zb[2] || zb[3])
+	{
+		double e1;
+		for (k = 0; k < 2 * nc; k++)
+			Tw[k] = T[k] + zb[0] * dT[k] + zb[1] * dT[2 * (size_t)nc + k] + zb[2] * dT[4 * (size_t)nc + k] + zb[3] * dT[6 * (size_t)nc + k];
+		e1 = qg_energy(dm, L, rho, Tw, K, &c, ct, fix, cone, d, &fac);
+		if (e1 < e0)
+			memcpy(T, Tw, sizeof(int) * 2 * nc);
+	}
+ok:
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(v0); qaws_internal_free(vcs); qaws_internal_free(queue); qaws_internal_free(dpc); qaws_internal_free(dep); qaws_internal_free(par);
+	qaws_internal_free(nodeof); qaws_internal_free(intree); qaws_internal_free(seen); qaws_internal_free(dT); qaws_internal_free(Tw); qaws_internal_free(c.tri);
+	qaws_internal_free(ct); qaws_internal_free(fix); qaws_internal_free(cone); qaws_internal_free(d);
+	qaws_internal_ldlt_free(&fac);
+	return st;
+}
+
 qaws_status qg_quads(qaws_hm const* dm, mf_level const* L, double rho, int const* T0, unsigned char const* K0, qd_out* o, qg_map* map)
 {
 	int *T = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (2 * (size_t)dm->nc + 2))), *Tq = (int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(int), (2 * (size_t)dm->nc + 2)));
@@ -2165,6 +2445,9 @@ qaws_status qg_quads(qaws_hm const* dm, mf_level const* L, double rho, int const
 	memcpy(T, T0, sizeof(int) * 2 * dm->nc);
 	memcpy(K, K0, dm->nc);
 	qg_mend(dm, L, rho, T, K);
+	st = qg_periods(dm, L, rho, T, K);
+	if (st != QAWS_STATUS_OK)
+		goto done;
 	/* the flow's integers first (where they give a map its quality is theirs), else the quantized ones with the cones on
 	   vertices */
 	st = qg_map_of(dm, L, rho, T, K, o, map);

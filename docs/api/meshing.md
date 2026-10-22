@@ -633,6 +633,18 @@ Chen, Kobbelt 2013), on INSTANT's dense mesh and fields:
   goes onto the free vertex nearest it in the map with the cones split
   (that vertex's lattice point shifted onto it), as MIQ keeps its cones on
   vertices.
+- **A torus's periods**: the flow rounds each edge's steps alone, and its
+  grid may close round the hole only after a shift along the tube (the
+  quads spiral across a seam). On a closed torus without cones or creases
+  the two loops come from a tree and a cotree; a whole step along a cut
+  across one loop changes its period only. The map's energy over the four
+  steps is quadratic (fitted from 15 solves on one factor), and its least
+  integer point is kept when its solve agrees: the periods quantized
+  together, as MIQ does with its cones. Tori of radius 1 and 0.3, 0.5,
+  0.7 at 0.12 to 0.4: spirals in 14 of 20 meshes before, 2 after, at the
+  same time. The two left, and a torus of radii 2 and 0.4, follow the field:
+  INSTANT keeps the smoothest field on a tie, which may turn slowly round a
+  thin torus; pulled along the parallels (`guide_directions`) 17 of 20 close.
 - **Places**: one sparse LDL^T solve of sum A (|grad u - X/h|^2 +
   |grad v - Y/h|^2) over the triangles (the field turned into each
   triangle's plane), line vertices held on their whole isoline, corners

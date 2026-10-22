@@ -9,6 +9,9 @@
  *     with its rims creased (irregular no more than INSTANT's), a wavy open
  *     patch (its border on isolines: the border vertices of valence 3, its
  *     corners 2);
+ *   - tori of radii 1 and 0.7 at 0.22, 1 and 0.5 at 0.3: their periods
+ *     quantized together, every straight edge loop once round the hole or
+ *     once round the tube (the flow's own periods made them spirals);
  *   - every result valid, all quads, footpoints on the reference, scaled
  *     Jacobian above 0, made by the map (report iterations 1); against
  *     INSTANT (pure) on the same inputs: irregular and AD no higher. By
@@ -375,6 +378,86 @@ static void tg_print(char const* name, char const* method, tg_res const* s)
 
 /* ---- the map ------------------------------------------------------------ */
 
+/* a quad torus's straight edge loops (through valence 4 vertices, the edge across from the one it came by): each one's
+   turns round the hole and round the tube (radius R); those not once round exactly one of them (a spiral) counted */
+static void tg_windings(qaws_mesh_3d const* q, double R, unsigned int* loops, unsigned int* spirals)
+{
+	unsigned int nf = qaws_mesh_3d_get_face_count(q), nc = qaws_mesh_3d_get_corner_count(q), f, i, s, j;
+	unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1)), *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+	unsigned int *c0 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1)), *pos = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1));
+	unsigned char* seen = (unsigned char*)calloc(nc + 1, 1);
+	*loops = *spirals = 0;
+	qaws_mesh_3d_get_faces(fv, fs, q);
+	for (f = 0, i = 0; f < nf; f++)
+		for (j = 0; j < fs[f]; j++, i++)
+		{
+			c0[i] = i - j;   /* (each corner's face start and place in it) */
+			pos[i] = j | (fs[f] << 8);
+		}
+	for (s = 0; s < nc; s++)
+	{
+		unsigned int e = s, n = 0;
+		double wt = 0, wp = 0;
+		if (seen[s])
+			continue;
+		do
+		{
+			unsigned int k = pos[e] & 255, m = pos[e] >> 8, a = fv[e], b = fv[c0[e] + (k + 1) % m], c = fv[c0[e] + (k + 2) % m], g;
+			qaws_vec3 A = qaws_mesh_3d_get_vertex(q, a), B = qaws_mesh_3d_get_vertex(q, b);
+			double dt = atan2(B.y, B.x) - atan2(A.y, A.x), dp = atan2(B.z, sqrt(B.x * B.x + B.y * B.y) - R) - atan2(A.z, sqrt(A.x * A.x + A.y * A.y) - R);
+			wt += dt - 2 * M_PI * floor(dt / (2 * M_PI) + 0.5);
+			wp += dp - 2 * M_PI * floor(dp / (2 * M_PI) + 0.5);
+			seen[e] = 1;
+			/* the face across b -> c (it has c -> b), then the corner after b there: the straight way on; b -> a seen too */
+			for (g = 0; g < nc; g++)
+				if (fv[g] == c && fv[c0[g] + ((pos[g] & 255) + 1) % (pos[g] >> 8)] == b)
+					break;
+			for (i = 0; i < nc; i++)
+				if (fv[i] == b && fv[c0[i] + ((pos[i] & 255) + 1) % (pos[i] >> 8)] == a)
+					seen[i] = 1;
+			if (g == nc)
+				break;
+			{
+				unsigned int d = fv[c0[g] + ((pos[g] & 255) + 2) % (pos[g] >> 8)];
+				for (i = 0; i < nc; i++)
+					if (fv[i] == b && fv[c0[i] + ((pos[i] & 255) + 1) % (pos[i] >> 8)] == d)
+						break;
+			}
+			e = i;
+		} while (e < nc && e != s && ++n < nc);
+		{
+			int it = (int)floor(wt / (2 * M_PI) + 0.5), ip = (int)floor(wp / (2 * M_PI) + 0.5);
+			(*loops)++;
+			*spirals += e != s || !((abs(it) == 1 && ip == 0) || (it == 0 && abs(ip) == 1));
+		}
+	}
+	free(fv); free(fs); free(c0); free(pos); free(seen);
+}
+
+/* tori of uneven radii whose flow's periods made spirals (a seam the quads cross shifted): the periods quantized
+   together, every edge loop closes once round the hole or once round the tube */
+static void test_periods(void)
+{
+	static double const cases[2][3] = { { 0.7, 0.22, 0 }, { 0.5, 0.3, 0 } };
+	unsigned int k;
+	for (k = 0; k < 2; k++)
+	{
+		qaws_mesh_3d* m = tg_torus(96, 48, 1, cases[k][0]);
+		tg_res s;
+		qaws_mesh_3d* q = tg_quads(m, cases[k][1], QAWS_QUADS_GLOBAL, &s);
+		unsigned int loops = 0, spirals = 1;
+		char msg[300];
+		if (q)
+			tg_windings(q, 1, &loops, &spirals);
+		sprintf(msg, "a torus of radii 1 and %.1f at %.2f: %u quads, irregular %u, %u edge loops, %u spiral", cases[k][0], cases[k][1], s.quads,
+			s.s.irregular, loops, spirals);
+		printf("  %s\n", msg);
+		TEST_ASSERT(q && s.made == 1 && s.s.irregular == 0 && loops > 10 && spirals == 0, msg);
+		qaws_mesh_3d_destroy(q);
+		qaws_mesh_3d_destroy(m);
+	}
+}
+
 static void test_map(void)
 {
 	qaws_mesh_3d* blob = tg_can();
@@ -512,6 +595,7 @@ int test_136_quad_global_main(void)
 		test_map();   /* (the can by the map is checked by default through test_shapes) */
 	test_shapes();
 	test_sweep();
+	test_periods();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

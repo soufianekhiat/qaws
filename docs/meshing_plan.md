@@ -159,7 +159,7 @@ Parameterization:
 Hexahedra and quads (research-scale):
 
 20. **Polycube labels by graph cuts: landed** (`sm_label_cut`, alpha-expansion over a Dinic max-flow, test 176, figure 57 key V): data the facets' areas times 1 − their normals along the axes, smoothness the shared edges' lengths (twice between opposite sides). The L and the bent bar unchanged (valid, 0.98 and 0.26); a box with a bump of 0.3 / 0.4 at 0.68 / 0.67 (0.36 / 0.29 before); over bumps 0.25 to 0.65 the mean 0.48 (0.37). Next: spikes (bumps past half the height) given their own patches, the atlas groups by the same cut.
-21. **GLOBAL torus periods.** The integer-grid map's periods on a torus quantized together, so the quads close around both loops. Check: a torus with uneven radii meshed with no seam defects.
+21. **GLOBAL torus periods: landed** (`qg_periods`, test 136, figure 58 key W): tree-cotree cuts, a whole step along each changing one period; the map's energy over the four steps fitted from 15 solves on one factor, its least integer point kept. Spirals in 14 of 20 tori before, 2 after (radii 1 and 0.3 to 0.7, at 0.12 to 0.4), at the same time; those left follow a field that turns slowly round the tube (INSTANT keeps the smoothest on a tie; guided along the parallels 17 of 20 close). Next: higher genus (4 g steps), the curvature-aligned field preferred on closed tubes.
 22. **FRAME_FIELD through singular edges** (HexEx extraction, Lyon et al. 2016): hexahedra where the frame field has singular curves. Check: a cylinder's and a sphere's hexes all valid.
 
 ## 0. Scope
