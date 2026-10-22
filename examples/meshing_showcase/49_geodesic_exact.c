@@ -89,7 +89,7 @@ static void demo_geodesic_exact(void)
 			}
 		}
 		t0 = clock();
-		qaws_mesh_3d_geodesic_exact(d, m, &src, 1);
+		qaws_mesh_3d_geodesic_exact(d, m, &src, 1, (qaws_scalar)HUGE_VAL);
 		sprintf(sub, "%u vertices in %.0f ms; far corner %.6f (2 sqrt 5 %.6f)", nv, 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC,
 			(double)d[nv - 1], 2 * sqrt(5.0));
 		ms_panel(c, 0, 0, 750, 720, m, -0.6, 0.5, "a cube from a corner, exact", sub);
@@ -131,8 +131,18 @@ static void demo_geodesic_exact(void)
 		src.b = (qaws_scalar)0.3;
 		g = ms_gd_solve(m, &src, 1, dh, sub);
 		t0 = clock();
-		qaws_mesh_3d_geodesic_exact(de, m, &src, 1);
+		qaws_mesh_3d_geodesic_exact(de, m, &src, 1, (qaws_scalar)HUGE_VAL);
 		ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
+		{
+			/* the same up to a radius: the windows within it only */
+			qaws_scalar* dr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+			unsigned int within = 0;
+			t0 = clock();
+			qaws_mesh_3d_geodesic_exact(dr, m, &src, 1, (qaws_scalar)0.5);
+			for (i = 0; i < nv; i++) within += dr[i] != (qaws_scalar)HUGE_VAL;
+			printf("  hill, exact up to 0.5: %u of %u vertices in %.0f ms (all: %.0f ms)\n", within, nv, 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC, ms);
+			free(dr);
+		}
 		top = ms_gd_top(de, nv);
 		for (i = 0; i < nv; i++) err = fmax(err, fabs((double)dh[i] - (double)de[i]));
 		ms_panel(c, 750, 0, 750, 720, m, -0.35, 0.75, "a hill: the heat method", sub);

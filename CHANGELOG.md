@@ -59,6 +59,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Exact geodesics up to a radius (`max_distance` of
+  `qaws_mesh_3d_geodesic_exact`): the windows within it only, the same
+  distances there, HUGE_VAL beyond. Test 164.
 - The modified butterfly (`QAWS_MESH_SUBDIVIDE_BUTTERFLY`): interpolating
   subdivision of triangles (Zorin, Schröder and Sweldens), the ten points,
   extraordinary rings and crease four points; cubics reproduced. Test 172,

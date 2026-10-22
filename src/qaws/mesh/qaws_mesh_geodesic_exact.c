@@ -292,14 +292,16 @@ static int gx_cmp_key(void const* a, void const* b)
 	return x < y ? -1 : x > y ? 1 : 0;
 }
 
-qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources, unsigned int source_count)
+qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources, unsigned int source_count,
+	qaws_scalar max_distance)
 {
 	gx_ctx c;
 	qaws_scalar* p = NULL;
 	double* ang = NULL;
 	unsigned int i, k, s;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
-	if (!out_distances || !mesh || (source_count && !sources))
+	double R = (double)max_distance;
+	if (!out_distances || !mesh || (source_count && !sources) || !(R >= 0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&c, 0, sizeof c);
 	c.nv = qaws_mesh_3d_get_vertex_count(mesh);
@@ -412,10 +414,12 @@ qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d
 	while (c.nh)
 	{
 		gx_win w = c.w[gx_pop(&c)];
+		if (w.key > R)
+			break;   /* (every window left is farther: the distances within R are settled) */
 		if (w.f == GX_NONE ? w.sigma == c.d[w.k] && !gx_expand(&c, w.k, w.sigma) : !gx_propagate(&c, &w))
 			goto done;
 	}
-	for (i = 0; i < c.nv; i++) out_distances[i] = (qaws_scalar)c.d[i];
+	for (i = 0; i < c.nv; i++) out_distances[i] = (qaws_scalar)(c.d[i] <= R ? c.d[i] : HUGE_VAL);
 	st = QAWS_STATUS_OK;
 done:
 	qaws_internal_free(c.x); qaws_internal_free(c.t); qaws_internal_free(c.adj); qaws_internal_free(c.v0); qaws_internal_free(c.vc);

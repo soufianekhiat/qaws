@@ -520,7 +520,7 @@ static void test_exact(void)
 		sp[1] = 0.5 * (double)p0.y + 0.3 * (double)p1.y + 0.2 * (double)p2.y;
 		sp[2] = 0;
 	}
-	s1 = qaws_mesh_3d_geodesic_exact(dg, g, &src, 1);
+	s1 = qaws_mesh_3d_geodesic_exact(dg, g, &src, 1, (qaws_scalar)HUGE_VAL);
 	for (i = 0; i < ng; i++)
 	{
 		qaws_vec3 q = qaws_mesh_3d_get_vertex(g, i);
@@ -534,7 +534,7 @@ static void test_exact(void)
 			break;
 	}
 	src = gd_at_vertex(cube, i);
-	s2 = qaws_mesh_3d_geodesic_exact(dc, cube, &src, 1);
+	s2 = qaws_mesh_3d_geodesic_exact(dc, cube, &src, 1, (qaws_scalar)HUGE_VAL);
 	for (i = 0; i < nc; i++)
 	{
 		qaws_vec3 q = qaws_mesh_3d_get_vertex(cube, i);
@@ -572,7 +572,7 @@ static void test_exact(void)
 	}
 	/* two grids apart: the second not reached */
 	src = gd_at_vertex(two, 0);
-	s3 = qaws_mesh_3d_geodesic_exact(d2, two, &src, 1);
+	s3 = qaws_mesh_3d_geodesic_exact(d2, two, &src, 1, (qaws_scalar)HUGE_VAL);
 	for (i = 0; i < n2; i++) far += (double)d2[i] == HUGE_VAL;
 	sprintf(msg, "exact geodesics: a flat grid from inside a triangle, off Euclid by %.1e; the cube from a corner, off its unfoldings by %.1e, the far corner at %.12f (sqrt 5 = 2.236067977500), a path down them %.12f long, off the unfolding by %.1e; two grids apart, %u of %u unreached",
 		eg, ec, corner, plen, perr, far, n2);
@@ -614,7 +614,7 @@ static void test_exact_saddles(void)
 	desc.face_count = nt;
 	qaws_mesh_3d_create(&m, &desc);
 	src = gd_at_vertex(m, 0);
-	st = qaws_mesh_3d_geodesic_exact(d, m, &src, 1);
+	st = qaws_mesh_3d_geodesic_exact(d, m, &src, 1, (qaws_scalar)HUGE_VAL);
 	/* the edge graph's distances (Dijkstra, quadratic: a small mesh) */
 	for (i = 0; i < nv; i++) g[i] = HUGE_VAL;
 	g[0] = 0;
@@ -648,6 +648,29 @@ static void test_exact_saddles(void)
 	sprintf(msg, "exact geodesics on saddles (%u vertices): %u violations, %.3f below the edge graph on average", nv, bad, below / nv);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && bad == 0 && below > 0, msg);
+	{
+		/* up to a radius: the same distances within it, HUGE_VAL beyond */
+		qaws_scalar* dr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv);
+		unsigned int in = 0, out = 0, wrong = 0;
+		qaws_status sr = qaws_mesh_3d_geodesic_exact(dr, m, &src, 1, (qaws_scalar)1.2), sn = qaws_mesh_3d_geodesic_exact(dr, m, &src, 1, (qaws_scalar)-1);
+		for (i = 0; i < nv; i++)
+		{
+			if ((double)d[i] <= 1.2)
+			{
+				in++;
+				wrong += dr[i] != d[i];
+			}
+			else
+			{
+				out++;
+				wrong += dr[i] != (qaws_scalar)HUGE_VAL;
+			}
+		}
+		sprintf(msg, "exact geodesics up to 1.2: %u vertices within, %u beyond, %u differing from the full run; a negative radius refused (%d)", in, out, wrong, (int)sn);
+		printf("  %s\n", msg);
+		TEST_ASSERT(sr == QAWS_STATUS_OK && sn == QAWS_STATUS_INVALID_ARGUMENT && in > 10 && out > 10 && wrong == 0, msg);
+		free(dr);
+	}
 	free(x);
 	free(t);
 	free(d);

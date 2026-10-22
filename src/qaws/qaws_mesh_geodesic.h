@@ -92,8 +92,12 @@ qaws_status qaws_mesh_geodesic_path(qaws_scalar* out_points, qaws_mesh_location*
    window splitting at a vertex no sooner than an earlier one through the
    same edge keeps one child (one angle, one split). Without a factor or a
    solve: no object needed. HUGE_VAL where no source reaches. The cost grows
-   with the windows (about n sqrt n on smooth meshes, n^2 at worst). */
+   with the windows (about n sqrt n on smooth meshes, n^2 at worst).
+   max_distance stops the windows once the cheapest left lies beyond it: the
+   distances up to it are the same as the full run's, the farther ones
+   HUGE_VAL, the cost the windows within it (HUGE_VAL: every distance).
+   INVALID_ARGUMENT for a negative or NaN max_distance. */
 qaws_status qaws_mesh_3d_geodesic_exact(qaws_scalar* out_distances, qaws_mesh_3d const* mesh, qaws_mesh_location const* sources,
-	unsigned int source_count);
+	unsigned int source_count, qaws_scalar max_distance);
 
 #endif /* QAWS_MESH_GEODESIC_H */
