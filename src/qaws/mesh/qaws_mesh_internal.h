@@ -269,11 +269,14 @@ typedef struct wt_contour_info
 	double cell;
 	unsigned int crossings, sharp;
 	int closed;
+	size_t evaluated;          /* grid points the field was evaluated at */
 } wt_contour_info;
 
-/* phi = 0 contoured on a grid over lo..hi grown by margin, res cells along the longest side (*out NULL when empty) */
+/* phi = 0 contoured on a grid over lo..hi grown by margin, res cells along the longest side (*out NULL when empty). lip > 0:
+   phi changes by at most lip per unit length (a distance: 1), so it is evaluated on a coarse lattice first and exactly only
+   at the points of blocks the level may cross, the others given their block's sign: the same contour, fewer evaluations */
 qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* info, wt_field_fn f, void* ctx, double const* lo, double const* hi, double margin,
-	unsigned int res);
+	unsigned int res, double lip);
 
 /* dual contouring of the crossings X on a grid (lo, cell h, n points per axis; in per point: 1 inside) into a mesh through
    qaws_mesh_repair (non-manifold places split); *out_sharp += its vertices on edges or corners */

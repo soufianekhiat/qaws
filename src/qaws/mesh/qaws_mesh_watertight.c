@@ -1130,7 +1130,7 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 	}
 	f.nrm = dn;
 	memset(&ci, 0, sizeof ci);
-	st = wt_contour_field(out, &ci, wtp_eval, &f, lo, hi, 2 * spacing, res);
+	st = wt_contour_field(out, &ci, wtp_eval, &f, lo, hi, 2 * spacing, res, 0);
 	memcpy(report->grid, ci.grid, sizeof ci.grid);
 	report->cell = (qaws_scalar)ci.cell;
 	report->crossings = ci.crossings;

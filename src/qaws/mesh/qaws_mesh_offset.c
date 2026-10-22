@@ -89,7 +89,7 @@ static qaws_status ofs_field_eval(void* ctx, double const* x, size_t n, double* 
    sides a crossing found by regula falsi on phi, its normal phi's gradient there, then dual contouring (wt_dual_contour).
    *out NULL when it is empty. */
 qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_field_fn fe, void* ctx, double const* lo, double const* hi,
-	double margin, unsigned int res)
+	double margin, unsigned int res, double lip)
 {
 	double glo[3], h, ext = 0, *gx = NULL, *phi = NULL, *A = NULL, *B = NULL, *pa = NULL, *pb = NULL, *xm = NULL, *fm = NULL, *gm = NULL;
 	unsigned int n[3], a, i, it;
@@ -119,8 +119,153 @@ qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_fie
 		gx[3 * q + 1] = glo[1] + h * (double)(q / n[0] % n[1]);
 		gx[3 * q + 2] = glo[2] + h * (double)(q / ((size_t)n[0] * n[1]));
 	}
-	if ((st = fe(ctx, gx, N, phi, NULL)) != QAWS_STATUS_OK)
-		goto done;
+	if (lip > 0)
+	{
+		/* blocks halved from a coarse stride down to one cell, the field evaluated at their corners level by level: a block
+		   with a corner farther from the level than lip times its diagonal holds no crossing (its points take that corner's
+		   sign), the others split; every crossing edge ends as two corners of a one-cell block, evaluated */
+		unsigned char* done2 = (unsigned char*)qaws_internal_scratch_zalloc(N + 1, 1);   /* 1 evaluated, 2 given a sign */
+		st = QAWS_STATUS_OK;
+		size_t *blk = NULL, *nxt = NULL, nb = 0, nbn = 0, capb = 0, capn = 0, m, r, *sq = NULL;
+		double *sx = NULL, *sv = NULL;
+		size_t capq = 0;
+		unsigned int s = 1;
+		int fail = !done2;
+		while (s < n[0] || s < n[1] || s < n[2]) s *= 2;
+		s /= 2;
+		if (s < 1)
+			s = 1;
+		report->evaluated = 0;
+		/* (the blocks: their lowest corner's grid point; the first level tiling the grid) */
+		{
+			unsigned int b0, b1, b2;
+			for (b2 = 0; !fail && b2 + 1 < n[2]; b2 += s)
+				for (b1 = 0; !fail && b1 + 1 < n[1]; b1 += s)
+					for (b0 = 0; !fail && b0 + 1 < n[0]; b0 += s)
+					{
+						if (nb == capb)
+						{
+							size_t cap = capb ? 2 * capb : 1024;
+							size_t* g2 = (size_t*)qaws_internal_realloc(blk, sizeof(size_t) * cap);
+							if (!g2) { fail = 1; break; }
+							blk = g2;
+							capb = cap;
+						}
+						blk[nb++] = (size_t)b0 + n[0] * ((size_t)b1 + (size_t)n[1] * b2);
+					}
+		}
+		while (!fail && nb)
+		{
+			/* this level's corners not yet evaluated, in one batch */
+			m = 0;
+			for (r = 0; r < nb && !fail; r++)
+			{
+				unsigned int c0 = (unsigned int)(blk[r] % n[0]), c1 = (unsigned int)(blk[r] / n[0] % n[1]), c2 = (unsigned int)(blk[r] / ((size_t)n[0] * n[1])), i0;
+				for (i0 = 0; i0 < 8; i0++)
+				{
+					unsigned int x0 = (i0 & 1) ? (c0 + s < n[0] ? c0 + s : n[0] - 1) : c0, x1 = (i0 & 2) ? (c1 + s < n[1] ? c1 + s : n[1] - 1) : c1;
+					unsigned int x2 = (i0 & 4) ? (c2 + s < n[2] ? c2 + s : n[2] - 1) : c2;
+					size_t cq = (size_t)x0 + n[0] * ((size_t)x1 + (size_t)n[1] * x2);
+					if (done2[cq] == 1)
+						continue;
+					done2[cq] = 1;
+					if (m == capq)
+					{
+						size_t cap = capq ? 2 * capq : 4096;
+						size_t* g2 = (size_t*)qaws_internal_realloc(sq, sizeof(size_t) * cap);
+						double* g3 = g2 ? (double*)qaws_internal_realloc(sx, sizeof(double) * 3 * cap) : NULL;
+						double* g4 = g3 ? (double*)qaws_internal_realloc(sv, sizeof(double) * cap) : NULL;
+						if (g2) sq = g2;
+						if (g3) sx = g3;
+						if (!g2 || !g3 || !g4) { fail = 1; break; }
+						sv = g4;
+						capq = cap;
+					}
+					memcpy(sx + 3 * m, gx + 3 * cq, sizeof(double) * 3);
+					sq[m++] = cq;
+				}
+			}
+			if (fail)
+				break;
+			if (m && (st = fe(ctx, sx, m, sv, NULL)) != QAWS_STATUS_OK)
+				break;
+			for (r = 0; r < m; r++) phi[sq[r]] = sv[r];
+			report->evaluated += m;
+			/* far blocks fill their points by sign; near ones split (at one cell: done, their corners evaluated) */
+			nbn = 0;
+			for (r = 0; r < nb && !fail; r++)
+			{
+				unsigned int c0 = (unsigned int)(blk[r] % n[0]), c1 = (unsigned int)(blk[r] / n[0] % n[1]), c2 = (unsigned int)(blk[r] / ((size_t)n[0] * n[1])), i0, i1, i2;
+				unsigned int e0 = c0 + s < n[0] ? c0 + s : n[0] - 1, e1 = c1 + s < n[1] ? c1 + s : n[1] - 1, e2 = c2 + s < n[2] ? c2 + s : n[2] - 1;
+				double diag = h * sqrt((double)(e0 - c0) * (e0 - c0) + (double)(e1 - c1) * (e1 - c1) + (double)(e2 - c2) * (e2 - c2)), val = 0;
+				int far = 0;
+				for (i0 = 0; i0 < 8; i0++)
+				{
+					size_t cq = (size_t)((i0 & 1) ? e0 : c0) + n[0] * ((size_t)((i0 & 2) ? e1 : c1) + (size_t)n[1] * ((i0 & 4) ? e2 : c2));
+					if (fabs(phi[cq]) > lip * diag)
+					{
+						far = 1;
+						val = phi[cq];
+					}
+				}
+				if (far)
+				{
+					for (i2 = c2; i2 <= e2; i2++)
+						for (i1 = c1; i1 <= e1; i1++)
+							for (i0 = c0; i0 <= e0; i0++)
+							{
+								size_t fq = (size_t)i0 + n[0] * ((size_t)i1 + (size_t)n[1] * i2);
+								if (!done2[fq])
+								{
+									phi[fq] = val;
+									done2[fq] = 2;
+								}
+							}
+					continue;
+				}
+				if (s == 1)
+					continue;
+				for (i0 = 0; i0 < 8; i0++)
+				{
+					unsigned int h0 = s / 2, x0 = c0 + ((i0 & 1) ? h0 : 0), x1 = c1 + ((i0 & 2) ? h0 : 0), x2 = c2 + ((i0 & 4) ? h0 : 0);
+					if (x0 >= e0 || x1 >= e1 || x2 >= e2)
+						continue;   /* (past the grid's last point: no child there) */
+					if (nbn == capn)
+					{
+						size_t cap = capn ? 2 * capn : 1024;
+						size_t* g2 = (size_t*)qaws_internal_realloc(nxt, sizeof(size_t) * cap);
+						if (!g2) { fail = 1; break; }
+						nxt = g2;
+						capn = cap;
+					}
+					nxt[nbn++] = (size_t)x0 + n[0] * ((size_t)x1 + (size_t)n[1] * x2);
+				}
+			}
+			{
+				size_t* sw = blk;
+				size_t cs = capb;
+				blk = nxt;
+				capb = capn;
+				nxt = sw;
+				capn = cs;
+				nb = nbn;
+			}
+			s /= 2;
+			if (s == 0)
+				break;
+		}
+		qaws_internal_free(done2); qaws_internal_free(blk); qaws_internal_free(nxt); qaws_internal_free(sq); qaws_internal_free(sx); qaws_internal_free(sv);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+		if (fail)
+			goto oom;
+	}
+	else
+	{
+		if ((st = fe(ctx, gx, N, phi, NULL)) != QAWS_STATUS_OK)
+			goto done;
+		report->evaluated = N;
+	}
 	for (q = 0; q < N; q++) in[q] = phi[q] < 0 ? 1 : 2;
 	/* the crossings: grid edges whose ends lie on two sides */
 	for (q = 0; q < N; q++)
@@ -1091,12 +1236,13 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 		/* SURFACE: phi = s - d; SHELL: the inner surface s = -|d|; THICKEN: |dist| = |d| / 2 */
 		f.level = desc->kind == QAWS_MESH_OFFSET_SURFACE ? d : desc->kind == QAWS_MESH_OFFSET_SHELL ? -fabs(d) : 0.5 * fabs(d);
 		memset(&ci, 0, sizeof ci);
-		st = wt_contour_field(&c, &ci, ofs_field_eval, &f, lo, hi, f.level > 0 ? f.level : 0, res);
+		st = wt_contour_field(&c, &ci, ofs_field_eval, &f, lo, hi, f.level > 0 ? f.level : 0, res, 1);
 		memcpy(report->grid, ci.grid, sizeof ci.grid);
 		report->cell = (qaws_scalar)ci.cell;
 		report->crossings = ci.crossings;
 		report->sharp = ci.sharp;
 		report->closed = ci.closed;
+		report->evaluated = (unsigned int)ci.evaluated;
 		if (st == QAWS_STATUS_OK && c)
 			st = ofs_measure_mesh(report, &f, c);
 		if (st != QAWS_STATUS_OK || !c || desc->kind != QAWS_MESH_OFFSET_SHELL)

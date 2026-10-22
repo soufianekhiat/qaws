@@ -122,6 +122,8 @@ typedef struct qaws_mesh_offset_report
 	qaws_scalar min_distance;           /* the offset surface's vertices' distances to the input */
 	qaws_scalar max_distance;
 	int closed;                         /* the result's directed edges all cancel */
+	unsigned int evaluated;             /* CONTOUR: grid points the distance was evaluated at (only near the level: a block of
+	                                       4^3 cells whose corner is farther than its diagonal holds no crossing) */
 } qaws_mesh_offset_report;
 
 /* report may be NULL. INVALID_ARGUMENT for a distance zero or not finite, an unknown kind or method, a mesh without faces.

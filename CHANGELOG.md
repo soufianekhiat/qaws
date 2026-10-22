@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Contoured offsets evaluate the distance only where the level may pass (blocks
+  halved from a coarse stride): the same surfaces, 22% of the evaluations at 128
+  cells. The report's `evaluated`. Test 171.
 - Adaptive subdivision (`adaptive_angle`, Loop and the butterfly): only where the
   surface turns, transitions without T-junctions. Test 172, figure 54 (key S).
 - Memoryless decimation (`QAWS_DECIMATE_MEMORYLESS`, Lindstrom and Turk 1998): costs

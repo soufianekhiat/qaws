@@ -183,11 +183,11 @@ static void test_cube(void)
 	qaws_status st;
 	st = ot_offset(&o, &r, c, QAWS_MESH_OFFSET_SURFACE, QAWS_MESH_OFFSET_CONTOUR, 0.1, 40);
 	v = ot_volume(o);
-	sprintf(msg, "cube contoured out by 0.1: volume %.4f (the offset's %.4f), distances %.4f to %.4f (cell %.3f), closed %d", v, ve,
-		(double)r.min_distance, (double)r.max_distance, (double)r.cell, r.closed);
+	sprintf(msg, "cube contoured out by 0.1: volume %.4f (the offset's %.4f), distances %.4f to %.4f (cell %.3f), closed %d; the distance evaluated at %u of %u grid points",
+		v, ve, (double)r.min_distance, (double)r.max_distance, (double)r.cell, r.closed, r.evaluated, r.grid[0] * r.grid[1] * r.grid[2]);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && o && r.closed && fabs(v - ve) < 0.01 * ve && fabs((double)r.min_distance - 0.1) < 0.1 * (double)r.cell &&
-		fabs((double)r.max_distance - 0.1) < 0.1 * (double)r.cell, msg);
+		fabs((double)r.max_distance - 0.1) < 0.1 * (double)r.cell && 10 * r.evaluated < 6 * r.grid[0] * r.grid[1] * r.grid[2], msg);
 	qaws_mesh_3d_destroy(o);
 	o = NULL;
 	st = ot_offset(&o, &r, c, QAWS_MESH_OFFSET_SURFACE, QAWS_MESH_OFFSET_CONTOUR, -0.1, 40);
