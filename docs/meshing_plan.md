@@ -161,6 +161,25 @@ Hexahedra and quads (research-scale):
 20. **Polycube labels by graph cuts: landed** (`sm_label_cut`, alpha-expansion over a Dinic max-flow, test 176, figure 57 key V): data the facets' areas times 1 − their normals along the axes, smoothness the shared edges' lengths (twice between opposite sides). The L and the bent bar unchanged (valid, 0.98 and 0.26); a box with a bump of 0.3 / 0.4 at 0.68 / 0.67 (0.36 / 0.29 before); over bumps 0.25 to 0.65 the mean 0.48 (0.37). Next: spikes (bumps past half the height) given their own patches, the atlas groups by the same cut.
 21. **GLOBAL torus periods: landed** (`qg_periods`, test 136, figure 58 key W): tree-cotree cuts, a whole step along each changing one period; the map's energy over the four steps fitted from 15 solves on one factor, its least integer point kept. Spirals in 14 of 20 tori before, 2 after (radii 1 and 0.3 to 0.7, at 0.12 to 0.4), at the same time; those left follow a field that turns slowly round the tube (INSTANT keeps the smoothest on a tie; guided along the parallels 17 of 20 close). Next: higher genus (4 g steps), the curvature-aligned field preferred on closed tubes.
 22. **FRAME_FIELD through singular edges** (HexEx extraction, Lyon et al. 2016): hexahedra where the frame field has singular curves. Check: a cylinder's and a sphere's hexes all valid.
+    Tried 2026-10-22, not landed (work kept in `wip_frame_field_singular.patch` at the repository's root, not committed):
+    a seamless map with transitions (CubeCover: the frames combed along a spanning tree, the cut reduced to the sheets the
+    singular edges need, one unknown per vertex copy, the transitions and the singular lines and border planes rounded
+    greedily by kind) and its lattice read off as HexEx does (points registered per cell and merged across facets by the
+    whole transitions, each cube's corners found by walking the map from its centre). It reproduces a box exactly when
+    forced through it, frames scrambled or not. Blocked by the field: the singular curves of `ff_frames` zigzag across
+    the tetrahedra (on a cylinder 60 of 73 singular edges lie more than 30 degrees off the axis their frames turn about;
+    the sphere has edges turning by a third of a turn, which no hexahedra follow), and a seamless map must put each
+    singular edge on its axis's line, so the map collapses (every cell of the cylinder near flat). Straightening the
+    curves by moving their points (no cell below a tenth) aligns 43 of 73 but the map still collapses. Needed first:
+    a frame field whose singular graph is valid (Ray et al. 2016 or MBO with the graph repaired: quarter turns only, no
+    curve ending inside), tetrahedra split along the singular curves (their edges on the curves, aligned with the axes),
+    then this map and extraction.
+
+Ideas noted (not ordered):
+
+- Dynamic local remeshing for elastoplastic simulation (video: https://www.youtube.com/watch?v=moGZi1kim-8, likely Wicke
+  et al. 2010): local tetrahedral remeshing during a simulation, quality-driven edge and face operations; next to
+  `qaws_volume_mesh_improve`.
 
 ## 0. Scope
 
