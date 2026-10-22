@@ -18,9 +18,9 @@
 #include "qaws_mesh_reference.h"
 
 /*
- * Curved volume elements: a tetrahedral or hexahedral mesh's quadratic
- * nodes, the border's on a mesh reference, every element's Jacobian kept
- * positive.
+ * Curved volume elements: a tetrahedral or hexahedral mesh's quadratic or
+ * cubic nodes, the border's on a mesh reference, every element's Jacobian
+ * kept positive.
  *
  * Elements (VTK's quadratic numbering):
  *   tetrahedron  10 nodes: the corners 0 1 2 3, then the edges' middles
@@ -33,19 +33,43 @@
  * smaller vertex index, then the larger), then one per hexahedron's face
  * (faces ordered by their sorted vertices), then one per hexahedron.
  *
+ * Cubic elements (the corners first, as above):
+ *   tetrahedron  20 nodes: the corners, then each edge's two (in the order
+ *                above, at 1/3 and 2/3 from its first corner), then each
+ *                face's centre, the faces (0 1 3) (1 2 3) (0 2 3) (0 1 2);
+ *   hexahedron   64 nodes (tricubic): the corners, each edge's two, then
+ *                each face's four (the faces above, at (a, b) / 3 in the
+ *                face's frame, a from its first corner toward its second,
+ *                b toward its last, a fastest), then the inside's eight
+ *                (s fastest, then t, then u).
+ * The cubic nodes: the vertices, then two per edge (from its smaller vertex),
+ * then each face's (a hexahedron's four in the frame from its smallest
+ * vertex toward its smaller neighbour, a tetrahedron's one), then each
+ * hexahedron's eight. A cubic face node on the border starts at its Coons
+ * point (a tetrahedron's face: its six curved edge nodes' mean times 3 / 2,
+ * less half its corners' mean). Their Jacobians are bounded the same way,
+ * a tetrahedron's determinant of degree 6 by its 84 Bernstein coefficients,
+ * a hexahedron's of degree 8 in each axis by its 729.
+ *
  * Placement: every node first at the straight element's point (an edge's
  * middle, a face's or a cell's centre). On the border (facets with no cell
- * across), an edge's node goes to the reference's closest point to it; a
- * face's node to the closest point to its Coons point (the bilinear blend of
- * its curved edges). The inside nodes take the border's displacement,
- * spread through the elements (Jacobi averaging over the elements' nodes,
- * the vertices' displacement zero: it fades inward). Then each element's
+ * across), an edge's nodes go to equal lengths along the curved edge (its
+ * segment's samples projected onto the reference, the node at its fraction
+ * of their polyline's length, then projected); a face's node to the
+ * closest point to its Coons point (the blend of its curved edges). The
+ * inside nodes take the border's displacement, spread through the elements
+ * (Jacobi averaging over the elements' nodes, the vertices' displacement
+ * zero: it fades inward); then the faces inside the mesh take their edges'
+ * Coons blend and a hexahedron's own nodes its boundary's (Gordon and Hall's
+ * transfinite blend), so they follow the border's curving. Then each element's
  * Jacobian is checked relative to the straight element's: a tetrahedron's
  * bounded from below over the whole element (its determinant, cubic, in the
  * Bernstein basis: the least of its 20 coefficients; Johnen, Remacle,
  * Geuzaine 2013); a hexahedron's, of degree 5 in each axis, by its 216
  * tensor Bernstein coefficients, each over the straight hexahedron's in the
- * same basis. An element that passes is certified valid. An element below
+ * same basis, the box halved where the bound is under min_jacobian (three
+ * times at most: the bound tightens as the boxes shrink). An element that
+ * passes is certified valid. An element below
  * min_jacobian has its nodes' displacements halved, until it passes
  * (straight at worst, valid when the straight element is).
  *
@@ -76,6 +100,11 @@ qaws_status qaws_volume_mesh_quadratic_node_counts(unsigned int* out_node_count,
 /* out_positions: 3 per node; out_element_nodes: per cell in turn its 10 or
    27 nodes. reference NULL: the straight nodes. report and desc may be NULL. */
 qaws_status qaws_volume_mesh_quadratic_nodes(qaws_scalar* out_positions, unsigned int* out_element_nodes, qaws_volume_curve_report* report,
+	qaws_volume_mesh const* mesh, qaws_mesh_reference const* reference, qaws_volume_curve_desc const* desc);
+
+/* The cubic counterparts: 20 nodes per tetrahedron, 64 per hexahedron. */
+qaws_status qaws_volume_mesh_cubic_node_counts(unsigned int* out_node_count, unsigned int* out_element_node_count, qaws_volume_mesh const* mesh);
+qaws_status qaws_volume_mesh_cubic_nodes(qaws_scalar* out_positions, unsigned int* out_element_nodes, qaws_volume_curve_report* report,
 	qaws_volume_mesh const* mesh, qaws_mesh_reference const* reference, qaws_volume_curve_desc const* desc);
 
 #endif /* QAWS_VOLUME_CURVE_H */

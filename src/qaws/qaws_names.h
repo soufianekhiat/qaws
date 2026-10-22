@@ -1584,6 +1584,8 @@
 #define qaws_volume_mesh_clone QAWS_SFX(qaws_volume_mesh_clone)
 #define qaws_volume_mesh_connect QAWS_SFX(qaws_volume_mesh_connect)
 #define qaws_volume_mesh_create QAWS_SFX(qaws_volume_mesh_create)
+#define qaws_volume_mesh_cubic_node_counts QAWS_SFX(qaws_volume_mesh_cubic_node_counts)
+#define qaws_volume_mesh_cubic_nodes QAWS_SFX(qaws_volume_mesh_cubic_nodes)
 #define qaws_volume_mesh_desc QAWS_SFX(qaws_volume_mesh_desc)
 #define qaws_volume_mesh_destroy QAWS_SFX(qaws_volume_mesh_destroy)
 #define qaws_volume_mesh_frame_field QAWS_SFX(qaws_volume_mesh_frame_field)

@@ -1498,7 +1498,7 @@ Figure 41 (key F) shows a shaken grid (worst dihedral 1.6 -> 35.0 degrees), the 
 
 ## Curved volume elements
 
-`qaws_volume_mesh_quadratic_nodes` (`qaws_volume_curve.h`) gives a tetrahedral or hexahedral mesh's quadratic nodes for a solver, in VTK's numbering: P2 tetrahedra (10 nodes) and triquadratic hexahedra (27). Border nodes lie on a mesh reference, and every element's Jacobian stays above a bound. `qaws_volume_mesh_quadratic_node_counts` gives the sizes. The node list is:
+`qaws_volume_mesh_quadratic_nodes` (`qaws_volume_curve.h`) gives a tetrahedral or hexahedral mesh's quadratic nodes for a solver, in VTK's numbering: P2 tetrahedra (10 nodes) and triquadratic hexahedra (27). `qaws_volume_mesh_cubic_nodes` gives cubic ones: P3 tetrahedra (20 nodes: corners, two per edge, one per face) and tricubic hexahedra (64: corners, two per edge, four per face, eight inside), numbered as the header documents. Border nodes lie on a mesh reference, and every element's Jacobian stays above a bound. `qaws_volume_mesh_quadratic_node_counts` gives the sizes. The node list is:
 
 1. the vertices;
 2. one node per edge, by sorted vertices;
@@ -1507,9 +1507,9 @@ Figure 41 (key F) shows a shaken grid (worst dihedral 1.6 -> 35.0 degrees), the 
 
 Placement:
 
-1. **Border nodes:** a border edge's node goes to the reference's closest point to its middle. A border face's node goes to the closest point to its Coons point (the curved edges' blend).
-2. **Inside nodes:** the border's displacement is spread inside by Jacobi averaging over the elements, with the vertices' displacement held at zero.
-3. **Jacobian check:** each element's Jacobian is checked relative to the straight element's. A tetrahedron's is bounded from below over the whole element (its cubic determinant's 20 Bernstein coefficients, Johnen et al. 2013). A hexahedron's determinant is of degree 5 in each axis; its 216 tensor Bernstein coefficients are each divided by the straight hexahedron's in the same basis, and the least of these bounds the ratio. An element that passes is certified valid. An element below `min_jacobian` (default 0.1) has its nodes' displacements halved until it passes, down to straight at worst.
+1. **Border nodes:** a border edge's nodes go to equal lengths along the curved edge: its segment's samples are projected onto the reference and each node starts at its fraction of their polyline's length, then is projected itself. Projecting the straight points instead bunches them toward an arc's middle, and cubic interpolation overshoots on uneven nodes. A border face's nodes go to the closest points to their Coons points (the curved edges' blend).
+2. **Inside nodes:** the border's displacement is spread inside by Jacobi averaging over the elements, with the vertices' displacement held at zero. Then the faces inside the mesh take their edges' Coons blend, and a hexahedron's own nodes take its boundary's transfinite blend (Gordon and Hall), so they follow the border's curving rather than lag behind it.
+3. **Jacobian check:** each element's Jacobian is checked relative to the straight element's. A tetrahedron's is bounded from below over the whole element (its cubic determinant's 20 Bernstein coefficients, Johnen et al. 2013). A hexahedron's determinant is of degree 5 in each axis; its 216 tensor Bernstein coefficients are each divided by the straight hexahedron's in the same basis, and the least of these bounds the ratio. A cubic tetrahedron's determinant is of degree 6 (84 coefficients), a tricubic hexahedron's of degree 8 in each axis (729); a hexahedron's box is halved where its bound is under `min_jacobian`, three times at most, since the bound tightens as the boxes shrink. An element that passes is certified valid. An element below `min_jacobian` (default 0.1) has its nodes' displacements halved until it passes, down to straight at worst.
 
 The report gives the border nodes, the relaxed elements, the smallest Jacobian, and the border nodes' largest distance to the reference, straight (the sagitta) and placed.
 
@@ -1519,8 +1519,13 @@ A cell with two or three border facets meeting at a flat angle cannot be curved.
 |---|---|
 | A sphere's 692 tetrahedra on a PN reference of a finer sphere: border edge nodes within 2e-3 of the sphere | 354 of 384 (straight: 3.7e-2 off); 6 flat cells relaxed; Jacobian >= 0.176 |
 | A cube's hexahedron on the sphere through its corners: 27 nodes, edges' and faces' on the sphere, centre | 4.5e-7 off; centre 7e-10; Jacobian bound 0.212, the least of 11³ samples 0.212 |
-| A tetrahedron round a small sphere inside it | relaxed, Jacobian 0.105 >= 0.1 |
+| A tetrahedron round a small sphere inside it | relaxed, Jacobian bound 0.419 (sampled 0.453) |
+| Cubic: a cube's hexahedron with a spherical top (radius 3): its top face's nodes on the cap, its sides' on their planes; the bound against 11³ samples | 1e-7; exact; 0.663 against 0.705 |
+| Cubic: two cubes sharing a face, labelled with different frames: every node at its lattice point (the shared nodes agree) | 1.1e-16 |
+| Cubic: the sphere's 692 tetrahedra | Jacobian >= 0.232, 6 flat cells relaxed |
 | No reference: the middles exactly, Jacobian 1; a prism | exact; UNSUPPORTED_OPERATION |
+
+Figure 53 (key R) shows a coarse O-grid ball of 32 hexahedra straight, triquadratic and tricubic, their borders 0.125, 0.0015 and 0.0006 off the sphere. One hexahedron covering a whole ball is degenerate at high degree: its faces all lie on one sphere, so they meet tangentially along its edges and its Jacobian there is 0; the cubic element folds where the quadratic one only bends.
 
 Figure 42 (key G) shows a sphere's tetrahedra straight and P2, and an O-grid ball of hexahedra straight and triquadratic (Jacobian >= 0.75, none relaxed), cut open.
 

@@ -143,7 +143,7 @@ Subdivision, geodesics, decimation, offsets (bounded, exact checks):
 
 Volumes, points, smoothing (larger):
 
-11. **Cubic nodes.** P3 tetrahedra and Q3 hexahedra, the border's nodes on the surface, Jacobians certified by their Bernstein coefficients. Check: an exact cubic geometry reproduced; the bound below every sample.
+11. **Cubic nodes: landed** (`qaws_volume_mesh_cubic_nodes`, test 174, figure 53 key R): P3 tetrahedra and Q3 hexahedra from one degree-p implementation, edge nodes at equal arc lengths, inside faces by Coons and hexahedra's own nodes by Gordon and Hall, the Jacobians certified (84 and 729 Bernstein coefficients, hexahedra subdivided where loose); a coarse ball's border 0.0006 off the sphere against Q2's 0.0015. Next: simplex subdivision for the tetrahedra's bound.
 12. **Untangling curved elements.** Where the bound is not positive, the interior nodes moved up the bound's gradient until it is. Check: a bent tetrahedron made valid with its border nodes kept.
 13. **Points without normals.** Normals estimated (PCA of the nearest points) and oriented (a minimum spanning tree, then winding numbers) before the watertight surface. Check: a sphere's and a ring's points give the same surfaces as with true normals.
 14. **Denoised corners.** BILATERAL keeping the corners where three or more features meet (the normals' filter split by feature). Check: a noisy cube's corners within the noise's tenth.
