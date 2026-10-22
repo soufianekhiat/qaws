@@ -426,8 +426,11 @@ static int sm_line_laplacian(sm_csr* K, unsigned int const* ln, unsigned char co
 /* BILATERAL: the triangles' normals filtered (Zheng, Fu, Au, Tai 2011), each the mean of the normals of the triangles
    sharing a vertex with it weighted by their areas, by a Gaussian of the distance between centroids (sigma: their mean
    spacing) and by a Gaussian of the normals' difference (sigma_r: the range), iters times; then the vertices moved to the
-   filtered triangles' planes (Sun et al. 2007: each by the mean of n (n . (c - x)) over its triangles), 20 times. Held
+   filtered triangles' planes, 20 times: each to the point nearest them in least squares (where they span; Sun et al.
+   2007 moved by their mean, which rounds corners). Held
    vertices stay, a line vertex moves along its line. 0 on allocation failure. */
+#define SM_PLANES 0.05   /* BILATERAL: a direction the planes fix with a twentieth of the strongest's weight */
+
 static int sm_bilateral(double* x, unsigned int nv, unsigned int const* t, unsigned int nt, unsigned char const* cls, unsigned int const* ln,
 	unsigned int iters, double sigma_r)
 {
@@ -521,17 +524,34 @@ static int sm_bilateral(double* x, unsigned int nv, unsigned int const* t, unsig
 				c[3 * (size_t)i + k] = (x[3 * (size_t)t[3 * i] + k] + x[3 * (size_t)t[3 * i + 1] + k] + x[3 * (size_t)t[3 * i + 2] + k]) / 3;
 		for (i = 0; i < nv; i++)
 		{
-			double d[3] = { 0, 0, 0 };
-			unsigned int j;
+			double d[3] = { 0, 0, 0 }, M[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, V[9], b[3] = { 0, 0, 0 }, lmax = 0;
+			unsigned int j, a2;
 			if (cls[i] == 2 || v0[i] == v0[i + 1])
 				continue;
+			/* the point nearest the filtered planes in least squares (sum n n^T) d = sum n (n . (c - x)): solved where the
+			   planes span (a pseudo-inverse), so a flat vertex moves along its normal, an edge's onto the planes' line and a
+			   corner's to where they meet, kept sharp */
 			for (j = v0[i]; j < v0[i + 1]; j++)
 			{
-				unsigned int g = vf[j];
+				unsigned int g = vf[j], a1;
 				double const* nn = n + 3 * (size_t)g;
 				double e = 0;
 				for (k = 0; k < 3; k++) e += nn[k] * (c[3 * (size_t)g + k] - x[3 * (size_t)i + k]);
-				for (k = 0; k < 3; k++) d[k] += nn[k] * e / (v0[i + 1] - v0[i]);
+				for (k = 0; k < 3; k++)
+				{
+					b[k] += nn[k] * e;
+					for (a1 = 0; a1 < 3; a1++) M[3 * k + a1] += nn[k] * nn[a1];
+				}
+			}
+			wt_sym_eigen3(M, V);
+			for (k = 0; k < 3; k++) lmax = fmax(lmax, fabs(M[4 * k]));
+			for (a2 = 0; a2 < 3; a2++)
+			{
+				double lk = M[4 * a2], pr;
+				if (!(fabs(lk) > SM_PLANES * lmax))
+					continue;   /* (a direction the planes do not fix: not moved along) */
+				pr = (V[a2] * b[0] + V[3 + a2] * b[1] + V[6 + a2] * b[2]) / lk;
+				for (k = 0; k < 3; k++) d[k] += pr * V[3 * k + a2];
 			}
 			if (cls[i] == 1)
 			{

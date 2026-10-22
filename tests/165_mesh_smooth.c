@@ -295,6 +295,112 @@ static void st_roof_error(qaws_mesh_3d const* m, unsigned int n, double roof, do
 	*rms = sqrt(s / ((n + 1) * (n + 1)));
 }
 
+/* the cube [0, 1]^3's surface, n x n squares a side cut in two, every vertex shaken by noise along each axis */
+static qaws_mesh_3d* st_noisy_cube(unsigned int n, double noise, unsigned int seed)
+{
+	unsigned int N = n + 1, *id = (unsigned int*)malloc(sizeof(unsigned int) * N * N * N), nv = 0, nf = 0, a, s, u, v, k;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * N * N * N);
+	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 36 * n * n);
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (k = 0; k < N * N * N; k++)
+	{
+		unsigned int q[3];
+		q[0] = k % N;
+		q[1] = (k / N) % N;
+		q[2] = k / (N * N);
+		id[k] = 0xFFFFFFFFu;
+		if (q[0] % n && q[1] % n && q[2] % n)
+			continue;
+		id[k] = nv;
+		for (a = 0; a < 3; a++) x[3 * nv + a] = (qaws_scalar)((double)q[a] / n + noise * st_rand(&seed));
+		nv++;
+	}
+	for (a = 0; a < 3; a++)
+		for (s = 0; s < 2; s++)
+			for (u = 0; u < n; u++)
+				for (v = 0; v < n; v++)
+				{
+					unsigned int q4[4], c, b = (a + 1) % 3, e = (a + 2) % 3;
+					for (c = 0; c < 4; c++)
+					{
+						unsigned int q[3];
+						q[a] = s * n;
+						q[b] = u + (c == 1 || c == 2);
+						q[e] = v + (c >= 2);
+						q4[c] = id[q[0] + N * (q[1] + N * q[2])];
+					}
+					if (!s)
+					{
+						c = q4[1];
+						q4[1] = q4[3];
+						q4[3] = c;
+					}
+					f[3 * nf] = q4[0]; f[3 * nf + 1] = q4[1]; f[3 * nf + 2] = q4[2]; nf++;
+					f[3 * nf] = q4[0]; f[3 * nf + 1] = q4[2]; f[3 * nf + 2] = q4[3]; nf++;
+				}
+	memset(&d, 0, sizeof d);
+	d.positions = x;
+	d.vertex_count = nv;
+	d.face_vertices = f;
+	d.face_count = nf;
+	qaws_mesh_3d_create(&m, &d);
+	free(id);
+	free(x);
+	free(f);
+	return m;
+}
+
+/* a noisy cube, nothing marked: bilateral puts each corner where its three filtered planes meet, as near the true corner
+   as the planes are to their faces allow (their noise, about sqrt 3 times through three of them) */
+static void test_bilateral_corners(void)
+{
+	qaws_mesh_3d* m = st_noisy_cube(8, 0.01, 5);
+	qaws_smooth_desc d;
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), i;
+	double before = 0, after = 0, face = 0;
+	qaws_status st;
+	char msg[300];
+	for (i = 0; i < nv; i++)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(m, i);
+		double q[3] = { p.x, p.y, p.z }, e = 0;
+		unsigned int k, ends = 0;
+		for (k = 0; k < 3; k++)
+			if (fabs(q[k] - floor(q[k] + 0.5)) < 0.05)
+				ends++;
+		if (ends == 3)
+			for (k = 0; k < 3; k++) e += (q[k] - floor(q[k] + 0.5)) * (q[k] - floor(q[k] + 0.5));
+		before = fmax(before, sqrt(e));
+	}
+	memset(&d, 0, sizeof d);
+	d.method = QAWS_SMOOTH_BILATERAL;
+	st = qaws_mesh_3d_smooth(m, &d);
+	for (i = 0; i < nv; i++)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(m, i);
+		double q[3] = { p.x, p.y, p.z }, e = 0, dmin = 1;
+		unsigned int k, ends = 0;
+		for (k = 0; k < 3; k++)
+		{
+			double dk = fabs(q[k] - floor(q[k] + 0.5));
+			ends += dk < 0.05;
+			dmin = fmin(dmin, dk);
+		}
+		if (ends == 3)
+		{
+			for (k = 0; k < 3; k++) e += (q[k] - floor(q[k] + 0.5)) * (q[k] - floor(q[k] + 0.5));
+			after = fmax(after, sqrt(e));
+		}
+		face = fmax(face, dmin);
+	}
+	sprintf(msg, "bilateral on a cube shaken by 0.01: its corners off the cube's by %.4f before, %.4f after; every vertex off a face plane by %.4f",
+		before, after, face);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && after < 0.7 * before && after < 2 * face && face < 0.003, msg);
+	qaws_mesh_3d_destroy(m);
+}
+
 static void test_bilateral(void)
 {
 	unsigned int n = 24;
@@ -424,6 +530,7 @@ int test_165_mesh_smooth_main(void)
 	test_border();
 	test_crease();
 	test_bilateral();
+	test_bilateral_corners();
 	test_fair_plane();
 	test_fair_cap();
 	test_refusals();

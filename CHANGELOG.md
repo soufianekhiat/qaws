@@ -57,6 +57,11 @@ All notable changes to Qaws are documented here.
   CSG emblem of figure 27: 3784 faces instead of 7918). Boolean results have the
   edges inside flat regions turned toward Delaunay.
 
+### Changed
+
+- BILATERAL smoothing moves each vertex to the least-squares point of its filtered
+  planes (a corner to where they meet) instead of their mean. Test 165.
+
 ### Added
 
 - Watertight surfaces from points without normals (`normals` NULL): estimated by
