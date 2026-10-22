@@ -302,6 +302,302 @@ done:
 	return st;
 }
 
+/* The charts packed by their shapes (as xatlas does): each rasterized at the pixel size of a 96-pixel square of their whole
+   area over 0.7, grown by the gap and a pixel, placed largest first at its lowest (then leftmost) free spot in a strip,
+   turned a quarter when that sits lower; the strip's width the best of a few around the square. uv turned in place for
+   the charts turned; xy: each chart's box corner (its rotated box's) in uv units; *out_side the square's side. 0 on
+   allocation failure */
+static int pm_pack_bitmap(double* uv, unsigned int const* wedge, unsigned int const* chart, unsigned int n, unsigned int W, unsigned int C,
+	double gap, double* xy, double* out_side)
+{
+	unsigned int c, i, k, r, *wch = NULL, *ord = NULL, *pix = NULL, *p0 = NULL, np = 0, capp = 0, gw, best_gw = 0, trial;
+	double *bb = NULL, area = 0, ps, best_side = HUGE_VAL;
+	unsigned char *occ = NULL, *rot = NULL;
+	int ok = 0;
+	wch = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)W + 1));
+	ord = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)C + 1));
+	bb = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 5, (size_t)C + 1));   /* min x, min y, max x, max y, area */
+	p0 = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)C + 2));   /* per chart and turn its pixels' start */
+	rot = (unsigned char*)qaws_internal_zalloc((size_t)C + 1, 1);
+	if (!wch || !ord || !bb || !p0 || !rot)
+		goto done;
+	for (i = 0; i < W; i++)
+		wch[i] = PM_NONE;
+	for (i = 0; i < n; i++)
+		wch[wedge[i]] = chart[i / 3];
+	for (c = 0; c < C; c++)
+	{
+		bb[5 * (size_t)c] = bb[5 * (size_t)c + 1] = HUGE_VAL;
+		bb[5 * (size_t)c + 2] = bb[5 * (size_t)c + 3] = -HUGE_VAL;
+		bb[5 * (size_t)c + 4] = 0;
+		ord[c] = c;
+	}
+	for (i = 0; i < W; i++)
+		if (wch[i] != PM_NONE)
+		{
+			double* b = bb + 5 * (size_t)wch[i];
+			b[0] = fmin(b[0], uv[2 * (size_t)i]);
+			b[1] = fmin(b[1], uv[2 * (size_t)i + 1]);
+			b[2] = fmax(b[2], uv[2 * (size_t)i]);
+			b[3] = fmax(b[3], uv[2 * (size_t)i + 1]);
+		}
+	for (i = 0; i < n; i += 3)
+	{
+		double const *a = uv + 2 * (size_t)wedge[i], *b = uv + 2 * (size_t)wedge[i + 1], *d = uv + 2 * (size_t)wedge[i + 2];
+		double s = 0.5 * fabs((b[0] - a[0]) * (d[1] - a[1]) - (d[0] - a[0]) * (b[1] - a[1]));
+		bb[5 * (size_t)chart[i / 3] + 4] += s;
+		area += s;
+	}
+	if (!(area > 0))
+		goto done;
+	ps = sqrt(area / 0.7) / 192;
+	/* largest first */
+	for (i = 1; i < C; i++)
+		for (k = i; k > 0 && bb[5 * (size_t)ord[k] + 4] > bb[5 * (size_t)ord[k - 1] + 4]; k--)
+		{
+			unsigned int s = ord[k];
+			ord[k] = ord[k - 1];
+			ord[k - 1] = s;
+		}
+	/* each chart's pixels, unturned and turned a quarter (x, y packed in one int each pair), the gap and a pixel grown */
+	{
+		int g = (int)ceil(0.5 * gap / ps);
+		for (c = 0; c < C; c++)
+			for (r = 0; r < 2; r++)
+			{
+				double const* b = bb + 5 * (size_t)c;
+				int bw = (int)ceil((r ? b[3] - b[1] : b[2] - b[0]) / ps) + 1 + 2 * g, bh = (int)ceil((r ? b[2] - b[0] : b[3] - b[1]) / ps) + 1 + 2 * g, px, py;
+				unsigned char* m = (unsigned char*)qaws_internal_zalloc((size_t)bw * (size_t)bh + 1, 1);
+				if (!m)
+					goto done;
+				p0[2 * (size_t)c + r] = np;
+				for (i = 0; i < n; i += 3)
+				{
+					double P[3][2];
+					int x0, x1, y0, y1;
+					if (chart[i / 3] != c)
+						continue;
+					for (k = 0; k < 3; k++)
+					{
+						double u = uv[2 * (size_t)wedge[i + k]] - b[0], v = uv[2 * (size_t)wedge[i + k] + 1] - b[1];
+						P[k][0] = (r ? (b[3] - b[1]) - v : u) / ps + g;
+						P[k][1] = (r ? u : v) / ps + g;
+					}
+					x0 = (int)floor(fmin(P[0][0], fmin(P[1][0], P[2][0])));
+					x1 = (int)ceil(fmax(P[0][0], fmax(P[1][0], P[2][0])));
+					y0 = (int)floor(fmin(P[0][1], fmin(P[1][1], P[2][1])));
+					y1 = (int)ceil(fmax(P[0][1], fmax(P[1][1], P[2][1])));
+					for (py = y0; py <= y1; py++)
+						for (px = x0; px <= x1; px++)
+						{
+							/* the pixel touched: its centre within the triangle grown by a pixel's half diagonal */
+							double cx = px + 0.5, cy = py + 0.5, ar = (P[1][0] - P[0][0]) * (P[2][1] - P[0][1]) - (P[2][0] - P[0][0]) * (P[1][1] - P[0][1]), in = 1;
+							for (k = 0; k < 3 && in; k++)
+							{
+								double const *e0 = P[k], *e1 = P[(k + 1) % 3];
+								double ex = e1[0] - e0[0], ey = e1[1] - e0[1], l = sqrt(ex * ex + ey * ey);
+								double sd = ((cx - e0[0]) * ey - (cy - e0[1]) * ex) * (ar > 0 ? -1 : 1);
+								in = l == 0 || sd / l > -0.71;
+							}
+							if (in && px >= 0 && py >= 0 && px < bw && py < bh)
+								m[(size_t)py * bw + px] = 1;
+						}
+				}
+				/* grown by g pixels (the gap), then the set pixels listed */
+				{
+					unsigned char* m2 = (unsigned char*)qaws_internal_zalloc((size_t)bw * (size_t)bh + 1, 1);
+					int dx, dy;
+					if (!m2)
+					{
+						qaws_internal_free(m);
+						goto done;
+					}
+					for (py = 0; py < bh; py++)
+						for (px = 0; px < bw; px++)
+							if (m[(size_t)py * bw + px])
+								for (dy = -g; dy <= g; dy++)
+									for (dx = -g; dx <= g; dx++)
+										if (px + dx >= 0 && py + dy >= 0 && px + dx < bw && py + dy < bh)
+											m2[(size_t)(py + dy) * bw + px + dx] = 1;
+					for (py = 0; py < bh; py++)
+						for (px = 0; px < bw; px++)
+							if (m2[(size_t)py * bw + px])
+							{
+								if (np + 1 > capp)
+								{
+									unsigned int nc2 = qaws_internal_grow(capp, (size_t)np + 1, 4096);
+									unsigned int* g2 = nc2 ? (unsigned int*)qaws_internal_realloc(pix, qaws_internal_mul2(sizeof(unsigned int), nc2)) : NULL;
+									if (!g2)
+									{
+										qaws_internal_free(m);
+										qaws_internal_free(m2);
+										goto done;
+									}
+									pix = g2;
+									capp = nc2;
+								}
+								pix[np++] = ((unsigned int)py << 16) | (unsigned int)px;
+							}
+					qaws_internal_free(m2);
+				}
+				qaws_internal_free(m);
+			}
+		p0[2 * (size_t)C] = np;
+	}
+	/* the strip's width: 0.8 .. 1.4 of the square, the lowest square kept; then laid out at it */
+	for (trial = 0; trial < 8; trial++)
+	{
+		unsigned int H = 0, Wu = 0, side, wmin = 0;
+		gw = trial < 7 ? (unsigned int)(192 * (0.8 + 0.1 * trial)) : best_gw;
+		for (c = 0; c < C; c++)
+			for (r = 0; r < 2; r++)
+			{
+				unsigned int e = p0[2 * (size_t)c + r + 1], j, mx = 0;
+				for (j = p0[2 * (size_t)c + r]; j < e; j++)
+					mx = mx > (pix[j] & 0xFFFF) ? mx : (pix[j] & 0xFFFF);
+				if (!r)
+					wmin = wmin > mx + 1 ? wmin : mx + 1;
+			}
+		if (gw < wmin)
+			gw = wmin;
+		qaws_internal_free(occ);
+		occ = (unsigned char*)qaws_internal_zalloc((size_t)gw * 4096 + 1, 1);
+		if (!occ)
+			goto done;
+		for (i = 0; i < C; i++)
+		{
+			unsigned int bx = 0, byy = 0, br = 0, bt = 0xFFFFFFFFu, j, bpw = 0;
+			c = ord[i];
+			for (r = 0; r < 2; r++)
+			{
+				unsigned int s0 = p0[2 * (size_t)c + r], e = p0[2 * (size_t)c + r + 1], pw = 0, ph = 0, x, y, found = 0;
+				for (j = s0; j < e; j++)
+				{
+					pw = pw > (pix[j] & 0xFFFF) + 1 ? pw : (pix[j] & 0xFFFF) + 1;
+					ph = ph > (pix[j] >> 16) + 1 ? ph : (pix[j] >> 16) + 1;
+				}
+				if (pw > gw)
+					continue;
+				for (y = 0; y + ph < 4096 && !found && y < bt; y++)
+					for (x = 0; x + pw <= gw && !found; x++)
+					{
+						for (j = s0; j < e && !occ[(size_t)(y + (pix[j] >> 16)) * gw + x + (pix[j] & 0xFFFF)]; j++)
+							;
+						if (j == e)
+						{
+							found = 1;
+							if (y + ph < bt)
+							{
+								bt = y + ph;
+								bx = x;
+								byy = y;
+								br = r;
+								bpw = pw;
+							}
+						}
+					}
+			}
+			if (bt == 0xFFFFFFFFu)
+				goto done;   /* (no room in 4096 rows: give up, the skyline instead) */
+			{
+				unsigned int s0 = p0[2 * (size_t)c + br], e = p0[2 * (size_t)c + br + 1];
+				for (j = s0; j < e; j++)
+					occ[(size_t)(byy + (pix[j] >> 16)) * gw + bx + (pix[j] & 0xFFFF)] = 1;
+			}
+			H = H > bt ? H : bt;
+			Wu = Wu > bx + bpw ? Wu : bx + bpw;
+			if (trial == 7)
+			{
+				rot[c] = (unsigned char)br;
+				xy[2 * (size_t)c] = bx * ps;
+				xy[2 * (size_t)c + 1] = byy * ps;
+			}
+		}
+		side = H > Wu ? H : Wu;
+		if (trial < 7 && side * ps < best_side)
+		{
+			best_side = side * ps;
+			best_gw = gw;
+		}
+		if (trial == 7)
+			best_side = side * ps;
+	}
+	/* the charts turned a quarter: u' = (box height) - (v - min v), v' = u - min u, then their box from 0; the others from 0 */
+	for (i = 0; i < W; i++)
+		if (wch[i] != PM_NONE)
+		{
+			double const* b = bb + 5 * (size_t)wch[i];
+			double u = uv[2 * (size_t)i] - b[0], v = uv[2 * (size_t)i + 1] - b[1];
+			int g = (int)ceil(0.5 * gap / ps);
+			uv[2 * (size_t)i] = (rot[wch[i]] ? (b[3] - b[1]) - v : u) + g * ps;
+			uv[2 * (size_t)i + 1] = (rot[wch[i]] ? u : v) + g * ps;
+		}
+	*out_side = best_side;
+	ok = 1;
+done:
+	qaws_internal_free(wch); qaws_internal_free(ord); qaws_internal_free(bb); qaws_internal_free(p0); qaws_internal_free(rot);
+	qaws_internal_free(pix); qaws_internal_free(occ);
+	return ok;
+}
+
+/* Boxes (wh: width and height per box) packed bottom-left on a skyline in a strip W wide, in the order ord: each where its
+   top is lowest (then leftmost), the skyline's segments (sk: 2 per segment, its start and height, 2 C + 2 of them)
+   raised under it. xy: each box's corner, or NULL; *out_w, *out_h: the extent used */
+static void pm_skyline(double const* wh, unsigned int const* ord, unsigned int C, double W, double* sk, double* xy, double* out_w, double* out_h)
+{
+	unsigned int i, s, nsk = 1;
+	double used_w = 0, used_h = 0;
+	sk[0] = 0;
+	sk[1] = 0;
+	for (i = 0; i < C; i++)
+	{
+		unsigned int c = ord[i], bs = 0, a, b, j, n2;
+		double w = wh[2 * (size_t)c], hgt = wh[2 * (size_t)c + 1], best = HUGE_VAL, bx = 0;
+		for (s = 0; s < nsk; s++)
+		{
+			double x = sk[2 * (size_t)s], top = 0;
+			if (s > 0 && x + w > W * (1 + 1e-12))
+				break;
+			for (j = s; j < nsk && sk[2 * (size_t)j] < x + w - 1e-12; j++)
+				top = fmax(top, sk[2 * (size_t)j + 1]);
+			if (top < best - 1e-12)
+			{
+				best = top;
+				bx = x;
+				bs = s;
+			}
+		}
+		if (xy)
+		{
+			xy[2 * (size_t)c] = bx;
+			xy[2 * (size_t)c + 1] = best;
+		}
+		used_w = fmax(used_w, bx + w);
+		used_h = fmax(used_h, best + hgt);
+		/* the skyline: the segments before bx, the box's top over [bx, bx + w), the rest from bx + w on */
+		for (a = bs; a + 1 < nsk && sk[2 * (size_t)(a + 1)] < bx + w - 1e-12; a++)
+			;
+		{
+			double resty = sk[2 * (size_t)a + 1], tmp[8];
+			unsigned int k = 0;
+			tmp[k++] = bx;
+			tmp[k++] = best + hgt;
+			b = a + 1;
+			if (b >= nsk || sk[2 * (size_t)b] > bx + w + 1e-12)
+			{
+				tmp[k++] = bx + w;
+				tmp[k++] = resty;   /* (the segment the box ends in goes on past it) */
+			}
+			n2 = bs + k / 2 + (nsk - b);
+			memmove(sk + 2 * ((size_t)bs + k / 2), sk + 2 * (size_t)b, sizeof(double) * 2 * (nsk - b));
+			memcpy(sk + 2 * (size_t)bs, tmp, sizeof(double) * k);
+			nsk = n2;
+		}
+	}
+	*out_w = used_w;
+	*out_h = used_h;
+}
+
 /* each chart turned to its smallest bounding box (16 angles in a half turn), then wider than tall; wch: W scratch */
 static void pm_turn_charts(double* uv, unsigned int* wch, double* bb, unsigned int const* wedge, unsigned int const* chart, unsigned int n,
 	unsigned int W, unsigned int C)
@@ -765,7 +1061,7 @@ laid:
 			   all scaled into the unit square at once (the charts keep their relative sizes) */
 			double* hi = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)C + 1));
 			unsigned int* ord = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)C + 1));
-			double sum = 0, row = 0, x0 = 0, y0 = 0, rowh = 0, wmax = 0, side, sc;
+			double sum = 0, row = 0, wmax = 0, side = 1, sc;
 			if (!hi || !ord)
 			{
 				qaws_internal_free(hi);
@@ -801,37 +1097,56 @@ laid:
 					ord[j] = ord[j - 1];
 					ord[j - 1] = s;
 				}
-			/* the rows' width: the one of sqrt(sum) x 1, 1.1, .. 1.6 (at least the widest chart) whose square is least */
-			for (k = 0, side = HUGE_VAL, sc = 0; k < 8; k++)
+			/* by the charts' shapes (pm_pack_bitmap); on a skyline by their boxes when that fails */
 			{
-				double f = k < 7 ? 1 + 0.1 * k : sc;
-				row = fmax(sqrt(sum) * f, wmax);
-				x0 = y0 = rowh = off = 0;
-				for (i = 0; i < C; i++)
+				double* xyb = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)C + 1));
+				double sideb = 0;
+				int packed = xyb && pm_pack_bitmap(uv, wedge, chart, n, W, C, gap, xyb, &sideb);
+				for (i = 0; packed && i < C; i++)
 				{
-					unsigned int c = ord[i];
-					if (x0 > 0 && x0 + hi[2 * (size_t)c] > row)
-					{
-						x0 = 0;
-						y0 += rowh;
-						rowh = 0;
-					}
-					if (k == 7)
-					{
-						lo[4 * (size_t)c + 2] = x0 - lo[4 * (size_t)c];
-						lo[4 * (size_t)c + 3] = y0 - lo[4 * (size_t)c + 1];
-					}
-					x0 += hi[2 * (size_t)c];
-					rowh = fmax(rowh, hi[2 * (size_t)c + 1]);
-					off = fmax(off, x0);
+					lo[4 * (size_t)i + 2] = xyb[2 * (size_t)i];
+					lo[4 * (size_t)i + 3] = xyb[2 * (size_t)i + 1];
 				}
-				if (k < 7 && fmax(off, y0 + rowh) < side)
+				if (packed)
+					side = sideb;
+				qaws_internal_free(xyb);
+				if (!packed)
+				/* on a skyline (pm_skyline), the strip's width the one of sqrt(sum) x 1, 1.1, .. 1.6 (at least the widest chart)
+				   whose square is least */
 				{
-					side = fmax(off, y0 + rowh);
-					sc = f;   /* (the best factor, laid out at k = 7) */
+					double* sky = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 4, (size_t)C + 2));
+					double* xy = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)C + 1));
+					double uw, uh, bf = 1;
+					if (!sky || !xy)
+					{
+						qaws_internal_free(sky);
+						qaws_internal_free(xy);
+						qaws_internal_free(hi);
+						qaws_internal_free(ord);
+						qaws_internal_free(lo);
+						goto done;
+					}
+					for (k = 0, side = HUGE_VAL; k < 7; k++)
+					{
+						row = fmax(sqrt(sum) * (1 + 0.1 * k), wmax);
+						pm_skyline(hi, ord, C, row, sky, NULL, &uw, &uh);
+						if (fmax(uw, uh) < side)
+						{
+							side = fmax(uw, uh);
+							bf = 1 + 0.1 * k;
+						}
+					}
+					pm_skyline(hi, ord, C, fmax(sqrt(sum) * bf, wmax), sky, xy, &uw, &uh);
+					for (i = 0; i < C; i++)
+					{
+						lo[4 * (size_t)i + 2] = xy[2 * (size_t)i] - lo[4 * (size_t)i];
+						lo[4 * (size_t)i + 3] = xy[2 * (size_t)i + 1] - lo[4 * (size_t)i + 1];
+					}
+					side = fmax(uw, uh);
+					qaws_internal_free(sky);
+					qaws_internal_free(xy);
 				}
 			}
-			side = fmax(off, y0 + rowh);
 			sc = side > 0 ? 1 / side : 1;
 			for (i = 0; i < n; i++)
 			{

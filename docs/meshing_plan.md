@@ -190,6 +190,11 @@ Larger:
    to 0.57, borders cleaner (test 166, figure 56).
 4. **Atlas, further:** splits along the distortion's level lines, a skyline packing, groups by the graph cut. Check:
    stretch bound met with fewer charts, fill above 0.6.
+   Done (2026-10-22): packing by the charts' shapes (bitmap, as xatlas; a skyline of boxes as the fallback): the blob
+   0.57 to 0.60, its split atlas 0.47 to 0.51, the icosphere's 12 charts 0.46 to 0.49; its 6 equal square charts stay
+   at 0.51 (three by two in a square: about 0.53 at best). Groups by the graph cut: item 3. Tried and dropped: splits
+   along the scale's level lines (a two-label cut on the log scale): on a cap they cut a disc out of a ring, 19 charts
+   for 12 and more distortion; the median plane stays.
 5. **BFF, further:** prescribed border angles (cone points), the inside by the conjugate harmonic. Check: a square
    chart from a disc with four corners, angles kept.
 6. **Weights per edge on every skeleton** (asked 2026-10-22). Today `qaws_skeleton` weighs its lines only

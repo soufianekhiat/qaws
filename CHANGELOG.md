@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Atlas packing by the charts' shapes (rasterized, largest first, a quarter turn allowed; a skyline of boxes as
+  the fallback): a blob's fill 0.57 to 0.60. Test 166, figure 56.
 - Polycube labels: patches too small for hexahedra (under 3 h^2, a spike's walls) merged into a neighbour's label (a
   spike 0.6 high from 0.025 to 0.62); the atlas groups by the same graph cut (a blob's fill 0.52 to 0.57). Tests
   176, 166.

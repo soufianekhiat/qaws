@@ -52,11 +52,11 @@
  * longest extent and the whole flattened again (32 splits at most).
  *
  * pack turns each chart to its smallest bounding box (wider than tall),
- * places them on shelves (tallest first, the rows' width the best of a few
- * around the square their boxes fill, a gap of 2% of the mesh's size
- * between them) and scales them all at once into the unit square, the
- * charts keeping their relative sizes; the report's fill is the share of
- * the square they cover.
+ * packs them by their shapes (rasterized, largest first at the lowest free
+ * spot, a quarter turn allowed, a gap of 2% of the mesh's size between
+ * them; a skyline of their boxes if that fails) and scales them all at once
+ * into the unit square, the charts keeping their relative sizes; the
+ * report's fill is the share of the square they cover.
  *
  * Polygons are fanned from their first vertex (qaws_mesh_3d_get_triangle):
  * the output is per triangle corner, in that order.
