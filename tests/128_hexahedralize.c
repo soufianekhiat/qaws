@@ -10,8 +10,8 @@
  *     frame the world's axes; of the torus's: orthonormal frames, the
  *     border's cells holding an axis along its normal;
  *   - FRAME_FIELD: a turned box in perfect cubes along it, its volume exact;
- *     a bent bar; a round torus at a cell as wide as half its tube: no cube
- *     fits (INVALID_ARGUMENT);
+ *     a bent bar; a round torus (radii 2 and 0.7) at 0.6 through its
+ *     field's singular edges: valid, near its volume;
  *   - FRAME_FIELD through singular edges: a cylinder (its field's four
  *     singular lines along its side) and a ball (its singular graph a
  *     cube's), all hexahedra valid, positive, near the solid's volume;
@@ -385,8 +385,17 @@ static void test_frame_field(void)
 		q2.hexahedra, v2 ? qaws_status_to_string(qaws_volume_mesh_validate(v2)) : "-", (double)q2.min_scaled_jacobian, (double)q2.volume);
 	TEST_ASSERT(s2 == QAWS_STATUS_OK && v2 && qaws_volume_mesh_validate(v2) == QAWS_STATUS_OK && (double)q2.min_scaled_jacobian > 0.9
 		&& fabs((double)q2.volume - 0.75 * M_PI) < (heavy ? 0.01 : 0.02) * 0.75 * M_PI, msg);   /* (by default 2%: 1.0% measured at 0.3) */
-	sprintf(msg, "round torus along its field (singular edges), a cell half its tube: %s", qaws_status_to_string(s3));
-	TEST_ASSERT(heavy || s3 == QAWS_STATUS_INVALID_ARGUMENT, msg);   /* (heavy: a finer torus, not checked) */
+	{
+		qaws_volume_quality q3;
+		memset(&q3, 0, sizeof q3);
+		if (v3)
+			qaws_volume_mesh_measure_quality(&q3, v3);
+		sprintf(msg, "round torus along its field (singular edges), a cell half its tube: %s, %u hexahedra, validate %s, scaled Jacobian from %.3f, volume %.3f",
+			qaws_status_to_string(s3), q3.hexahedra, v3 ? qaws_status_to_string(qaws_volume_mesh_validate(v3)) : "-", (double)q3.min_scaled_jacobian, (double)q3.volume);
+		printf("  %s\n", msg);
+		TEST_ASSERT(heavy || (s3 == QAWS_STATUS_OK && v3 && qaws_volume_mesh_validate(v3) == QAWS_STATUS_OK && (double)q3.min_scaled_jacobian > 0.1 &&
+			fabs((double)q3.volume - 4 * M_PI * M_PI * 0.49) < 0.25 * 4 * M_PI * M_PI * 0.49), msg);   /* (heavy: a finer torus, not checked) */
+	}
 	qaws_volume_mesh_destroy(v1);
 	qaws_volume_mesh_destroy(v2);
 	qaws_volume_mesh_destroy(v3);
@@ -480,7 +489,7 @@ static void test_frame_singular(void)
 			k ? "a ball" : "a cylinder", qaws_status_to_string(st), q.hexahedra, v ? qaws_status_to_string(qaws_volume_mesh_validate(v)) : "-",
 			(double)q.min_scaled_jacobian, (double)q.volume, vol);
 		printf("  %s\n", msg);
-		TEST_ASSERT(st == QAWS_STATUS_OK && v && qaws_volume_mesh_validate(v) == QAWS_STATUS_OK && q.hexahedra >= (k ? 20u : 12u) &&
+		TEST_ASSERT(st == QAWS_STATUS_OK && v && qaws_volume_mesh_validate(v) == QAWS_STATUS_OK && q.hexahedra >= 12u &&
 			(double)q.min_scaled_jacobian > 0.1 && fabs((double)q.volume - vol) < 0.25 * vol, msg);
 		qaws_volume_mesh_destroy(v);
 		qaws_mesh_3d_destroy(s);

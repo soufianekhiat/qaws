@@ -1584,7 +1584,9 @@ whose singular curves a lattice can follow:
   across facets not cut); the energy sum V |grad u - R / h|^2 with the cut facets' transitions (u_c = Pi u_d + t),
   each border facet on a plane of the axis its normal follows, by penalties (10^7 the median row, the factor's ordering
   by each copy's cells' centres); rounded greedily as MIQ does: the singular edges' vertices onto whole lines across
-  their axis, then the border's planes, then the transitions, each with those within a fiftieth, solved again.
+  their axis, then the border's planes, then the transitions, each with those within 0.15, solved again; a round that
+  turns cells over undone, its first candidate alone, then the other way. With a handle (the border's Euler
+  characteristic below 2) the cut keeps the disc across it (only inner edges glue).
 - **Lattice**: as HexEx (Lyon, Bommes, Kobbelt 2016) reads it: each cell's lattice points (corners and cube centres, in
   doubled coordinates) registered and merged across facets by the whole transitions; a cube round each centre, its
   corners found by walking the map from it across the cells (breadth first when a flat cell is on the way); cells
@@ -1592,19 +1594,20 @@ whose singular curves a lattice can follow:
   from their corners (a missing corner put by the box rule); each face held by two cubes at most, turned opposite ways
   (the cubes taken best first). More than one cell in a hundred turned over: `QAWS_STATUS_UNSUPPORTED_OPERATION`.
 - **Relaxed**: each vertex toward its neighbours along the hexahedra's edges, the border's vertices put back on the
-  surface (those where it bends by more than 40 degrees held), each move kept when the worst scaled Jacobian round it
-  rises.
+  surface (those within a third of a cell of the surface's creases held), each move kept when the worst scaled
+  Jacobian round it rises; a vertex still below 0.3 then up that Jacobian's gradient.
 
 | Check (test 128) | Result |
 |---|---|
 | A can (radius 0.5, height 1.5) at 0.4 | 16 hexahedra, valid, scaled Jacobian 0.17, volume 1.00 (the can 1.18) |
 | A ball at 0.5 | 27 hexahedra, valid, scaled Jacobian 0.18, volume 3.72 (4.19) |
-| A round torus at 0.6 (its tube 2.3 cells across) | INVALID_ARGUMENT: no cube fits |
+| A round torus (radii 2 and 0.7) at 0.6 | 80 hexahedra, valid, scaled Jacobian 0.65, volume 16.0 (19.3) |
 
-Figure 59 (key X) shows a can at 0.3 (45 hexahedra) and a ball at 0.4 (48), whole and halved. About a second for the can
-at 0.4 and 5 for the ball at 0.5, most of it the field. Limits: a border cube may be missing where the cells under it
-squeezed flat (a pit in the border); the result depends on the rounding and can be refused at one size and not the next;
-genus beyond zero is not checked. `POLYCUBE`: below.
+Over cells of 0.3 to 0.5, a can and a ball (32 x 16 rings) come out valid at every size (scaled Jacobian 0.26 and up).
+Figure 59 (key X) shows a can at 0.3 (45 hexahedra), a ball at 0.4 (35), whole and halved, and the torus. About a second for the can
+at 0.4 and 5 for the ball at 0.5, most of it the field. Limits: a border vertex may sit a little inside (a dent); a
+coarse faceted ball (16 x 8 rings) is refused at 0.3 and 0.35 (its map folded before any rounding); a thinner torus
+(radii 1 and 0.5) or a coarser one (48 x 24 rings) still fails. `POLYCUBE`: below.
 
 ### Polycube maps
 

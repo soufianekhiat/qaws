@@ -171,6 +171,10 @@ Larger:
 1. **FRAME_FIELD through singular edges, robust:** no border pits, results stable across cell sizes (rounding that turns
    no cell over), genus beyond zero (a torus), speed (MBO's projections, one factor per rounding round). Check: a can,
    two balls and a torus over five cell sizes, all valid and without pits.
+   Progress (2026-10-22): flip-aware rounding, the relaxation holding only creases and stepping up the gradient, a
+   handle's disc kept in the cut: a can and a 32 x 16 ball valid at all five sizes (scaled Jacobian 0.26 and up), a
+   torus (radii 2 and 0.7) at 0.6 valid (test 128). Left: the 16 x 8 ball at 0.3 and 0.35 (folded before rounding),
+   thinner and coarser tori (a zero map: singular curves round the hole), dents, speed (a 0.3 ball about a minute).
 2. **Torus periods, further:** higher genus (4 g steps, the same fit); the curvature-aligned field preferred on closed
    tubes. Check: a double torus with no spiral, the thin torus without guides.
 3. **Polycube labels, further:** spikes (bumps past half the height) given their own patches; the atlas groups by the

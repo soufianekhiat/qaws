@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- FRAME_FIELD through singular edges, sturdier: rounding that undoes rounds turning cells over, the
+  relaxation holding only the surface's creases and stepping up the Jacobian's gradient, the cut keeping a handle's
+  disc; a can and a ball valid at every size from 0.3 to 0.5, a torus meshed. Test 128, figure 59.
 - FRAME_FIELD hexahedra through singular edges: the field relaxed by MBO, an integer-grid map with
   transitions across a reduced cut (CubeCover), its lattice read off as HexEx does, the hexahedra relaxed;
   a can and a ball meshed. Test 128, figure 59 (key X).

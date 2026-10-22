@@ -329,6 +329,20 @@ done:
 	return st;
 }
 
+/* the cells turned over in the map U (its volume below -0.05 of the cell's at the cell size h) */
+static unsigned int hs_turned(qaws_volume_mesh const* t, unsigned int const* copy, double const* U, double h)
+{
+	unsigned int c, q, n = 0;
+	for (c = 0; c < t->nc; c++)
+	{
+		double P[12], g[4][3], l[4], z[3] = { 0, 0, 0 }, V = hs_grads(t, c, g);
+		for (q = 0; q < 4; q++)
+			memcpy(P + 3 * q, U + 3 * (size_t)copy[4 * c + q], 3 * sizeof(double));
+		n += hs_bary(P, z, l) / 6 < -0.05 * V / (h * h * h);
+	}
+	return n;
+}
+
 /* a point of the lattice (doubled coordinates: corners even, cube centres odd) seen from a cell */
 typedef struct hs_reg
 {
@@ -657,6 +671,7 @@ static int hs_cmp_cube(void const* a, void const* b)
 
 qaws_status hs_hexes(qaws_volume_mesh const* t, double* R, double h, qaws_volume_mesh** out_mesh, qaws_mesh_report* rep)
 {
+	int sphere = 1;
 	unsigned int nturn = 0, nc = t->nc, nv = t->nv, ns = 4 * nc, c, f, i, j, k, q, ne = 0, ncopy = 0, nreg = 0, capreg = 0, round;
 	unsigned int *queue = NULL, *uf = NULL, *copy = NULL, *ecell = NULL, *fe = NULL, *ecnt = NULL, *e0 = NULL, *ef = NULL, *stack = NULL;
 	unsigned char *tree = NULL, *cut = NULL, *esing = NULL, *ebord = NULL, *seen = NULL, *flat = NULL;
@@ -664,6 +679,8 @@ qaws_status hs_hexes(qaws_volume_mesh const* t, double* R, double h, qaws_volume
 	int *Ps = NULL, *Ts = NULL;
 	double *U = NULL, *cx = NULL, *fixv = NULL, *par = NULL, *px = NULL;
 	unsigned char* isfix = NULL;
+	unsigned int *bat = NULL, nbat = 0, phase = 0, t1 = 0, tprev = 0, bat0 = 0;
+	double orig = 0, alt = 0;
 	unsigned int *rid = NULL, *cells = NULL, ncell = 0, capc = 0, np = 0, *bq = NULL, *vis = NULL, nbq = 0, cappx = 0;
 	int* bk = NULL;
 	hs_reg* reg = NULL;
@@ -823,7 +840,29 @@ qaws_status hs_hexes(qaws_volume_mesh const* t, double* R, double h, qaws_volume
 		esing[i] = !ebord[i] && !(M[0] == 1 && M[4] == 1 && M[8] == 1);
 	}
 	/* 3. the cut reduced: a cut facet with an edge no other cut facet holds (an inner regular edge, or a border edge where
-	   the facet's permutation is none) is glued; the singular edges stay in the cut */
+	   the facet's permutation is none and the border is one sphere) is glued; the singular edges stay in the cut. With a
+	   handle (the border's Euler characteristic below 2) the cut keeps the disc across it: only inner edges glue */
+	{
+		unsigned int bv = 0, be = 0, bf = 0;
+		unsigned char* vb = (unsigned char*)qaws_internal_zalloc((size_t)nv + 1, 1);
+		if (!vb)
+			goto done;
+		for (c = 0; c < nc; c++)
+			for (f = 0; f < 4; f++)
+				if (t->fo[t->f0[c] + f] == HM_NONE)
+				{
+					bf++;
+					for (k = 0; k < 4; k++)
+						if (k != f)
+							vb[t->cv[t->c0[c] + k]] = 1;
+				}
+		for (i = 0; i < nv; i++)
+			bv += vb[i];
+		for (i = 0; i < ne; i++)
+			be += ebord[i];
+		qaws_internal_free(vb);
+		sphere = (long)bv - (long)be + (long)bf == 2;
+	}
 	for (c = 0; c < nc; c++)
 		for (f = 0; f < 4; f++)
 		{
@@ -874,7 +913,7 @@ qaws_status hs_hexes(qaws_volume_mesh const* t, double* R, double h, qaws_volume
 					s = ef[k];
 			if (s == HM_NONE)
 				continue;
-			if (ebord[e] && !(Ps[3 * (size_t)s] == 1 && Ps[3 * (size_t)s + 1] == 2 && Ps[3 * (size_t)s + 2] == 3))
+			if (ebord[e] && (!sphere || !(Ps[3 * (size_t)s] == 1 && Ps[3 * (size_t)s + 1] == 2 && Ps[3 * (size_t)s + 2] == 3)))
 				continue;
 			cut[s] = cut[t->fo[s]] = 0;
 			Ps[3 * (size_t)t->fo[s]] = 1; Ps[3 * (size_t)t->fo[s] + 1] = 2; Ps[3 * (size_t)t->fo[s] + 2] = 3;
@@ -1068,19 +1107,49 @@ qaws_status hs_hexes(qaws_volume_mesh const* t, double* R, double h, qaws_volume
 	}
 	/* 6. the rounding (MIQ's greedy order: the singular edges, the border's planes, then the transitions): solved, the
 	   candidates already whole fixed there, then the one nearest a whole number of the first kind left (with those within
-	   a fiftieth of one), solved again */
+	   a fiftieth of one), solved again. A round that turns more cells over is undone and its first candidate rounded the
+	   other way instead; if that turns over more still, it goes back to the nearer whole number alone */
 	U = (double*)qaws_internal_zalloc(3 * (size_t)ncopy + 1, sizeof(double));
 	fixv = (double*)qaws_internal_zalloc((size_t)cand.n + 1, sizeof(double));
 	isfix = (unsigned char*)qaws_internal_zalloc((size_t)cand.n + 1, 1);
-	if (!U || !fixv || !isfix)
+	bat = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)cand.n + 1));
+	if (!U || !fixv || !isfix || !bat)
 		goto done;
 	for (round = 0;; round++)
 	{
-		unsigned int best = HM_NONE, kind;
+		unsigned int best = HM_NONE, kind, tn;
 		double bd = 2;
 		st = hs_solve(t, R, h, copy, ncopy, cx, &con, &cand, fixv, isfix, U);
 		if (st != QAWS_STATUS_OK)
 			goto done;
+		tn = hs_turned(t, copy, U, h);
+		if (phase == 0 && nbat > 1 && tn > tprev)
+		{
+			/* the batch turned cells over: undone but for its first candidate */
+			for (i = 1; i < nbat; i++)
+				isfix[bat[i]] = 0;
+			nbat = 1;
+			phase = 1;
+			continue;
+		}
+		if (phase <= 1 && nbat == 1 && tn > tprev)
+		{
+			/* the first candidate alone still turns cells over: the other way */
+			t1 = tn;
+			fixv[bat0] = alt;
+			nbat = 0;
+			phase = 2;
+			continue;
+		}
+		if (phase == 2 && tn > t1)
+		{
+			fixv[bat0] = orig;   /* (the other way was worse: the nearer whole number) */
+			phase = 3;
+			continue;
+		}
+		phase = 0;
+		tprev = tn;
+		nbat = 0;
 		for (kind = 0; kind < 3 && best == HM_NONE; kind++)
 			for (i = 0; i < cand.n; i++)
 			{
@@ -1108,14 +1177,24 @@ qaws_status hs_hexes(qaws_volume_mesh const* t, double* R, double h, qaws_volume
 			st = QAWS_STATUS_NOT_CONVERGED;
 			goto done;
 		}
+		{
+			double vb = hs_eval(&cand.f[best], U);
+			orig = floor(vb + 0.5);
+			alt = orig + (vb > orig ? 1 : -1);
+			bat0 = best;
+			fixv[best] = orig;
+			isfix[best] = 1;
+			bat[nbat++] = best;
+		}
 		for (i = 0; i < cand.n; i++)
 			if (!isfix[i] && cand.f[i].kind == cand.f[best].kind)
 			{
 				double v = hs_eval(&cand.f[i], U), d = fabs(v - floor(v + 0.5));
-				if (i == best || d < 0.02)
+				if (d < 0.15)
 				{
 					fixv[i] = floor(v + 0.5);
 					isfix[i] = 1;
+					bat[nbat++] = i;
 				}
 			}
 	}
@@ -1549,7 +1628,7 @@ done:
 	qaws_internal_free(e0); qaws_internal_free(ef); qaws_internal_free(stack); qaws_internal_free(tree); qaws_internal_free(cut); qaws_internal_free(esing);
 	qaws_internal_free(ebord); qaws_internal_free(seen); qaws_internal_free(ekey); qaws_internal_free(rkey); qaws_internal_free(Ps); qaws_internal_free(Ts);
 	qaws_internal_free(U); qaws_internal_free(cx); qaws_internal_free(fixv); qaws_internal_free(par); qaws_internal_free(px); qaws_internal_free(rid);
-	qaws_internal_free(cells); qaws_internal_free(reg); qaws_internal_free(con.f); qaws_internal_free(cand.f); qaws_internal_free(isfix); qaws_internal_free(flat);
+	qaws_internal_free(cells); qaws_internal_free(reg); qaws_internal_free(con.f); qaws_internal_free(cand.f); qaws_internal_free(isfix); qaws_internal_free(flat); qaws_internal_free(bat);
 	qaws_internal_free(bq); qaws_internal_free(bk); qaws_internal_free(vis);
 	return st;
 }

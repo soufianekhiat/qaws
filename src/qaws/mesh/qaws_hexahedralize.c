@@ -824,8 +824,7 @@ done:
 
 /* A hexahedral mesh relaxed (as the grid's: each vertex halfway, or a quarter or all the way, to the centre of its neighbours
    along the cells' edges, kept when the worst scaled Jacobian round it rises): its border vertices with their border
-   neighbours only, put back on the surface; those where the border bends (border faces round them more than 40 degrees
-   apart: a crease, a corner) held. */
+   neighbours only, put back on the surface; those within a third of a cell of the surface's creases held. */
 static qaws_status hx_relax(qaws_volume_mesh** io, qaws_mesh_3d const* boundary, unsigned int rounds)
 {
 	static unsigned char const nb3[8][3] = { { 1, 3, 4 }, { 2, 0, 5 }, { 3, 1, 6 }, { 0, 2, 7 }, { 7, 5, 0 }, { 4, 6, 1 }, { 5, 7, 2 }, { 6, 4, 3 } };
@@ -874,8 +873,7 @@ static qaws_status hx_relax(qaws_volume_mesh** io, qaws_mesh_3d const* boundary,
 				unsigned int v = cells[8 * c + F[f][k]];
 				double* q = bn + 3 * (size_t)v;
 				double ql = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]);
-				if (kind[v] && ql > 0 && (q[0] * n[0] + q[1] * n[1] + q[2] * n[2]) / (ql * l) < cos(40 * 3.14159265358979323846 / 180))
-					kind[v] = 2;
+				(void)ql;
 				if (!kind[v])
 				{
 					q[0] = n[0] / l;
@@ -885,6 +883,61 @@ static qaws_status hx_relax(qaws_volume_mesh** io, qaws_mesh_3d const* boundary,
 				}
 			}
 		}
+	/* held: the border's vertices within a third of a cell edge of the surface's creases (its edges whose faces meet at
+	   more than 40 degrees) */
+	{
+		qaws_hm const* bm = &boundary->hm;
+		double le = 0, cs = cos(40 * 3.14159265358979323846 / 180);
+		unsigned int c2, ne = 0;
+		for (c = 0; c < nc; c++)
+			for (k = 0; k < 4; k++)
+			{
+				double const *a = x + 3 * (size_t)cells[8 * c + k], *b = x + 3 * (size_t)cells[8 * c + (k + 1) % 4];
+				le += sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+				ne++;
+			}
+		le = ne ? le / ne : 1;
+		for (c2 = 0; c2 < bm->nc; c2++)
+		{
+			unsigned int o = bm->co[c2], f1 = bm->cf[c2], f2, j;
+			double n1[3], n2[3], l1, l2;
+			if (f1 == HM_NONE || o == HM_NONE || o < c2)
+				continue;
+			f2 = bm->cf[o];
+			for (j = 0; j < 2; j++)
+			{
+				unsigned int ff = j ? f2 : f1, a0 = bm->cv[bm->fc[ff]], a1 = bm->cv[bm->fc[ff] + 1], a2 = bm->cv[bm->fc[ff] + 2];
+				double const *pa = bm->x + 3 * (size_t)a0, *pb = bm->x + 3 * (size_t)a1, *pc = bm->x + 3 * (size_t)a2;
+				double* nn = j ? n2 : n1;
+				nn[0] = (pb[1] - pa[1]) * (pc[2] - pa[2]) - (pb[2] - pa[2]) * (pc[1] - pa[1]);
+				nn[1] = (pb[2] - pa[2]) * (pc[0] - pa[0]) - (pb[0] - pa[0]) * (pc[2] - pa[2]);
+				nn[2] = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pb[1] - pa[1]) * (pc[0] - pa[0]);
+			}
+			l1 = sqrt(n1[0] * n1[0] + n1[1] * n1[1] + n1[2] * n1[2]);
+			l2 = sqrt(n2[0] * n2[0] + n2[1] * n2[1] + n2[2] * n2[2]);
+			if (!(l1 > 0 && l2 > 0) || (n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]) / (l1 * l2) > cs)
+				continue;
+			{
+				/* a crease segment: each border vertex near it held */
+				unsigned int nx = bm->fc[f1] + (c2 - bm->fc[f1] + 1) % bm->fn[f1];
+				double const *sa = bm->x + 3 * (size_t)bm->cv[c2], *sb = bm->x + 3 * (size_t)bm->cv[nx];
+				double d[3] = { sb[0] - sa[0], sb[1] - sa[1], sb[2] - sa[2] }, dd = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+				for (i = 0; i < nv; i++)
+				{
+					double const* pv = x + 3 * (size_t)i;
+					double tt, e[3];
+					if (kind[i] != 1)
+						continue;
+					tt = dd > 0 ? ((pv[0] - sa[0]) * d[0] + (pv[1] - sa[1]) * d[1] + (pv[2] - sa[2]) * d[2]) / dd : 0;
+					tt = tt < 0 ? 0 : tt > 1 ? 1 : tt;
+					for (k = 0; k < 3; k++)
+						e[k] = pv[k] - sa[k] - tt * d[k];
+					if (e[0] * e[0] + e[1] * e[1] + e[2] * e[2] < le * le / 9)
+						kind[i] = 2;
+				}
+			}
+		}
+	}
 	st = qaws_mesh_reference_create(&ref, boundary, NULL);
 	if (st != QAWS_STATUS_OK)
 		goto done;
@@ -939,6 +992,47 @@ static qaws_status hx_relax(qaws_volume_mesh** io, qaws_mesh_3d const* boundary,
 				{
 					best = q1;
 					memcpy(bx, y, sizeof bx);
+				}
+			}
+			if (best < 0.3)
+			{
+				/* still poor: up the worst scaled Jacobian's gradient (central differences at a hundredth of the mean
+				   distance to the neighbours), a step of that distance halved until it gains */
+				double g[3], gl, hd = 0, y[3], fr2;
+				for (k = 0; k < 3; k++)
+					hd += fabs(cen[k] / n - keep[k]);
+				hd = 0.01 * (hd > 0 ? hd : 1);
+				memcpy(x + 3 * (size_t)i, bx, sizeof bx);
+				for (k = 0; k < 3; k++)
+				{
+					double qa, qb, xk = x[3 * (size_t)i + k];
+					x[3 * (size_t)i + k] = xk + hd;
+					qa = hx_worst(x, cells, &csr, i);
+					x[3 * (size_t)i + k] = xk - hd;
+					qb = hx_worst(x, cells, &csr, i);
+					x[3 * (size_t)i + k] = xk;
+					g[k] = (qa - qb) / (2 * hd);
+				}
+				gl = sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+				for (fr2 = 100 * hd; gl > 0 && fr2 > hd; fr2 *= 0.5)
+				{
+					double q1;
+					for (k = 0; k < 3; k++)
+						y[k] = bx[k] + fr2 * g[k] / gl;
+					if (kind[i])
+					{
+						qaws_mesh_location l;
+						mr_project(ref, y, HM_NONE, &s, &l);
+						mr_eval(ref, &l, y, NULL);
+					}
+					memcpy(x + 3 * (size_t)i, y, sizeof y);
+					q1 = hx_worst(x, cells, &csr, i);
+					if (q1 > best)
+					{
+						best = q1;
+						memcpy(bx, y, sizeof bx);
+						break;
+					}
 				}
 			}
 			memcpy(x + 3 * (size_t)i, bx, sizeof bx);
@@ -1015,7 +1109,7 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 		if (st == QAWS_STATUS_OK)
 			st = hs_hexes(t, R, h, out_mesh, rep);
 		if (st == QAWS_STATUS_OK)
-			st = hx_relax(out_mesh, boundary, 20);
+			st = hx_relax(out_mesh, boundary, 60);
 	}
 done:
 	qaws_internal_free(R);
