@@ -427,7 +427,7 @@ static void test_refusals(void)
 	s3 = qaws_volume_mesh_frame_field(fr, NULL, h, NULL);
 	sprintf(msg, "refusals: an open surface %s, POLYCUBE %s, a field on hexahedra %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
 		qaws_status_to_string(s3));
-	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION && s3 == QAWS_STATUS_UNSUPPORTED_OPERATION && !v, msg);
+	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_INVALID_TOPOLOGY && s3 == QAWS_STATUS_UNSUPPORTED_OPERATION && !v, msg);
 	qaws_mesh_3d_destroy(open);
 	qaws_volume_mesh_destroy(h);
 }

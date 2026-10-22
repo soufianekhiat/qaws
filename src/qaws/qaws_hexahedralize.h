@@ -46,7 +46,21 @@
  *                out as a grid aligned with it, a bent bar as a bent grid.
  *                Fields with singular edges (a sphere, a round torus) or that
  *                turn round a hole: UNSUPPORTED_OPERATION for now.
- *   POLYCUBE     reserved (UNSUPPORTED_OPERATION): a polycube map.
+ *   POLYCUBE     hexahedra of a polycube map (Gregson, Sheffer, Zhang 2011):
+ *                the inside tetrahedralized (half the cell size) and deformed
+ *                until each border facet faces an axis: each pass labels the
+ *                facets by their nearest axis (an old label kept unless
+ *                another is clearly nearer, a facet unlike neighbours that
+ *                agree taking theirs), turns each facet onto its axis,
+ *                spreads the turns inside (harmonic per vertex) and solves for
+ *                the positions whose gradients are the cells' turned ones.
+ *                The deformation's rotations (the polar parts of its
+ *                gradients) are then the frames of FRAME_FIELD's integer-grid
+ *                map, the polycube's faces its patches. No field to comb: a
+ *                sphere comes out as a cube, a ring of genus one as a ring.
+ *                Labels by nearest axes cut a bent bar at 45 degrees (its
+ *                polycube turns a corner there); shapes whose labels break
+ *                into many small patches (lumpy blobs) fold.
  *
  * The border: a closed qaws_mesh_3d turned outward. INVALID_TOPOLOGY when it
  * is not closed; INVALID_ARGUMENT when no cube fits inside.

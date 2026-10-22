@@ -59,6 +59,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Hexahedra of polycube maps (`QAWS_HEXES_POLYCUBE`): the inside deformed until
+  its border faces the axes (Gregson et al.), the integer-grid map's lattice
+  read off with the deformation's rotations as frames; spheres and rings of
+  genus one, which FRAME_FIELD refuses. Test 176, figure 44 (key I).
 - Tetrahedra keeping the border (`qaws_tetrahedralize_desc.keep_border`): the
   recovery's border points moved inside (Steiner point suppression), the
   border's triangles merged back, the cells improved after; Schonhardt's

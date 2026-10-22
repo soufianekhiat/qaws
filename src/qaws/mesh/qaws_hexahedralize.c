@@ -497,43 +497,22 @@ static int hx_pput(hx_pmap* h, unsigned long long key, unsigned int val)
 	return 1;
 }
 
-/* Hexahedra by an integer-grid map (CubeCover's idea, for fields without singular edges): the inside tetrahedralized,
-   its frame field combed into one gauge, three Poisson solves fitting a map u whose gradient follows the frames at the
-   cell size (each border patch, facets whose normal follows one axis, held on a whole-number plane of that axis), the
-   hexahedra read off the integer lattice in the map's image. */
-static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_volume_mesh** out_mesh, qaws_mesh_report* rep)
+/* Hexahedra by an integer-grid map (CubeCover's idea) on tetrahedra t whose frames R (9 per cell, rows the axes) need no
+   cut: three Poisson solves fitting a map u whose gradient follows the frames at the cell size (each border patch, facets
+   labelled alike by flab or by the axis their normal follows, held on a whole-number plane of that axis), the hexahedra
+   read off the integer lattice in the map's image. */
+static qaws_status hx_map(qaws_volume_mesh const* t, double const* R, unsigned char const* flab, double h, qaws_volume_mesh** out_mesh,
+	qaws_mesh_report* rep)
 {
-	qaws_tetrahedralize_desc td;
-	qaws_volume_mesh* t = NULL;
 	hx_mat K;
 	hx_pmap pts, cen;
-	double *R = NULL, *U = NULL, *b = NULL, *u = NULL, *px = NULL;
-	unsigned char *sing = NULL, *fixed = NULL;
+	double *U = NULL, *b = NULL, *u = NULL, *px = NULL;
+	unsigned char* fixed = NULL;
 	unsigned int *bf = NULL, *uf = NULL, *lab = NULL, *cells = NULL, nb = 0, c, f, i, k, np = 0, capp = 0, ncell = 0, capc = 0;
-	qaws_status st;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(&K, 0, sizeof K);
 	memset(&pts, 0, sizeof pts);
 	memset(&cen, 0, sizeof cen);
-	memset(&td, 0, sizeof td);
-	td.target_length = (qaws_scalar)(0.5 * h);
-	st = qaws_volume_mesh_tetrahedralize(&t, NULL, boundary, &td);
-	if (st != QAWS_STATUS_OK)
-		return st;
-	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	R = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (9 * (size_t)t->nc + 1)));
-	sing = (unsigned char*)qaws_internal_scratch_malloc((size_t)t->nc + 1);
-	if (!R || !sing)
-		goto done;
-	st = ff_frames(t, 60, R, sing);
-	if (st != QAWS_STATUS_OK)
-		goto done;
-	st = QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (a field with singular edges, or turning round a hole) */
-	for (c = 0; c < t->nc; c++)
-		if (sing[c])
-			goto done;
-	if (!ff_comb(t, R))
-		goto done;
-	st = QAWS_STATUS_ALLOCATION_FAILURE;
 	/* the border's facets labelled by the axis their normal follows (and its side), patches of like neighbours */
 	bf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)t->nc + 1)));
 	lab = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)t->nc + 1)));
@@ -561,7 +540,7 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 			N[0] = s[1] * q[2] - s[2] * q[1];
 			N[1] = s[2] * q[0] - s[0] * q[2];
 			N[2] = s[0] * q[1] - s[1] * q[0];
-			for (k = 0; k < 3; k++)
+			for (k = 0; !flab && k < 3; k++)
 			{
 				double d = R[9 * (size_t)c + 3 * k] * N[0] + R[9 * (size_t)c + 3 * k + 1] * N[1] + R[9 * (size_t)c + 3 * k + 2] * N[2];
 				if (fabs(d) > dmax)
@@ -570,6 +549,8 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 					best = 2 * k + (d > 0);
 				}
 			}
+			if (flab)
+				best = flab[4 * (size_t)c + f];
 			bf[nb] = 4 * c + f;
 			lab[nb] = best;
 			uf[nb] = nb;
@@ -687,13 +668,19 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 		qaws_internal_free(sum);
 		qaws_internal_free(cnt);
 	}
-	/* the lattice: each cell's integer points and cube centres in its image, located by barycentric coordinates */
-	for (c = 0; c < t->nc; c++)
+	/* the lattice: each cell's integer points and cube centres in its image, located by barycentric coordinates (the
+	   border's cells first: a point on a patch's plane lands on the patch's facet, not in a cell beside it by rounding) */
+	for (i = 0; i < 2 * t->nc; i++)
 	{
-		double const *U0 = U + 3 * (size_t)t->cv[t->c0[c]], *X[4];
+		double const *U0, *X[4];
 		double M[9], inv[9], det, lo[3], hi[3];
 		unsigned int q;
-		int half;
+		int half, border = 0;
+		c = i % t->nc;
+		for (q = 0; q < 4; q++) border |= t->fo[t->f0[c] + q] == HM_NONE;
+		if ((i < t->nc) != (border != 0))
+			continue;
+		U0 = U + 3 * (size_t)t->cv[t->c0[c]];
 		for (q = 0; q < 4; q++)
 			X[q] = t->x + 3 * (size_t)t->cv[t->c0[c] + q];
 		for (q = 0; q < 3; q++)
@@ -829,9 +816,337 @@ static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_v
 		qaws_mesh_3d_destroy(bd);
 	}
 done:
-	qaws_internal_free(R); qaws_internal_free(sing); qaws_internal_free(bf); qaws_internal_free(uf); qaws_internal_free(lab); qaws_internal_free(U); qaws_internal_free(b); qaws_internal_free(u); qaws_internal_free(fixed); qaws_internal_free(px); qaws_internal_free(cells);
+	qaws_internal_free(bf); qaws_internal_free(uf); qaws_internal_free(lab); qaws_internal_free(U); qaws_internal_free(b); qaws_internal_free(u); qaws_internal_free(fixed); qaws_internal_free(px); qaws_internal_free(cells);
 	qaws_internal_free(K.r0); qaws_internal_free(K.col); qaws_internal_free(K.val);
 	qaws_internal_free(pts.key); qaws_internal_free(pts.val); qaws_internal_free(cen.key); qaws_internal_free(cen.val);
+	return st;
+}
+
+/* Hexahedra following a frame field without singular edges: the inside tetrahedralized, its frame field combed into one
+   gauge, the integer-grid map's lattice (hx_map). */
+static qaws_status hx_frame_field(qaws_mesh_3d const* boundary, double h, qaws_volume_mesh** out_mesh, qaws_mesh_report* rep)
+{
+	qaws_tetrahedralize_desc td;
+	qaws_volume_mesh* t = NULL;
+	double* R = NULL;
+	unsigned char* sing = NULL;
+	unsigned int c;
+	qaws_status st;
+	memset(&td, 0, sizeof td);
+	td.target_length = (qaws_scalar)(0.5 * h);
+	st = qaws_volume_mesh_tetrahedralize(&t, NULL, boundary, &td);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	R = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (9 * (size_t)t->nc + 1)));
+	sing = (unsigned char*)qaws_internal_scratch_malloc((size_t)t->nc + 1);
+	if (!R || !sing)
+		goto done;
+	st = ff_frames(t, 60, R, sing);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	st = QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (a field with singular edges, or turning round a hole) */
+	for (c = 0; c < t->nc; c++)
+		if (sing[c])
+			goto done;
+	if (!ff_comb(t, R))
+		goto done;
+	st = hx_map(t, R, NULL, h, out_mesh, rep);
+done:
+	qaws_internal_free(R);
+	qaws_internal_free(sing);
+	qaws_volume_mesh_destroy(t);
+	return st;
+}
+
+/* the rotation by vector r (its axis times its angle), row-major */
+static void hx_rot(double const* r, double* M)
+{
+	double a = sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]), k[3], cs, sn, v;
+	unsigned int i;
+	if (a < 1e-15)
+	{
+		for (i = 0; i < 9; i++) M[i] = i % 4 == 0;
+		return;
+	}
+	for (i = 0; i < 3; i++) k[i] = r[i] / a;
+	cs = cos(a);
+	sn = sin(a);
+	v = 1 - cs;
+	M[0] = cs + k[0] * k[0] * v; M[1] = k[0] * k[1] * v - k[2] * sn; M[2] = k[0] * k[2] * v + k[1] * sn;
+	M[3] = k[1] * k[0] * v + k[2] * sn; M[4] = cs + k[1] * k[1] * v; M[5] = k[1] * k[2] * v - k[0] * sn;
+	M[6] = k[2] * k[0] * v - k[1] * sn; M[7] = k[2] * k[1] * v + k[0] * sn; M[8] = cs + k[2] * k[2] * v;
+}
+
+/* the rotation of J's polar decomposition (Higham's iteration R = (R + R^-T) / 2), row-major; J itself when turned over */
+static void hx_polar(double const* J, double* R)
+{
+	unsigned int it, i;
+	memcpy(R, J, sizeof(double) * 9);
+	for (it = 0; it < 30; it++)
+	{
+		double c[9], det, d = 0;
+		c[0] = R[4] * R[8] - R[5] * R[7]; c[1] = R[5] * R[6] - R[3] * R[8]; c[2] = R[3] * R[7] - R[4] * R[6];
+		c[3] = R[7] * R[2] - R[8] * R[1]; c[4] = R[8] * R[0] - R[6] * R[2]; c[5] = R[6] * R[1] - R[7] * R[0];
+		c[6] = R[1] * R[5] - R[2] * R[4]; c[7] = R[2] * R[3] - R[0] * R[5]; c[8] = R[0] * R[4] - R[1] * R[3];
+		det = R[0] * c[0] + R[1] * c[1] + R[2] * c[2];
+		if (!(det > 1e-300))
+		{
+			memcpy(R, J, sizeof(double) * 9);
+			return;
+		}
+		/* (R^-T is the cofactor matrix over the determinant) */
+		for (i = 0; i < 9; i++)
+		{
+			double nr = 0.5 * (R[i] + c[i] / det);
+			d = fmax(d, fabs(nr - R[i]));
+			R[i] = nr;
+		}
+		if (d < 1e-14)
+			break;
+	}
+}
+
+#define HX_POLY_PASSES 40u
+
+/* A polycube's frames (Gregson, Sheffer, Zhang 2011): the tetrahedra deformed until every border facet's normal lies on an
+   axis. Each pass labels the facets by their nearest axis (the old label kept unless another is clearly nearer; a facet
+   unlike its neighbours that agree takes theirs), turns each facet's normal onto its axis, spreads the turns inside
+   (harmonic per vertex), and solves for the positions whose gradients are the cells' turned ones (one vertex pinned).
+   R: the final gradients (rows: the polycube's axes, 9 per cell); flab: per facet slot 4 c + f its axis and side
+   (2 k + positive), 0xFF inside. */
+static qaws_status hx_polycube_frames(qaws_volume_mesh const* t, double* R, unsigned char* flab)
+{
+	hx_mat K;
+	hx_pmap em;
+	unsigned int *bf = NULL, *nbr = NULL, nb = 0, c, f, i, k, pass, q;
+	double *Y = NULL, *W = NULL, *b = NULL, *y = NULL, *nrm = NULL, *area = NULL, *rv = NULL, (*G)[4][3] = NULL, *vol = NULL;
+	unsigned char *fixed = NULL, *pin = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(&K, 0, sizeof K);
+	memset(&em, 0, sizeof em);
+	memset(flab, 0xFF, 4 * (size_t)t->nc);
+	if (!hx_stiffness(t, &K))
+		goto done;
+	bf = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (4 * (size_t)t->nc + 1));
+	nbr = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (12 * (size_t)t->nc + 1));
+	Y = (double*)qaws_internal_scratch_malloc(sizeof(double) * (3 * (size_t)t->nv + 1));
+	W = (double*)qaws_internal_scratch_zalloc(3 * (size_t)t->nv + 1, sizeof(double));
+	b = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)t->nv + 1));
+	y = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)t->nv + 1));
+	nrm = (double*)qaws_internal_scratch_malloc(sizeof(double) * (12 * (size_t)t->nc + 1));
+	area = (double*)qaws_internal_scratch_malloc(sizeof(double) * (4 * (size_t)t->nc + 1));
+	rv = (double*)qaws_internal_scratch_malloc(sizeof(double) * (12 * (size_t)t->nc + 1));
+	G = (double(*)[4][3])qaws_internal_scratch_malloc(sizeof(double) * 12 * ((size_t)t->nc + 1));
+	vol = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)t->nc + 1));
+	fixed = (unsigned char*)qaws_internal_scratch_zalloc((size_t)t->nv + 1, 1);
+	pin = (unsigned char*)qaws_internal_scratch_zalloc((size_t)t->nv + 1, 1);
+	if (!bf || !nbr || !Y || !W || !b || !y || !nrm || !area || !rv || !G || !vol || !fixed || !pin)
+		goto done;
+	memcpy(Y, t->x, sizeof(double) * 3 * t->nv);
+	for (c = 0; c < t->nc; c++) vol[c] = hx_grads(t, c, G[c]);
+	pin[t->cv[0]] = 1;
+	/* the border's facets, their vertices fixed for the turns' spread, their neighbours across edges */
+	for (c = 0; c < t->nc; c++)
+		for (f = 0; f < 4; f++)
+			if (t->fo[t->f0[c] + f] == HM_NONE)
+			{
+				unsigned int n;
+				unsigned char const* loc = vm_facet(QAWS_CELL_TETRAHEDRON, f, &n);
+				for (k = 0; k < 3; k++) fixed[t->cv[t->c0[c] + loc[k]]] = 1;
+				nbr[3 * nb] = nbr[3 * nb + 1] = nbr[3 * nb + 2] = HM_NONE;
+				bf[nb++] = 4 * c + f;
+			}
+	for (i = 0; i < nb; i++)
+	{
+		unsigned int n, e2;
+		unsigned char const* loc = vm_facet(QAWS_CELL_TETRAHEDRON, bf[i] % 4, &n);
+		for (e2 = 0; e2 < 3; e2++)
+		{
+			unsigned int va = t->cv[t->c0[bf[i] / 4] + loc[e2]], vb = t->cv[t->c0[bf[i] / 4] + loc[(e2 + 1) % 3]], other;
+			unsigned long long key = va < vb ? ((unsigned long long)va << 32) | vb : ((unsigned long long)vb << 32) | va;
+			other = em.cap ? hx_pget(&em, key) : HM_NONE;
+			if (other == HM_NONE)
+			{
+				if (!hx_pput(&em, key, 3 * i + e2))
+					goto done;
+				continue;
+			}
+			nbr[3 * i + e2] = other / 3;
+			nbr[other] = i;
+		}
+	}
+	for (pass = 0; pass < HX_POLY_PASSES; pass++)
+	{
+		double turn = 0, total = 0;
+		/* the facets' normals and areas in the deformed positions */
+		for (i = 0; i < nb; i++)
+		{
+			unsigned int n;
+			unsigned char const* loc = vm_facet(QAWS_CELL_TETRAHEDRON, bf[i] % 4, &n);
+			double const *a = Y + 3 * (size_t)t->cv[t->c0[bf[i] / 4] + loc[0]], *bb = Y + 3 * (size_t)t->cv[t->c0[bf[i] / 4] + loc[1]],
+				*e = Y + 3 * (size_t)t->cv[t->c0[bf[i] / 4] + loc[2]];
+			double s[3], w[3], N[3], l;
+			for (k = 0; k < 3; k++) { s[k] = bb[k] - a[k]; w[k] = e[k] - a[k]; }
+			N[0] = s[1] * w[2] - s[2] * w[1];
+			N[1] = s[2] * w[0] - s[0] * w[2];
+			N[2] = s[0] * w[1] - s[1] * w[0];
+			l = sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]);
+			area[i] = 0.5 * l;
+			for (k = 0; k < 3; k++) nrm[3 * (size_t)i + k] = l > 0 ? N[k] / l : 0;
+		}
+		/* the labels: the nearest axis, the old one kept unless another is nearer by 0.1 */
+		for (i = 0; i < nb; i++)
+		{
+			double const* n = nrm + 3 * (size_t)i;
+			unsigned int best = 0, old = flab[bf[i]];
+			double dmax = -1;
+			for (k = 0; k < 3; k++)
+				if (fabs(n[k]) > dmax)
+				{
+					dmax = fabs(n[k]);
+					best = 2 * k + (n[k] > 0);
+				}
+			if (old != 0xFF && (n[old / 2] > 0) == (old % 2 == 1) && fabs(n[old / 2]) > dmax - 0.1)
+				best = old;
+			flab[bf[i]] = (unsigned char)best;
+		}
+		/* a facet whose neighbours agree on another label takes theirs */
+		for (q = 0; q < 2; q++)
+			for (i = 0; i < nb; i++)
+			{
+				unsigned int a = nbr[3 * i], bb = nbr[3 * i + 1], e = nbr[3 * i + 2], la, lb, le, mine = flab[bf[i]];
+				if (a == HM_NONE || bb == HM_NONE || e == HM_NONE)
+					continue;
+				la = flab[bf[a]];
+				lb = flab[bf[bb]];
+				le = flab[bf[e]];
+				if (la != mine && lb != mine && le != mine)
+					flab[bf[i]] = (unsigned char)(la == lb || la == le ? la : lb == le ? lb : mine);
+				else if ((la == lb && la != mine && le != mine) || (la == le && la != mine && lb != mine) || (lb == le && lb != mine && la != mine))
+					flab[bf[i]] = (unsigned char)(la == lb || la == le ? la : lb);
+			}
+		/* each facet's turn onto its axis; spread to the vertices (area-weighted at the border, harmonic inside) */
+		memset(W, 0, sizeof(double) * 3 * t->nv);
+		memset(y, 0, sizeof(double) * t->nv);
+		for (i = 0; i < nb; i++)
+		{
+			double const* n = nrm + 3 * (size_t)i;
+			double ax[3] = { 0, 0, 0 }, cr[3], s, cs, ang;
+			unsigned int n3;
+			unsigned char const* loc = vm_facet(QAWS_CELL_TETRAHEDRON, bf[i] % 4, &n3);
+			ax[flab[bf[i]] / 2] = flab[bf[i]] % 2 ? 1 : -1;
+			cr[0] = n[1] * ax[2] - n[2] * ax[1];
+			cr[1] = n[2] * ax[0] - n[0] * ax[2];
+			cr[2] = n[0] * ax[1] - n[1] * ax[0];
+			s = sqrt(cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2]);
+			cs = n[0] * ax[0] + n[1] * ax[1] + n[2] * ax[2];
+			ang = atan2(s, cs);
+			turn += area[i] * ang;
+			total += area[i];
+			for (k = 0; k < 3; k++) rv[3 * (size_t)i + k] = s > 1e-12 ? cr[k] / s * ang : 0;
+			for (q = 0; q < 3; q++)
+			{
+				unsigned int v = t->cv[t->c0[bf[i] / 4] + loc[q]];
+				for (k = 0; k < 3; k++) W[3 * (size_t)v + k] += area[i] * rv[3 * (size_t)i + k];
+				y[v] += area[i];
+			}
+		}
+		if (!(total > 0) || turn / total < 0.25 * 3.14159265358979323846 / 180)
+			break;
+		for (i = 0; i < t->nv; i++)
+			if (fixed[i] && y[i] > 0)
+				for (k = 0; k < 3; k++) W[3 * (size_t)i + k] /= y[i];
+		for (k = 0; k < 3; k++)
+		{
+			for (i = 0; i < t->nv; i++)
+			{
+				y[i] = W[3 * (size_t)i + k];
+				b[i] = 0;
+			}
+			if (!hx_cg(&K, b, fixed, y))
+				goto done;
+			for (i = 0; i < t->nv; i++) W[3 * (size_t)i + k] = y[i];
+		}
+		/* the cells' targets: their turns applied to their gradients; the positions solved for */
+		for (c = 0; c < t->nc; c++)
+		{
+			double r[3] = { 0, 0, 0 }, M[9], J[9];
+			unsigned int a, d;
+			for (q = 0; q < 4; q++)
+				for (k = 0; k < 3; k++) r[k] += 0.25 * W[3 * (size_t)t->cv[t->c0[c] + q] + k];
+			hx_rot(r, M);
+			for (a = 0; a < 3; a++)
+				for (d = 0; d < 3; d++)
+				{
+					double s = 0;
+					for (q = 0; q < 4; q++) s += Y[3 * (size_t)t->cv[t->c0[c] + q] + a] * G[c][q][d];
+					J[3 * a + d] = s;
+				}
+			for (a = 0; a < 3; a++)
+				for (d = 0; d < 3; d++) R[9 * (size_t)c + 3 * a + d] = M[3 * a] * J[d] + M[3 * a + 1] * J[3 + d] + M[3 * a + 2] * J[6 + d];
+		}
+		for (k = 0; k < 3; k++)
+		{
+			memset(b, 0, sizeof(double) * t->nv);
+			for (c = 0; c < t->nc; c++)
+				for (q = 0; q < 4; q++)
+					b[t->cv[t->c0[c] + q]] += vol[c] * (G[c][q][0] * R[9 * (size_t)c + 3 * k] + G[c][q][1] * R[9 * (size_t)c + 3 * k + 1] +
+						G[c][q][2] * R[9 * (size_t)c + 3 * k + 2]);
+			for (i = 0; i < t->nv; i++) y[i] = Y[3 * (size_t)i + k];
+			if (!hx_cg(&K, b, pin, y))
+				goto done;
+			for (i = 0; i < t->nv; i++) Y[3 * (size_t)i + k] = y[i];
+		}
+	}
+	/* the frames: the rotations of the deformation's gradients (their polar parts: the polycube's turn, without its
+	   leftover shear, as a frame field's) */
+	for (c = 0; c < t->nc; c++)
+	{
+		unsigned int a, d;
+		double J[9];
+		for (a = 0; a < 3; a++)
+			for (d = 0; d < 3; d++)
+			{
+				double s = 0;
+				for (q = 0; q < 4; q++) s += Y[3 * (size_t)t->cv[t->c0[c] + q] + a] * G[c][q][d];
+				J[3 * a + d] = s;
+			}
+		hx_polar(J, R + 9 * (size_t)c);
+	}
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(K.r0); qaws_internal_free(K.col); qaws_internal_free(K.val);
+	qaws_internal_free(em.key); qaws_internal_free(em.val);
+	qaws_internal_free(bf); qaws_internal_free(nbr); qaws_internal_free(Y); qaws_internal_free(W); qaws_internal_free(b); qaws_internal_free(y);
+	qaws_internal_free(nrm); qaws_internal_free(area); qaws_internal_free(rv); qaws_internal_free(G); qaws_internal_free(vol);
+	qaws_internal_free(fixed); qaws_internal_free(pin);
+	return st;
+}
+
+/* Hexahedra of a polycube map: the inside tetrahedralized, deformed into a polycube (hx_polycube_frames), the integer-grid
+   map's lattice with the polycube's faces as patches (hx_map). */
+static qaws_status hx_polycube(qaws_mesh_3d const* boundary, double h, qaws_volume_mesh** out_mesh, qaws_mesh_report* rep)
+{
+	qaws_tetrahedralize_desc td;
+	qaws_volume_mesh* t = NULL;
+	double* R = NULL;
+	unsigned char* flab = NULL;
+	qaws_status st;
+	memset(&td, 0, sizeof td);
+	td.target_length = (qaws_scalar)(0.5 * h);
+	st = qaws_volume_mesh_tetrahedralize(&t, NULL, boundary, &td);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	R = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (9 * (size_t)t->nc + 1)));
+	flab = (unsigned char*)qaws_internal_scratch_malloc(4 * (size_t)t->nc + 1);
+	if (R && flab)
+		st = hx_polycube_frames(t, R, flab);
+	if (st == QAWS_STATUS_OK)
+		st = hx_map(t, R, flab, h, out_mesh, rep);
+	qaws_internal_free(R);
+	qaws_internal_free(flab);
 	qaws_volume_mesh_destroy(t);
 	return st;
 }
@@ -860,8 +1175,6 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_volume_mesh** out_mesh, qaws_mes
 	*out_mesh = NULL;
 	if (!boundary || !desc || (unsigned int)desc->method > QAWS_HEXES_FRAME_FIELD || desc->cell_size < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method == QAWS_HEXES_POLYCUBE)
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	hm = &boundary->hm;
 	for (c = 0; c < hm->nc; c++)
 		if (hm->cf[c] != HM_NONE && hm->co[c] == HM_NONE)
@@ -908,6 +1221,11 @@ qaws_status qaws_volume_mesh_hexahedralize(qaws_volume_mesh** out_mesh, qaws_mes
 	if (desc->method == QAWS_HEXES_FRAME_FIELD)
 	{
 		st = hx_frame_field(boundary, L, out_mesh, &rep);
+		goto done;
+	}
+	if (desc->method == QAWS_HEXES_POLYCUBE)
+	{
+		st = hx_polycube(boundary, L, out_mesh, &rep);
 		goto done;
 	}
 	/* the grid: the box in whole cells per axis (the step adjusted, so a box's faces fall on grid planes) */
