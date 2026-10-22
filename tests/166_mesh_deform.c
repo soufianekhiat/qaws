@@ -14,6 +14,8 @@
  *     to pole; two separate grids: two charts side by side;
  *   - BFF: a flat grid unchanged, a cap with its border's lengths kept and
  *     mapped to a disc, the cut sphere;
+ *   - an atlas: the closed sphere cut by itself and packed into the unit
+ *     square, no overlap;
  *   - refusals: a seam that is not an edge.
  */
 
@@ -406,6 +408,46 @@ static void test_bff(void)
 	free(uc);
 }
 
+/* an atlas: the closed sphere cut by itself (auto_seams) and packed into the unit square; no two triangles overlap (a
+   64 x 64 grid of points, each inside at most one), every point of it inside the square */
+static void test_atlas(void)
+{
+	char msg[300];
+	qaws_mesh_3d* m = dt_icosphere(0);
+	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), i, a, b, over = 0, out = 0;
+	qaws_scalar* uv = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * nt);
+	qaws_param_report r;
+	qaws_param_desc d;
+	qaws_status st;
+	memset(&d, 0, sizeof d);
+	d.auto_seams = 1;
+	d.pack = 1;
+	st = qaws_mesh_3d_parameterize(uv, &r, m, NULL, 0, &d);
+	for (i = 0; i < 6 * nt; i++)
+		out += uv[i] < 0 || uv[i] > 1;
+	for (a = 0; a < 64; a++)
+		for (b = 0; b < 64; b++)
+		{
+			double px = (a + 0.5) / 64, py = (b + 0.5) / 64;
+			unsigned int in = 0;
+			for (i = 0; i < nt; i++)
+			{
+				qaws_scalar const* q = uv + 6 * i;
+				double s0 = (q[2] - q[0]) * (py - q[1]) - (q[3] - q[1]) * (px - q[0]);
+				double s1 = (q[4] - q[2]) * (py - q[3]) - (q[5] - q[3]) * (px - q[2]);
+				double s2 = (q[0] - q[4]) * (py - q[5]) - (q[1] - q[5]) * (px - q[4]);
+				in += (s0 > 0 && s1 > 0 && s2 > 0) || (s0 < 0 && s1 < 0 && s2 < 0);
+			}
+			over += in > 1;
+		}
+	sprintf(msg, "an atlas of the closed sphere: %u charts, %u turned, %u coordinates outside the square, %u points covered twice, fill %.3f, angles %.4f",
+		r.charts, r.flipped, out, over, (double)r.fill, (double)r.angle_distortion);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && r.charts >= 6 && r.flipped == 0 && out == 0 && over == 0 && r.fill > 0.3, msg);
+	qaws_mesh_3d_destroy(m);
+	free(uv);
+}
+
 static void test_param(void)
 {
 	char msg[240];
@@ -528,6 +570,7 @@ int test_166_mesh_deform_main(void)
 	test_deformer();
 	test_param();
 	test_bff();
+	test_atlas();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

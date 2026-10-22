@@ -41,6 +41,15 @@
  *          its curve integrated, the inside its harmonic extension. A chart
  *          must be a disk (one border loop: INVALID_TOPOLOGY else).
  *
+ * auto_seams cuts the mesh into charts by itself: each triangle grouped by
+ * the axis direction nearest its normal (+-x, +-y, +-z), the edges between
+ * groups seams (with the given ones), each connected group a chart: a
+ * closed mesh opens without seams given. pack places the charts on shelves
+ * (tallest first, rows as wide as the square their boxes fill, a gap of 2%
+ * of the mesh's size between them) and scales them all at once into the
+ * unit square, the charts keeping their relative sizes; the report's fill
+ * is the share of the square they cover.
+ *
  * Polygons are fanned from their first vertex (qaws_mesh_3d_get_triangle):
  * the output is per triangle corner, in that order.
  */
@@ -60,6 +69,8 @@ typedef struct qaws_param_desc
 	qaws_param_method method;
 	unsigned int iterations;            /* ARAP's local-global rounds; 0: 10 */
 	int bff_disk;                       /* BFF: 1 the border a circle; 0 its lengths kept */
+	int auto_seams;                     /* 1: cut also between triangles facing different axis directions (6 groups) */
+	int pack;                           /* 1: the charts packed into the unit square (shelves, one scale); 0: side by side along u */
 } qaws_param_desc;
 
 typedef struct qaws_param_report
@@ -68,6 +79,7 @@ typedef struct qaws_param_report
 	unsigned int flipped;               /* triangles turned over in the plane */
 	qaws_scalar angle_distortion;       /* the mean of |the corner's angle in the plane - on the mesh| (radians) */
 	qaws_scalar area_distortion;        /* the sum over the triangles of |their share of the plane's area - of the mesh's| (0 to 2) */
+	qaws_scalar fill;                   /* with pack: the charts' share of the unit square */
 } qaws_param_report;
 
 /* out_uv: 2 per triangle corner (3 per triangle); report may be NULL; seam_edges: 2 vertices each (INVALID_ARGUMENT if one is

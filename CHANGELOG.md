@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Parameterization atlases: `auto_seams` cuts charts by the axis direction nearest each
+  normal, `pack` packs them into the unit square (shelves, one scale; `fill` reported).
+  Test 166, figure 56 (key U).
 - BFF parameterization (`QAWS_PARAM_BFF`, Sawhney and Crane 2017): the border's lengths
   kept, or mapped to a disc (`bff_disk`). Test 166, figure 55 (key T).
 - Contoured offsets evaluate the distance only where the level may pass (blocks

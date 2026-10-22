@@ -304,7 +304,7 @@ qaws_status qaws_mesh_3d_parameterize(qaws_scalar* out_uv, qaws_param_report* re
 	double *x = NULL, *xw = NULL, *uv = NULL, *mass = NULL, *rhs = NULL;
 	unsigned int *t = NULL, *wedge = NULL, *par = NULL, *tpar = NULL, *tw = NULL, *chart = NULL, *pin_a = NULL, *pin_b = NULL;
 	unsigned long long *he = NULL, *sk = NULL;
-	unsigned char *bord = NULL, *move = NULL;
+	unsigned char *bord = NULL, *move = NULL, *cls = NULL;
 	qaws_scalar* pos = NULL;
 	pm_trip* T = NULL;
 	sm_csr K, Q;
@@ -368,6 +368,29 @@ qaws_status qaws_mesh_3d_parameterize(qaws_scalar* out_uv, qaws_param_report* re
 		sk[i] = key;
 	}
 	qsort(sk, ns, sizeof *sk, pm_cmp_u64);
+	if (desc && desc->auto_seams)
+	{
+		/* each triangle's group: the axis direction nearest its normal (6), an edge between two groups a seam */
+		cls = (unsigned char*)qaws_internal_malloc((size_t)nt + 1);
+		if (!cls)
+			goto done;
+		for (i = 0; i < nt; i++)
+		{
+			double const *a = x + 3 * (size_t)t[3 * i], *b = x + 3 * (size_t)t[3 * i + 1], *c = x + 3 * (size_t)t[3 * i + 2];
+			double u[3], w[3], nr[3], best = -1;
+			for (k = 0; k < 3; k++) { u[k] = b[k] - a[k]; w[k] = c[k] - a[k]; }
+			nr[0] = u[1] * w[2] - u[2] * w[1];
+			nr[1] = u[2] * w[0] - u[0] * w[2];
+			nr[2] = u[0] * w[1] - u[1] * w[0];
+			cls[i] = 0;
+			for (k = 0; k < 3; k++)
+				if (fabs(nr[k]) > best)
+				{
+					best = fabs(nr[k]);
+					cls[i] = (unsigned char)(2 * k + (nr[k] < 0));
+				}
+		}
+	}
 	/* edges of exactly two triangles turned opposite ways, not seams, join the corners at their ends and the triangles; the
 	   others are the cut mesh's border */
 	for (i = 0; i < n; i = j)
@@ -387,6 +410,8 @@ qaws_status qaws_mesh_3d_parameterize(qaws_scalar* out_uv, qaws_param_report* re
 					hi = mid;
 			}
 			seam = lo < ns && sk[lo] == key;
+			if (j == i + 2 && cls && cls[(unsigned int)he[2 * (size_t)i + 1] / 3] != cls[(unsigned int)he[2 * (size_t)i + 3] / 3])
+				seam = 1;
 			if (j == i + 2 && !seam)
 			{
 				unsigned int c0 = (unsigned int)he[2 * (size_t)i + 1], c1 = (unsigned int)he[2 * (size_t)i + 3];
@@ -621,18 +646,96 @@ laid:
 			}
 		}
 		gap = 0.02 * sqrt((bmax[0] - bmin[0]) * (bmax[0] - bmin[0]) + (bmax[1] - bmin[1]) * (bmax[1] - bmin[1]) + (bmax[2] - bmin[2]) * (bmax[2] - bmin[2]));
-		for (i = 0; i < C; i++)
+		if (desc && desc->pack)
 		{
-			double w = lo[4 * (size_t)i + 2] - lo[4 * (size_t)i];
-			lo[4 * (size_t)i + 2] = off - lo[4 * (size_t)i];   /* (the chart's shift in u) */
-			lo[4 * (size_t)i + 3] = -lo[4 * (size_t)i + 1];
-			off += w + gap;
+			/* shelves: the charts by height, tallest first, left to right in rows as wide as the square their boxes fill; then
+			   all scaled into the unit square at once (the charts keep their relative sizes) */
+			double* hi = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)C + 1));
+			unsigned int* ord = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)C + 1));
+			double sum = 0, row = 0, x0 = 0, y0 = 0, rowh = 0, wmax = 0, side, sc;
+			if (!hi || !ord)
+			{
+				qaws_internal_free(hi);
+				qaws_internal_free(ord);
+				qaws_internal_free(lo);
+				goto done;
+			}
+			for (i = 0; i < C; i++)
+			{
+				hi[2 * (size_t)i] = -HUGE_VAL;
+				hi[2 * (size_t)i + 1] = -HUGE_VAL;
+				ord[i] = i;
+			}
+			for (i = 0; i < n; i++)
+			{
+				unsigned int c = chart[i / 3];
+				double const* p = uv + 2 * (size_t)wedge[i];
+				hi[2 * (size_t)c] = fmax(hi[2 * (size_t)c], p[0]);
+				hi[2 * (size_t)c + 1] = fmax(hi[2 * (size_t)c + 1], p[1]);
+			}
+			for (i = 0; i < C; i++)
+			{
+				double w = hi[2 * (size_t)i] - lo[4 * (size_t)i] + gap, hh = hi[2 * (size_t)i + 1] - lo[4 * (size_t)i + 1] + gap;
+				hi[2 * (size_t)i] = w;
+				hi[2 * (size_t)i + 1] = hh;
+				sum += w * hh;
+				wmax = fmax(wmax, w);
+			}
+			for (i = 1; i < C; i++)
+				for (j = i; j > 0 && hi[2 * (size_t)ord[j] + 1] > hi[2 * (size_t)ord[j - 1] + 1]; j--)
+				{
+					unsigned int s = ord[j];
+					ord[j] = ord[j - 1];
+					ord[j - 1] = s;
+				}
+			row = fmax(sqrt(sum), wmax);
+			for (i = 0; i < C; i++)
+			{
+				unsigned int c = ord[i];
+				if (x0 > 0 && x0 + hi[2 * (size_t)c] > row)
+				{
+					x0 = 0;
+					y0 += rowh;
+					rowh = 0;
+				}
+				lo[4 * (size_t)c + 2] = x0 - lo[4 * (size_t)c];
+				lo[4 * (size_t)c + 3] = y0 - lo[4 * (size_t)c + 1];
+				x0 += hi[2 * (size_t)c];
+				rowh = fmax(rowh, hi[2 * (size_t)c + 1]);
+				off = fmax(off, x0);
+			}
+			side = fmax(off, y0 + rowh);
+			sc = side > 0 ? 1 / side : 1;
+			for (i = 0; i < n; i++)
+			{
+				unsigned int c = chart[i / 3];
+				out_uv[2 * (size_t)i] = (qaws_scalar)((uv[2 * (size_t)wedge[i]] + lo[4 * (size_t)c + 2]) * sc);
+				out_uv[2 * (size_t)i + 1] = (qaws_scalar)((uv[2 * (size_t)wedge[i] + 1] + lo[4 * (size_t)c + 3]) * sc);
+			}
+			/* the fill: the charts' area in the plane over the square's */
+			for (i = 0; i < nt; i++)
+			{
+				qaws_scalar const *p0 = out_uv + 6 * (size_t)i, *p1 = p0 + 2, *p2 = p0 + 4;
+				report->fill += (qaws_scalar)fabs(0.5 * (((double)p1[0] - p0[0]) * ((double)p2[1] - p0[1]) - ((double)p2[0] - p0[0]) * ((double)p1[1] - p0[1])));
+			}
+			qaws_internal_free(hi);
+			qaws_internal_free(ord);
 		}
-		for (i = 0; i < n; i++)
+		else
 		{
-			unsigned int c = chart[i / 3];
-			out_uv[2 * (size_t)i] = (qaws_scalar)(uv[2 * (size_t)wedge[i]] + lo[4 * (size_t)c + 2]);
-			out_uv[2 * (size_t)i + 1] = (qaws_scalar)(uv[2 * (size_t)wedge[i] + 1] + lo[4 * (size_t)c + 3]);
+			for (i = 0; i < C; i++)
+			{
+				double w = lo[4 * (size_t)i + 2] - lo[4 * (size_t)i];
+				lo[4 * (size_t)i + 2] = off - lo[4 * (size_t)i];   /* (the chart's shift in u) */
+				lo[4 * (size_t)i + 3] = -lo[4 * (size_t)i + 1];
+				off += w + gap;
+			}
+			for (i = 0; i < n; i++)
+			{
+				unsigned int c = chart[i / 3];
+				out_uv[2 * (size_t)i] = (qaws_scalar)(uv[2 * (size_t)wedge[i]] + lo[4 * (size_t)c + 2]);
+				out_uv[2 * (size_t)i + 1] = (qaws_scalar)(uv[2 * (size_t)wedge[i] + 1] + lo[4 * (size_t)c + 3]);
+			}
 		}
 		qaws_internal_free(lo);
 		/* distortion: areas' shares, corners' angles */
@@ -666,6 +769,6 @@ done:
 	qaws_internal_free(pos); qaws_internal_free(x); qaws_internal_free(t); qaws_internal_free(he); qaws_internal_free(sk);
 	qaws_internal_free(par); qaws_internal_free(tpar); qaws_internal_free(bord); qaws_internal_free(wedge); qaws_internal_free(chart);
 	qaws_internal_free(tw); qaws_internal_free(xw); qaws_internal_free(uv); qaws_internal_free(mass); qaws_internal_free(rhs);
-	qaws_internal_free(pin_a); qaws_internal_free(pin_b); qaws_internal_free(T); qaws_internal_free(move);
+	qaws_internal_free(pin_a); qaws_internal_free(pin_b); qaws_internal_free(T); qaws_internal_free(move); qaws_internal_free(cls);
 	return st;
 }
