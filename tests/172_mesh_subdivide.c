@@ -725,11 +725,11 @@ static void test_butterfly(void)
 }
 
 /* the cube [0, 1]^3's surface in n x n squares a side, each cut in two */
-static qaws_mesh_3d* sd_grid_cube(unsigned int n)
+static qaws_mesh_3d* sd_grid_cube(unsigned int n, int quads)
 {
 	unsigned int N = n + 1, *id = (unsigned int*)malloc(sizeof(unsigned int) * N * N * N), nv = 0, nf = 0, a, s, u, v, k;
 	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * N * N * N);
-	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 36 * n * n);
+	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 36 * n * n), *fs = (unsigned int*)malloc(sizeof(unsigned int) * 12 * n * n);
 	qaws_mesh_3d* m;
 	for (k = 0; k < N * N * N; k++)
 	{
@@ -764,13 +764,20 @@ static qaws_mesh_3d* sd_grid_cube(unsigned int n)
 						q4[1] = q4[3];
 						q4[3] = c;
 					}
+					if (quads)
+					{
+						for (c = 0; c < 4; c++) f[4 * nf + c] = q4[c];
+						fs[nf++] = 4;
+						continue;
+					}
 					f[3 * nf] = q4[0]; f[3 * nf + 1] = q4[1]; f[3 * nf + 2] = q4[2]; nf++;
 					f[3 * nf] = q4[0]; f[3 * nf + 1] = q4[2]; f[3 * nf + 2] = q4[3]; nf++;
 				}
-	m = sd_make(x, nv, f, NULL, nf);
+	m = sd_make(x, nv, f, quads ? fs : NULL, nf);
 	free(id);
 	free(x);
 	free(f);
+	free(fs);
 	return m;
 }
 
@@ -778,7 +785,7 @@ static qaws_mesh_3d* sd_grid_cube(unsigned int n)
    its faces' middles still flat */
 static void test_adaptive(void)
 {
-	qaws_mesh_3d *c = sd_grid_cube(4), *o = NULL, *u = sd_run(c, QAWS_MESH_SUBDIVIDE_LOOP, 2, NULL), *bad = NULL;
+	qaws_mesh_3d *c = sd_grid_cube(4, 0), *o = NULL, *u = sd_run(c, QAWS_MESH_SUBDIVIDE_LOOP, 2, NULL), *bad = NULL;
 	qaws_mesh_subdivide_desc d;
 	qaws_mesh_topology top;
 	qaws_status st, sb;
@@ -807,13 +814,64 @@ static void test_adaptive(void)
 			flat += mids == 2 && on == 1;
 		}
 	}
-	d.scheme = QAWS_MESH_SUBDIVIDE_CATMULL_CLARK;
+	d.scheme = QAWS_MESH_SUBDIVIDE_SQRT3;
 	sb = qaws_mesh_3d_subdivide(&bad, c, &d);
-	sprintf(msg, "adaptive Loop on a cube of 4 x 4 a side, two levels at 0.3: %u faces (uniform %u), closed %d, genus %u, the faces' middles unmoved %u of 6; refused with Catmull-Clark (%d)",
+	sprintf(msg, "adaptive Loop on a cube of 4 x 4 a side, two levels at 0.3: %u faces (uniform %u), closed %d, genus %u, the faces' middles unmoved %u of 6; refused with sqrt(3) (%d)",
 		o ? qaws_mesh_3d_get_face_count(o) : 0, u ? qaws_mesh_3d_get_face_count(u) : 0, top.closed, top.genus, flat, (int)sb);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && o && u && top.closed && top.genus == 0 && 4 * qaws_mesh_3d_get_face_count(o) < 3 * qaws_mesh_3d_get_face_count(u) &&
 		flat == 6 && sb == QAWS_STATUS_INVALID_ARGUMENT && !bad, msg);
+	qaws_mesh_3d_destroy(c);
+	qaws_mesh_3d_destroy(o);
+	qaws_mesh_3d_destroy(u);
+}
+
+/* adaptive Catmull-Clark on a cube of 4 x 4 quads a side, two levels at 0.3: split near its edges only, transition
+   triangles fanned from face points between (no T-junction: closed), fewer vertices than uniform (under 9 / 10: most faces of a 4 x 4 side touch its edges), the sides' middles unmoved */
+static void test_adaptive_cc(void)
+{
+	qaws_mesh_3d *c = sd_grid_cube(4, 1), *o = NULL, *u = sd_run(c, QAWS_MESH_SUBDIVIDE_CATMULL_CLARK, 2, NULL);
+	qaws_mesh_subdivide_desc d;
+	qaws_mesh_topology top;
+	qaws_status st;
+	unsigned int flat = 0, poly = 0, i;
+	char msg[300];
+	memset(&d, 0, sizeof d);
+	d.scheme = QAWS_MESH_SUBDIVIDE_CATMULL_CLARK;
+	d.levels = 2;
+	d.adaptive_angle = (qaws_scalar)0.3;
+	st = qaws_mesh_3d_subdivide(&o, c, &d);
+	memset(&top, 0, sizeof top);
+	if (o)
+	{
+		qaws_mesh_3d_get_topology(&top, o);
+		for (i = 0; i < qaws_mesh_3d_get_vertex_count(o); i++)
+		{
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(o, i);
+			double q[3] = { p.x, p.y, p.z };
+			unsigned int a, mids = 0, on = 0;
+			for (a = 0; a < 3; a++)
+			{
+				mids += fabs(q[a] - 0.5) < 1e-12;
+				on += q[a] == 0 || q[a] == 1;
+			}
+			flat += mids == 2 && on == 1;
+		}
+		{
+			unsigned int* fvs = (unsigned int*)malloc(sizeof(unsigned int) * (qaws_mesh_3d_get_corner_count(o) + 1));
+			unsigned int* fsz = (unsigned int*)malloc(sizeof(unsigned int) * (qaws_mesh_3d_get_face_count(o) + 1));
+			if (fvs && fsz && qaws_mesh_3d_get_faces(fvs, fsz, o) == QAWS_STATUS_OK)
+				for (i = 0; i < qaws_mesh_3d_get_face_count(o); i++)
+					poly += fsz[i] == 3;
+			free(fvs);
+			free(fsz);
+		}
+	}
+	sprintf(msg, "adaptive Catmull-Clark on a cube of 4 x 4 quads a side, two levels at 0.3: %u vertices (uniform %u), %u transition triangles, closed %d, genus %u, the sides' middles unmoved %u of 6",
+		o ? qaws_mesh_3d_get_vertex_count(o) : 0, u ? qaws_mesh_3d_get_vertex_count(u) : 0, poly, top.closed, top.genus, flat);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && u && top.closed && top.genus == 0 && 10 * qaws_mesh_3d_get_vertex_count(o) < 9 * qaws_mesh_3d_get_vertex_count(u) &&
+		poly > 0 && flat == 6, msg);
 	qaws_mesh_3d_destroy(c);
 	qaws_mesh_3d_destroy(o);
 	qaws_mesh_3d_destroy(u);
@@ -958,6 +1016,7 @@ int test_172_mesh_subdivide_main(void)
 	test_sqrt3();
 	test_sqrt3_creases();
 	test_adaptive();
+	test_adaptive_cc();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Adaptive Catmull-Clark (`adaptive_angle`): faces at a turn split into quads, their neighbours fanned in triangles from
+  their face points (no T-junction). Test 172, figure 54.
 - sqrt(3) subdivision: Kobbelt's ternary rule on borders and creases every second level (the ternary cubic
   B-spline; chain ends interpolated). Test 172.
 - The butterfly's extraordinary crease and border rule (Zorin): an edge next to a crease or border vertex whose side
