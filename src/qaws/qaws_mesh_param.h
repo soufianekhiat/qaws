@@ -42,13 +42,21 @@
  *          must be a disk (one border loop: INVALID_TOPOLOGY else).
  *
  * auto_seams cuts the mesh into charts by itself: each triangle grouped by
- * the axis direction nearest its normal (+-x, +-y, +-z), the edges between
- * groups seams (with the given ones), each connected group a chart: a
- * closed mesh opens without seams given. pack places the charts on shelves
- * (tallest first, rows as wide as the square their boxes fill, a gap of 2%
- * of the mesh's size between them) and scales them all at once into the
- * unit square, the charts keeping their relative sizes; the report's fill
- * is the share of the square they cover.
+ * the axis direction nearest its normal (+-x, +-y, +-z), the groups'
+ * borders smoothed (a triangle joins the group most of its neighbours are
+ * in when its normal faces that group's axis), the edges between groups
+ * seams (with the given ones), each connected group a chart: a closed mesh
+ * opens without seams given. With max_stretch > 0, a chart whose
+ * triangles' area scales (in the plane over on the mesh) differ by more
+ * than that factor, or with a triangle turned, is split in two across its
+ * longest extent and the whole flattened again (32 splits at most).
+ *
+ * pack turns each chart to its smallest bounding box (wider than tall),
+ * places them on shelves (tallest first, the rows' width the best of a few
+ * around the square their boxes fill, a gap of 2% of the mesh's size
+ * between them) and scales them all at once into the unit square, the
+ * charts keeping their relative sizes; the report's fill is the share of
+ * the square they cover.
  *
  * Polygons are fanned from their first vertex (qaws_mesh_3d_get_triangle):
  * the output is per triangle corner, in that order.
@@ -71,6 +79,7 @@ typedef struct qaws_param_desc
 	int bff_disk;                       /* BFF: 1 the border a circle; 0 its lengths kept */
 	int auto_seams;                     /* 1: cut also between triangles facing different axis directions (6 groups) */
 	int pack;                           /* 1: the charts packed into the unit square (shelves, one scale); 0: side by side along u */
+	qaws_scalar max_stretch;            /* auto_seams: a chart whose triangles' area scales differ by more (largest over least) split; 0: none */
 } qaws_param_desc;
 
 typedef struct qaws_param_report

@@ -154,7 +154,7 @@ Volumes, points, smoothing (larger):
 Parameterization:
 
 18. **BFF: landed** (`QAWS_PARAM_BFF`, `bff_disk`, test 166, figure 55 key T): the Yamabe scale factors, the border's curve from its new turning and lengths closed by least change, the inside harmonic; lengths kept to 1e-4 on a cap (angles below LSCM's), a disc round to 0.1%, a sphere cut pole to pole flattened. Next: prescribed border angles in general (cone points), the inside by the conjugate harmonic rather than both coordinates' harmonic extension.
-19. **Seams and chart packing: landed** (`auto_seams`, `pack`, `fill`, test 166, figure 56 key U): charts grouped by the axis direction nearest each normal, packed on shelves into the unit square at one scale; a closed icosphere gives 6 charts, none turned, no overlap, fill 0.37. Next: chart borders smoothed (they follow the triangles), charts split where the distortion stays high, a tighter packing (rotations, skyline).
+19. **Seams and chart packing: landed** (`auto_seams`, `pack`, `fill`, test 166, figure 56 key U): charts grouped by the axis direction nearest each normal, packed on shelves into the unit square at one scale; groups smoothed by iterated conditional modes; charts split across their longest extent while their area scales differ by more than `max_stretch`; charts turned to their least box before the shelves, the rows' width searched. A closed icosphere: 6 charts, fill 0.52 (0.37 before turning), no overlap; `max_stretch` 1.2: 12 charts, area distortion 0.090 to 0.040. Next: splits along the distortion's level lines rather than a median plane, a skyline packing, the groups by graph cuts (shared with polycube labels).
 
 Hexahedra and quads (research-scale):
 

@@ -20,6 +20,12 @@ static int pm_cmp_u64(void const* p, void const* q)
 	return a < b ? -1 : a > b;
 }
 
+static int pm_cmp_double(void const* p, void const* q)
+{
+	double a = *(double const*)p, b = *(double const*)q;
+	return a < b ? -1 : a > b;
+}
+
 static unsigned int pm_find(unsigned int* par, unsigned int i)
 {
 	while (par[i] != i)
@@ -296,8 +302,48 @@ done:
 	return st;
 }
 
-qaws_status qaws_mesh_3d_parameterize(qaws_scalar* out_uv, qaws_param_report* report, qaws_mesh_3d const* mesh, unsigned int const* seams,
-	unsigned int ns, qaws_param_desc const* desc)
+/* each chart turned to its smallest bounding box (16 angles in a half turn), then wider than tall; wch: W scratch */
+static void pm_turn_charts(double* uv, unsigned int* wch, double* bb, unsigned int const* wedge, unsigned int const* chart, unsigned int n,
+	unsigned int W, unsigned int C)
+{
+	unsigned int i, k;
+	for (i = 0; i < W; i++)
+		wch[i] = PM_NONE;
+	for (i = 0; i < n; i++)
+		wch[wedge[i]] = chart[i / 3];
+	for (i = 0; i < 64 * C; i++)
+		bb[i] = i % 4 < 2 ? HUGE_VAL : -HUGE_VAL;
+	for (i = 0; i < W; i++)
+		for (k = 0; wch[i] != PM_NONE && k < 16; k++)
+		{
+			double a = k * 3.14159265358979323846 / 16, c = cos(a), s = sin(a), *b = bb + 64 * (size_t)wch[i] + 4 * k;
+			double X = c * uv[2 * (size_t)i] - s * uv[2 * (size_t)i + 1], Y = s * uv[2 * (size_t)i] + c * uv[2 * (size_t)i + 1];
+			b[0] = fmin(b[0], X);
+			b[1] = fmin(b[1], Y);
+			b[2] = fmax(b[2], X);
+			b[3] = fmax(b[3], Y);
+		}
+	for (i = 0; i < C; i++)
+	{
+		unsigned int best = 0;
+		double* b = bb + 64 * (size_t)i;
+		for (k = 1; k < 16; k++)
+			if ((b[4 * k + 2] - b[4 * k]) * (b[4 * k + 3] - b[4 * k + 1]) < (b[4 * best + 2] - b[4 * best]) * (b[4 * best + 3] - b[4 * best + 1]))
+				best = k;
+		b[0] = best * 3.14159265358979323846 / 16 + (b[4 * best + 3] - b[4 * best + 1] > b[4 * best + 2] - b[4 * best] ? 1.5707963267948966 : 0);
+	}
+	for (i = 0; i < W; i++)
+		if (wch[i] != PM_NONE)
+		{
+			double a = bb[64 * (size_t)wch[i]], c = cos(a), s = sin(a), X = uv[2 * (size_t)i], Y = uv[2 * (size_t)i + 1];
+			uv[2 * (size_t)i] = c * X - s * Y;
+			uv[2 * (size_t)i + 1] = s * X + c * Y;
+		}
+}
+
+/* the parameterization with the given seams (and the axis groups' with auto_seams); tchart: NULL, or each triangle's chart */
+static qaws_status pm_parameterize(qaws_scalar* out_uv, qaws_param_report* report, qaws_mesh_3d const* mesh, unsigned int const* seams,
+	unsigned int ns, qaws_param_desc const* desc, unsigned int* tchart)
 {
 	qaws_param_method method = desc ? desc->method : QAWS_PARAM_LSCM;
 	unsigned int iters = desc && desc->iterations ? desc->iterations : 10, nv, nt, n, i, j, k, W = 0, C = 0, nb = 0, ntr = 0;
@@ -389,6 +435,49 @@ qaws_status qaws_mesh_3d_parameterize(qaws_scalar* out_uv, qaws_param_report* re
 					best = fabs(nr[k]);
 					cls[i] = (unsigned char)(2 * k + (nr[k] < 0));
 				}
+		}
+		/* the groups' borders smoothed (iterated conditional modes): each triangle the group maximizing its normal's
+		   component along the group's axis + 0.5 per neighbour in it, among the groups its normal faces (component > 0.3) */
+		{
+			unsigned int* tn = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1)), r;
+			if (!tn)
+				goto done;
+			for (i = 0; i < n; i++)
+				tn[i] = PM_NONE;
+			for (i = 0; i + 1 < n; i++)
+				if (he[2 * (size_t)i] == he[2 * (size_t)i + 2] && (i + 2 >= n || he[2 * (size_t)i + 4] != he[2 * (size_t)i]) &&
+					(i == 0 || he[2 * (size_t)i - 2] != he[2 * (size_t)i]))
+				{
+					unsigned int c0 = (unsigned int)he[2 * (size_t)i + 1], c1 = (unsigned int)he[2 * (size_t)i + 3];
+					tn[c0] = c1 / 3;
+					tn[c1] = c0 / 3;
+				}
+			for (r = 0; r < 8; r++)
+				for (i = 0; i < nt; i++)
+				{
+					double const *a = x + 3 * (size_t)t[3 * i], *b = x + 3 * (size_t)t[3 * i + 1], *c = x + 3 * (size_t)t[3 * i + 2];
+					double u[3], w[3], nr[3], l, best = -HUGE_VAL;
+					unsigned int g;
+					for (k = 0; k < 3; k++) { u[k] = b[k] - a[k]; w[k] = c[k] - a[k]; }
+					nr[0] = u[1] * w[2] - u[2] * w[1];
+					nr[1] = u[2] * w[0] - u[0] * w[2];
+					nr[2] = u[0] * w[1] - u[1] * w[0];
+					l = sqrt(nr[0] * nr[0] + nr[1] * nr[1] + nr[2] * nr[2]);
+					if (l <= 0)
+						continue;
+					for (g = 0; g < 6; g++)
+					{
+						double s = (g & 1 ? -nr[g / 2] : nr[g / 2]) / l;
+						for (k = 0; k < 3; k++)
+							s += tn[3 * i + k] != PM_NONE && cls[tn[3 * i + k]] == g ? 0.5 : 0;
+						if ((g & 1 ? -nr[g / 2] : nr[g / 2]) > 0.3 * l && s > best)
+						{
+							best = s;
+							cls[i] = (unsigned char)g;
+						}
+					}
+				}
+			qaws_internal_free(tn);
 		}
 	}
 	/* edges of exactly two triangles turned opposite ways, not seams, join the corners at their ends and the triangles; the
@@ -627,6 +716,20 @@ laid:
 		double bmin[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, bmax[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL };
 		if (!lo)
 			goto done;
+		if (desc && desc->pack)
+		{
+			unsigned int* wch = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)W + 1));
+			double* bb = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 64, (size_t)C + 1));
+			if (wch && bb)
+				pm_turn_charts(uv, wch, bb, wedge, chart, n, W, C);
+			qaws_internal_free(wch);
+			qaws_internal_free(bb);
+			if (!wch || !bb)
+			{
+				qaws_internal_free(lo);
+				goto done;
+			}
+		}
 		for (i = 0; i < C; i++)
 		{
 			lo[4 * (size_t)i] = lo[4 * (size_t)i + 1] = HUGE_VAL;
@@ -688,21 +791,35 @@ laid:
 					ord[j] = ord[j - 1];
 					ord[j - 1] = s;
 				}
-			row = fmax(sqrt(sum), wmax);
-			for (i = 0; i < C; i++)
+			/* the rows' width: the one of sqrt(sum) x 1, 1.1, .. 1.6 (at least the widest chart) whose square is least */
+			for (k = 0, side = HUGE_VAL, sc = 0; k < 8; k++)
 			{
-				unsigned int c = ord[i];
-				if (x0 > 0 && x0 + hi[2 * (size_t)c] > row)
+				double f = k < 7 ? 1 + 0.1 * k : sc;
+				row = fmax(sqrt(sum) * f, wmax);
+				x0 = y0 = rowh = off = 0;
+				for (i = 0; i < C; i++)
 				{
-					x0 = 0;
-					y0 += rowh;
-					rowh = 0;
+					unsigned int c = ord[i];
+					if (x0 > 0 && x0 + hi[2 * (size_t)c] > row)
+					{
+						x0 = 0;
+						y0 += rowh;
+						rowh = 0;
+					}
+					if (k == 7)
+					{
+						lo[4 * (size_t)c + 2] = x0 - lo[4 * (size_t)c];
+						lo[4 * (size_t)c + 3] = y0 - lo[4 * (size_t)c + 1];
+					}
+					x0 += hi[2 * (size_t)c];
+					rowh = fmax(rowh, hi[2 * (size_t)c + 1]);
+					off = fmax(off, x0);
 				}
-				lo[4 * (size_t)c + 2] = x0 - lo[4 * (size_t)c];
-				lo[4 * (size_t)c + 3] = y0 - lo[4 * (size_t)c + 1];
-				x0 += hi[2 * (size_t)c];
-				rowh = fmax(rowh, hi[2 * (size_t)c + 1]);
-				off = fmax(off, x0);
+				if (k < 7 && fmax(off, y0 + rowh) < side)
+				{
+					side = fmax(off, y0 + rowh);
+					sc = f;   /* (the best factor, laid out at k = 7) */
+				}
 			}
 			side = fmax(off, y0 + rowh);
 			sc = side > 0 ? 1 / side : 1;
@@ -761,6 +878,8 @@ laid:
 		}
 		report->angle_distortion = (qaws_scalar)(n ? dang / n : 0);
 	}
+	if (tchart)
+		memcpy(tchart, chart, sizeof(unsigned int) * nt);
 	st = QAWS_STATUS_OK;
 done:
 	sm_system_free(&S);
@@ -770,5 +889,135 @@ done:
 	qaws_internal_free(par); qaws_internal_free(tpar); qaws_internal_free(bord); qaws_internal_free(wedge); qaws_internal_free(chart);
 	qaws_internal_free(tw); qaws_internal_free(xw); qaws_internal_free(uv); qaws_internal_free(mass); qaws_internal_free(rhs);
 	qaws_internal_free(pin_a); qaws_internal_free(pin_b); qaws_internal_free(T); qaws_internal_free(move); qaws_internal_free(cls);
+	return st;
+}
+
+/* the triangles' area scales (plane over mesh) within one chart differ by more than max_stretch (or one turned): the chart
+   split across its longest extent (the triangles by their centroids' median), the edges between the halves new seams;
+   until none does, 32 splits at most */
+qaws_status qaws_mesh_3d_parameterize(qaws_scalar* out_uv, qaws_param_report* report, qaws_mesh_3d const* mesh, unsigned int const* seams,
+	unsigned int ns, qaws_param_desc const* desc)
+{
+	unsigned int nt, *tc = NULL, *all = NULL, na = ns, i, k, round;
+	double *sc = NULL, *cen = NULL, *rng = NULL;
+	unsigned long long* ek = NULL;
+	qaws_status st;
+	if (!desc || !desc->auto_seams || !(desc->max_stretch > 0) || !mesh || !out_uv || (ns && !seams))
+		return pm_parameterize(out_uv, report, mesh, seams, ns, desc, NULL);
+	nt = qaws_mesh_3d_get_triangle_count(mesh);
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	tc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+	all = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)ns + 6 * (size_t)nt + 2));
+	sc = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 4, (size_t)nt + 1));
+	cen = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nt + 1));
+	rng = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)nt + 1));
+	ek = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), 6, (size_t)nt + 1));
+	if (!tc || !all || !sc || !cen || !rng || !ek)
+		goto done;
+	if (ns)
+		memcpy(all, seams, sizeof(unsigned int) * 2 * ns);
+	for (i = 0; i < nt; i++)
+	{
+		unsigned int v[3];
+		qaws_vec3 a, b, c;
+		qaws_mesh_3d_get_triangle(v, mesh, i);
+		a = qaws_mesh_3d_get_vertex(mesh, v[0]);
+		b = qaws_mesh_3d_get_vertex(mesh, v[1]);
+		c = qaws_mesh_3d_get_vertex(mesh, v[2]);
+		{
+			double u[3] = { (double)b.x - a.x, (double)b.y - a.y, (double)b.z - a.z }, w[3] = { (double)c.x - a.x, (double)c.y - a.y, (double)c.z - a.z };
+			double nx = u[1] * w[2] - u[2] * w[1], ny = u[2] * w[0] - u[0] * w[2], nz = u[0] * w[1] - u[1] * w[0];
+			sc[4 * (size_t)i] = 0.5 * sqrt(nx * nx + ny * ny + nz * nz);
+		}
+		cen[3 * (size_t)i] = ((double)a.x + b.x + c.x) / 3;
+		cen[3 * (size_t)i + 1] = ((double)a.y + b.y + c.y) / 3;
+		cen[3 * (size_t)i + 2] = ((double)a.z + b.z + c.z) / 3;
+	}
+	for (round = 0;; round++)
+	{
+		unsigned int worst = PM_NONE, cnt = 0, ax = 0, ne = 0;
+		double wr = desc->max_stretch, mid, ext = -1;
+		st = pm_parameterize(out_uv, report, mesh, all, na, desc, tc);
+		if (st != QAWS_STATUS_OK || round == 32)
+			break;
+		/* each chart's least and largest scale (sc[4 c + 1], sc[4 c + 2]; turned: -1) */
+		for (i = 0; i < report->charts; i++)
+		{
+			sc[4 * (size_t)i + 1] = HUGE_VAL;
+			sc[4 * (size_t)i + 2] = 0;
+		}
+		for (i = 0; i < nt; i++)
+		{
+			qaws_scalar const* q = out_uv + 6 * (size_t)i;
+			double au = 0.5 * (((double)q[2] - q[0]) * ((double)q[5] - q[1]) - ((double)q[4] - q[0]) * ((double)q[3] - q[1]));
+			double s = sc[4 * (size_t)i] > 0 ? au / sc[4 * (size_t)i] : 0;
+			sc[4 * (size_t)tc[i] + 1] = fmin(sc[4 * (size_t)tc[i] + 1], s);
+			sc[4 * (size_t)tc[i] + 2] = fmax(sc[4 * (size_t)tc[i] + 2], s);
+		}
+		for (i = 0; i < report->charts; i++)
+		{
+			double r = sc[4 * (size_t)i + 1] <= 0 ? HUGE_VAL : sc[4 * (size_t)i + 2] / sc[4 * (size_t)i + 1];
+			if (r > wr)
+			{
+				wr = r;
+				worst = i;
+			}
+		}
+		if (worst == PM_NONE)
+			break;
+		/* the worst chart's longest extent, its centroids' median along it */
+		for (k = 0; k < 3; k++)
+		{
+			double lo = HUGE_VAL, hi = -HUGE_VAL;
+			for (i = 0; i < nt; i++)
+				if (tc[i] == worst)
+				{
+					lo = fmin(lo, cen[3 * (size_t)i + k]);
+					hi = fmax(hi, cen[3 * (size_t)i + k]);
+				}
+			if (hi - lo > ext)
+			{
+				ext = hi - lo;
+				ax = k;
+			}
+		}
+		for (i = 0; i < nt; i++)
+			if (tc[i] == worst)
+				rng[cnt++] = cen[3 * (size_t)i + ax];
+		qsort(rng, cnt, sizeof *rng, pm_cmp_double);
+		mid = rng[cnt / 2];
+		/* the edges of the worst chart's triangles keyed with their side; an edge on both sides a seam */
+		for (i = 0; i < nt; i++)
+			if (tc[i] == worst)
+			{
+				unsigned int v[3];
+				qaws_mesh_3d_get_triangle(v, mesh, i);
+				for (k = 0; k < 3; k++)
+				{
+					ek[2 * (size_t)ne] = pm_key(v[k], v[(k + 1) % 3]);
+					ek[2 * (size_t)ne + 1] = (cen[3 * (size_t)i + ax] < mid) | ((unsigned long long)v[k] << 1) | ((unsigned long long)v[(k + 1) % 3] << 33);
+					ne++;
+				}
+			}
+		qsort(ek, ne, 2 * sizeof *ek, pm_cmp_u64);
+		cnt = 0;
+		for (i = 0; i + 1 < ne; i++)
+			if (ek[2 * (size_t)i] == ek[2 * (size_t)i + 2] && ((ek[2 * (size_t)i + 1] ^ ek[2 * (size_t)i + 3]) & 1))
+			{
+				all[2 * (size_t)na] = (unsigned int)(ek[2 * (size_t)i + 1] >> 1);
+				all[2 * (size_t)na + 1] = (unsigned int)(ek[2 * (size_t)i + 1] >> 33);
+				na++;
+				cnt++;
+			}
+		if (!cnt || 2 * (size_t)na + 6 > 2 * (size_t)ns + 6 * (size_t)nt)
+			break;   /* (nothing to cut along, or no room: as it is) */
+	}
+done:
+	qaws_internal_free(tc);
+	qaws_internal_free(all);
+	qaws_internal_free(sc);
+	qaws_internal_free(cen);
+	qaws_internal_free(rng);
+	qaws_internal_free(ek);
 	return st;
 }
