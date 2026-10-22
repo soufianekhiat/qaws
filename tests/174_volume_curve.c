@@ -17,6 +17,8 @@
  *   - cubic: a cube's hexahedron with a spherical top, its top's nodes on
  *     the cap, its bound under the sampled determinant; two cubes sharing a face labelled differently,
  *     every node at its lattice point; the sphere's tetrahedra;
+ *   - untangling: a 7-cell O-grid ball made cubic: corner cells under the
+ *     bound brought over it by moving their inside nodes, the border kept;
  *   - refusals: prisms.
  */
 
@@ -534,6 +536,86 @@ static void test_cubic(void)
 	qaws_mesh_3d_destroy(sph);
 }
 
+/* an O-grid ball of 7 hexahedra: a cube of half-size 0.5 and six blocks out to the unit sphere (each point between the
+   cube's face and its projection), each cell turned positive */
+static qaws_volume_mesh* vc_ograph(void)
+{
+	qaws_scalar x[3 * 16];
+	unsigned int cv[56], i, k, f, nh = 1;
+	qaws_cell_type ty[7];
+	for (i = 0; i < 8; i++)
+	{
+		double c[3];
+		c[0] = i == 1 || i == 2 || i == 5 || i == 6 ? 1 : -1;
+		c[1] = i == 2 || i == 3 || i == 6 || i == 7 ? 1 : -1;
+		c[2] = i >= 4 ? 1 : -1;
+		for (k = 0; k < 3; k++)
+		{
+			x[3 * i + k] = (qaws_scalar)(0.5 * c[k]);
+			x[3 * (8 + i) + k] = (qaws_scalar)(c[k] / sqrt(3.0));
+		}
+		cv[i] = i;
+	}
+	for (f = 0; f < 6; f++)
+	{
+		/* the cube's face f (corners on side f) and their projections */
+		static unsigned char const fc[6][4] = { { 0, 3, 7, 4 }, { 1, 2, 6, 5 }, { 0, 1, 5, 4 }, { 3, 2, 6, 7 }, { 0, 1, 2, 3 }, { 4, 5, 6, 7 } };
+		unsigned int* c8 = cv + 8 * nh, s;
+		double e1[3], e3[3], e4[3], dt;
+		for (k = 0; k < 4; k++)
+		{
+			c8[k] = fc[f][k];
+			c8[4 + k] = 8 + fc[f][k];
+		}
+		for (k = 0; k < 3; k++)
+		{
+			e1[k] = (double)x[3 * c8[1] + k] - x[3 * c8[0] + k];
+			e3[k] = (double)x[3 * c8[3] + k] - x[3 * c8[0] + k];
+			e4[k] = (double)x[3 * c8[4] + k] - x[3 * c8[0] + k];
+		}
+		dt = e1[0] * (e3[1] * e4[2] - e3[2] * e4[1]) - e1[1] * (e3[0] * e4[2] - e3[2] * e4[0]) + e1[2] * (e3[0] * e4[1] - e3[1] * e4[0]);
+		if (dt < 0)
+		{
+			s = c8[1]; c8[1] = c8[3]; c8[3] = s;
+			s = c8[5]; c8[5] = c8[7]; c8[7] = s;
+		}
+		nh++;
+	}
+	for (i = 0; i < 7; i++) ty[i] = QAWS_CELL_HEXAHEDRON;
+	return vc_cells(x, 16, cv, ty, 7);
+}
+
+/* untangling: the 7-cell O-grid ball, cubic on the sphere */
+static void test_untangle(void)
+{
+	qaws_volume_mesh* v = vc_ograph();
+	qaws_mesh_3d* sph = vc_sphere(96, 48, 1);
+	qaws_mesh_reference* ref = NULL;
+	qaws_volume_curve_report r;
+	unsigned int nn = 0, nen = 0;
+	qaws_scalar* p = NULL;
+	unsigned int* en = NULL;
+	qaws_status st = QAWS_STATUS_INVALID_ARGUMENT;
+	char msg[300];
+	memset(&r, 0, sizeof r);
+	qaws_mesh_reference_create(&ref, sph, NULL);
+	if (v && ref && qaws_volume_mesh_cubic_node_counts(&nn, &nen, v) == QAWS_STATUS_OK)
+	{
+		p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nn);
+		en = (unsigned int*)malloc(sizeof(unsigned int) * nen);
+		st = qaws_volume_mesh_cubic_nodes(p, en, &r, v, ref, NULL);
+	}
+	sprintf(msg, "untangling: a 7-cell O-grid ball, cubic: %u untangled, %u relaxed, Jacobian bound %.3f, border placed %.1e off the reference",
+		r.untangled, r.relaxed, (double)r.min_jacobian, (double)r.max_distance);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && r.untangled >= 1 && r.min_jacobian >= 0.1, msg);
+	free(p);
+	free(en);
+	qaws_volume_mesh_destroy(v);
+	qaws_mesh_reference_destroy(ref);
+	qaws_mesh_3d_destroy(sph);
+}
+
 static void test_relax(void)
 {
 	static unsigned int const t[4] = { 0, 1, 2, 3 };
@@ -624,6 +706,7 @@ int test_174_volume_curve_main(void)
 	test_sphere();
 	test_hex();
 	test_cubic();
+	test_untangle();
 	test_relax();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

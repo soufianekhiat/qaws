@@ -416,6 +416,8 @@ static double vcu_hex_bound_split(vcu_bern const* B, vcu_el const* e, double con
 	return r;
 }
 
+static double vcu_sampled(vcu_bern const* B, vcu_el const* e, unsigned int const* en, double const* X, double const* D);
+
 /* an element's smallest Jacobian over its straight self's, bounded below over the whole element (nodes en, positions X straight + D) */
 static double vcu_ratio(vcu_bern const* B, vcu_el const* e, unsigned int const* en, double const* X, double const* D, double* work, double target)
 {
@@ -435,7 +437,12 @@ static double vcu_ratio(vcu_bern const* B, vcu_el const* e, unsigned int const* 
 		return ds > 0 ? dc / ds : (dc > 0 ? 1 : -1);
 	}
 	{
+		/* (subdividing only when the sampled determinant clears the target: the bound is below the least value, so an element
+		   sampled under it would only pay for nothing) */
 		static double const lo[3] = { -1, -1, -1 }, hi[3] = { 1, 1, 1 };
+		double r0 = vcu_hex_bound(B, e, (double const(*)[3])xc, (double const(*)[3])xs, work, work + 1000, lo, hi);
+		if (r0 >= target || vcu_sampled(B, e, en, X, D) < target)
+			return r0;
 		return vcu_hex_bound_split(B, e, (double const(*)[3])xc, (double const(*)[3])xs, work, lo, hi, 3, target);
 	}
 }
@@ -531,6 +538,46 @@ static void vcu_coons(double* out, vcu_el const* e, unsigned int const* en, unsi
 		for (k = 0; k < 4; k++)
 			for (d = 0; d < 3; d++) out[d] -= wq[k] * D[3 * (size_t)en[f4[k]] + d];
 	}
+}
+
+/* an element's least sampled Jacobian over its straight self's (a hexahedron's at 5^3 points, a tetrahedron's at its
+   degree 6 lattice): the untangling's quick objective, the bound certifying after */
+static double vcu_sampled(vcu_bern const* B, vcu_el const* e, unsigned int const* en, double const* X, double const* D)
+{
+	double xc[VCU_MAXN][3], xs[VCU_MAXN][3], r = HUGE_VAL;
+	unsigned int n, d, i, j, k;
+	for (n = 0; n < e->nn; n++)
+		for (d = 0; d < 3; d++)
+		{
+			xs[n][d] = X[3 * (size_t)en[n] + d];
+			xc[n][d] = xs[n][d] + D[3 * (size_t)en[n] + d];
+		}
+	if (e->hex)
+	{
+		for (k = 0; k <= 4; k++)
+			for (j = 0; j <= 4; j++)
+				for (i = 0; i <= 4; i++)
+				{
+					double pt[3], ds;
+					pt[0] = -1 + i / 2.0;
+					pt[1] = -1 + j / 2.0;
+					pt[2] = -1 + k / 2.0;
+					ds = vcu_el_det(e, (double const(*)[3])xs, pt);
+					r = fmin(r, ds > 0 ? vcu_el_det(e, (double const(*)[3])xc, pt) / ds : -1);
+				}
+		return r;
+	}
+	{
+		static double const mid[4] = { 0.25, 0.25, 0.25, 0.25 };
+		double ds = vcu_el_det(e, (double const(*)[3])xs, mid);
+		for (n = 0; n < B->nq; n++)
+		{
+			double lam[4];
+			for (k = 0; k < 4; k++) lam[k] = B->tl[n][k] / (double)B->qt;
+			r = fmin(r, ds > 0 ? vcu_el_det(e, (double const(*)[3])xc, lam) / ds : -1);
+		}
+	}
+	return r;
 }
 
 static int vcu_kinds(qaws_volume_mesh const* mesh, unsigned int* nt, unsigned int* nh)
@@ -1022,6 +1069,88 @@ static qaws_status vcu_nodes(qaws_scalar* out_positions, unsigned int* out_eleme
 		for (c = 0; c < mesh->nc; c++)
 			if (mesh->type[c] == QAWS_CELL_HEXAHEDRON)
 				vcu_gordon_hall(&lh, en + eo[c], D);
+
+		/* untangling: an element under min_jacobian has its free nodes (not on the border, not vertices) moved by pattern
+		   search, each step along an axis kept when it raises the least sampled Jacobian of the elements sharing the node,
+		   the step halved when none does, until its bound passes; the border stays where it was put */
+		{
+			unsigned int *nc0 = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nn + 2, sizeof(unsigned int)), *ncl = NULL, *fill2 = NULL;
+			if (!nc0)
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				goto done;
+			}
+			for (c = 0; c < mesh->nc; c++)
+				for (k = eo[c]; k < eo[c + 1]; k++) nc0[en[k] + 1]++;
+			for (i = 0; i < nn; i++) nc0[i + 1] += nc0[i];
+			ncl = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nen + 1));
+			fill2 = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nn + 1, sizeof(unsigned int));
+			if (!ncl || !fill2)
+			{
+				qaws_internal_free(nc0);
+				qaws_internal_free(ncl);
+				qaws_internal_free(fill2);
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				goto done;
+			}
+			for (c = 0; c < mesh->nc; c++)
+				for (k = eo[c]; k < eo[c + 1]; k++) ncl[nc0[en[k]] + fill2[en[k]]++] = c;
+			for (c = 0; c < mesh->nc; c++)
+			{
+				vcu_el const* e = mesh->type[c] == QAWS_CELL_TETRAHEDRON ? &lt : &lh;
+				double step = 0, step0, cur;
+				unsigned int a, round;
+				if (vcu_ratio(&B, e, en + eo[c], X, D, work, minj) >= minj)
+					continue;
+				/* (the first step: a tenth of the element's mean edge to its nodes' spacing) */
+				for (a = 0; a < 3; a++)
+				{
+					double const *p0 = X + 3 * (size_t)en[eo[c]], *p1 = X + 3 * (size_t)en[eo[c] + (e->hex ? 6 : a + 1)];
+					step += sqrt((p1[0] - p0[0]) * (p1[0] - p0[0]) + (p1[1] - p0[1]) * (p1[1] - p0[1]) + (p1[2] - p0[2]) * (p1[2] - p0[2]));
+				}
+				step *= 0.1 / (3.0 * p);
+				step0 = step;
+				/* (until the step is a 32nd of its first: an element held by its border gains nothing) */
+				for (round = 0; round < 16 && step > step0 / 32; round++)
+				{
+					int moved = 0;
+					for (a = e->hex ? 8u : 4u; a < e->nn; a++)
+					{
+						unsigned int g = en[eo[c] + a], q, dir;
+						if (isb[g])
+							continue;
+						/* the least sampled Jacobian round g now */
+						cur = HUGE_VAL;
+						for (q = nc0[g]; q < nc0[g + 1]; q++)
+							cur = fmin(cur, vcu_sampled(&B, mesh->type[ncl[q]] == QAWS_CELL_TETRAHEDRON ? &lt : &lh, en + eo[ncl[q]], X, D));
+						for (dir = 0; dir < 6; dir++)
+						{
+							double keep = D[3 * (size_t)g + dir / 2], now = HUGE_VAL;
+							D[3 * (size_t)g + dir / 2] += dir % 2 ? -step : step;
+							for (q = nc0[g]; q < nc0[g + 1]; q++)
+								now = fmin(now, vcu_sampled(&B, mesh->type[ncl[q]] == QAWS_CELL_TETRAHEDRON ? &lt : &lh, en + eo[ncl[q]], X, D));
+							if (now > cur)
+							{
+								cur = now;
+								moved = 1;
+							}
+							else
+								D[3 * (size_t)g + dir / 2] = keep;
+						}
+					}
+					if (vcu_sampled(&B, e, en + eo[c], X, D) >= minj && vcu_ratio(&B, e, en + eo[c], X, D, work, minj) >= minj)
+					{
+						rep.untangled++;
+						break;
+					}
+					if (!moved)
+						step *= 0.5;
+				}
+			}
+			qaws_internal_free(nc0);
+			qaws_internal_free(ncl);
+			qaws_internal_free(fill2);
+		}
 
 		/* the Jacobians: failing elements' displacements halved, then straight */
 		for (k = 0; k <= VCU_ROUNDS; k++)

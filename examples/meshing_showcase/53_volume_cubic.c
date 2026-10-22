@@ -4,9 +4,9 @@
  * half, each border face drawn finely from its nodes:
  *   - straight;
  *   - triquadratic (27 nodes a cell), the border on the sphere;
- *   - tricubic (64 nodes a cell), the border closer still (min_jacobian
- *     0.05: the corner cells' Jacobians reach 0.085 of the straight ones',
- *     valid, under the default 0.1).
+ *   - tricubic (64 nodes a cell), the border closer still (the corner cells,
+ *     at 0.085 of their straight Jacobians, untangled over 0.1 by moving
+ *     their inside nodes, the border kept).
  * Printed: how far the drawn border strays from the unit sphere.
  */
 
@@ -170,12 +170,7 @@ static void demo_volume_cubic(void)
 		pd = (double*)malloc(sizeof(double) * 3 * nn);
 		memset(&r, 0, sizeof r);
 		if (p == 3)
-		{
-			qaws_volume_curve_desc cd;
-			memset(&cd, 0, sizeof cd);
-			cd.min_jacobian = (qaws_scalar)0.05;
-			qaws_volume_mesh_cubic_nodes(pos, en, &r, b, ref, &cd);
-		}
+			qaws_volume_mesh_cubic_nodes(pos, en, &r, b, ref, NULL);
 		else
 			qaws_volume_mesh_quadratic_nodes(pos, en, &r, b, k ? ref : NULL, NULL);
 		for (i = 0; i < 3 * nn; i++) pd[i] = (double)pos[i];
@@ -184,7 +179,7 @@ static void demo_volume_cubic(void)
 		sprintf(sub, "off the sphere %.4f", off);
 		er_text(c, 450 * (int)k + 14, 12, titles[k], 3, 30, 30, 30);
 		er_text(c, 450 * (int)k + 14, 46, sub, 2, 95, 95, 95);
-		printf("  %s: %s, Jacobian >= %.2f, %u relaxed\n", titles[k], sub, (double)r.min_jacobian, r.relaxed);
+		printf("  %s: %s, Jacobian >= %.2f, %u untangled, %u relaxed\n", titles[k], sub, (double)r.min_jacobian, r.untangled, r.relaxed);
 		free(pos);
 		free(en);
 		free(pd);

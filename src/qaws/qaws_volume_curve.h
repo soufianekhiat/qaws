@@ -61,7 +61,12 @@
  * (Jacobi averaging over the elements' nodes, the vertices' displacement
  * zero: it fades inward); then the faces inside the mesh take their edges'
  * Coons blend and a hexahedron's own nodes its boundary's (Gordon and Hall's
- * transfinite blend), so they follow the border's curving. Then each element's
+ * transfinite blend), so they follow the border's curving. An element whose
+ * Jacobian bound is then under min_jacobian is untangled first: its free
+ * nodes (inside the mesh) moved by pattern search, a step along an axis kept
+ * when it raises the least sampled Jacobian of the elements sharing the
+ * node, the step halved when none does, until its bound passes; the border
+ * left where it is. Then each element's
  * Jacobian is checked relative to the straight element's: a tetrahedron's
  * bounded from below over the whole element (its determinant, cubic, in the
  * Bernstein basis: the least of its 20 coefficients; Johnen, Remacle,
@@ -91,6 +96,7 @@ typedef struct qaws_volume_curve_report
 	qaws_scalar min_jacobian;           /* the smallest Jacobian (a lower bound), relative to the straight elements' */
 	qaws_scalar max_sagitta;            /* the border nodes' largest distance to the reference, straight */
 	qaws_scalar max_distance;           /* and placed (0 unless relaxed) */
+	unsigned int untangled;             /* elements brought over min_jacobian by moving their free nodes alone */
 } qaws_volume_curve_report;
 
 /* The counts to allocate: nodes, and the elements' node lists' total

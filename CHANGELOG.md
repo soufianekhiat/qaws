@@ -59,6 +59,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Untangling curved volume elements: an element under the Jacobian bound has its
+  inside nodes moved by pattern search before any relaxing, the border kept
+  (the report's `untangled`). Test 174, figure 53.
 - Cubic volume elements (`qaws_volume_mesh_cubic_nodes`): P3 tetrahedra and tricubic
   hexahedra, the border on a reference at equal arc lengths, the inside by
   transfinite blends, the Jacobians certified. Quadratic elements now place
