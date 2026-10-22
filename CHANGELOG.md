@@ -59,6 +59,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Watertight surfaces from points without normals (`normals` NULL): estimated by
+  PCA and oriented along a minimum spanning tree (Hoppe et al. 1992). Test 161,
+  figure 48.
 - Untangling curved volume elements: an element under the Jacobian bound has its
   inside nodes moved by pattern search before any relaxing, the border kept
   (the report's `untangled`). Test 174, figure 53.

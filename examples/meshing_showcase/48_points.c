@@ -5,14 +5,16 @@
  *   - the points: figure 40's ring smoothed (its vertices and normals);
  *   - the surface from them;
  *   - the same points shaken and their normals tilted: still closed;
- *   - a cube sampled on its faces: its edges and corners kept sharp.
+ *   - a cube sampled on its faces: its edges and corners kept sharp;
+ *   - the shaken points without normals: estimated from their neighbours
+ *     and oriented along a spanning tree.
  */
 
 static void demo_points(void)
 {
 	static double const wire[3] = { 90, 95, 110 }, rose[3] = { 225, 180, 180 }, green[3] = { 150, 200, 160 }, blue[3] = { 140, 170, 220 };
-	er_canvas* c = er_create(1800, 640, 3, 252, 252, 250);
-	qaws_mesh_3d *cage = ms_sd_cage(0), *ring = NULL, *r1 = NULL, *r2 = NULL, *cb = NULL;
+	er_canvas* c = er_create(2250, 640, 3, 252, 252, 250);
+	qaws_mesh_3d *cage = ms_sd_cage(0), *ring = NULL, *r1 = NULL, *r2 = NULL, *cb = NULL, *r3 = NULL;
 	qaws_mesh_subdivide_desc sd;
 	qaws_watertight_desc wd;
 	qaws_watertight_report rep;
@@ -67,10 +69,18 @@ static void demo_points(void)
 	}
 	if (qaws_mesh_make_watertight_points(&r2, &rep, x2, n2, n, &wd) == QAWS_STATUS_OK && r2)
 	{
-		sprintf(sub, "shaken 0.03, normals tilted: closed %d", rep.closed);
+		sprintf(sub, "shaken, normals tilted: closed %d", rep.closed);
 		ms_panel(c, 900, 0, 450, 640, r2, yaw, pitch, "noisy points", sub);
 		ms_draw(c, r2, green, NULL, 1, NULL, 0);
 		printf("  noisy: %s\n", sub);
+	}
+	wd.resolution = 64;
+	if (qaws_mesh_make_watertight_points(&r3, &rep, x2, NULL, n, &wd) == QAWS_STATUS_OK && r3)
+	{
+		sprintf(sub, "shaken, normals estimated: closed %d", rep.closed);
+		ms_panel(c, 1800, 0, 450, 640, r3, yaw, pitch, "no normals", sub);
+		ms_draw(c, r3, rose, NULL, 1, NULL, 0);
+		printf("  no normals: %s\n", sub);
 	}
 	{
 		/* a cube sampled on its faces */
@@ -108,6 +118,7 @@ static void demo_points(void)
 	qaws_mesh_3d_destroy(r1);
 	qaws_mesh_3d_destroy(r2);
 	qaws_mesh_3d_destroy(cb);
+	qaws_mesh_3d_destroy(r3);
 	er_save(c, "showcase/mesh48_points.png");
 	printf("mesh48_points.png\n");
 	er_destroy(c);

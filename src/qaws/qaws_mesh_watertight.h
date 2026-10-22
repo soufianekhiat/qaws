@@ -89,7 +89,12 @@ qaws_status qaws_mesh_make_watertight(qaws_mesh_3d** out_mesh, qaws_watertight_r
    read. INVALID_ARGUMENT for fewer than 4 points, a value not finite;
    INVALID_TOPOLOGY for normals turned inward (sum of area n . (p - centre),
    three times the volume, not positive) or when nothing comes out inside.
-   The report's holes_filled is 0, evaluated the grid's points. */
+   The report's holes_filled is 0, evaluated the grid's points. normals NULL:
+   estimated (Hoppe et al. 1992), each point's the direction its 10
+   neighbours spread least along, oriented along a minimum spanning tree of
+   the neighbour graph (weights 1 - |n_i . n_j|) from each connected part's
+   highest point facing up, all turned when they bound a negative volume (a
+   cavity's part is oriented as an outer one). */
 qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out_mesh, qaws_watertight_report* report, qaws_scalar const* positions,
 	qaws_scalar const* normals, unsigned int count, qaws_watertight_desc const* desc);
 

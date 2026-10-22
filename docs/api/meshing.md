@@ -931,8 +931,9 @@ Figure 25 (key p) shows the holed sphere and its watertight surface, the crossin
 - **Crossings:** contoured as above, found by regula falsi on the winding number.
 - **Normals:** each crossing takes the nearest point's normal, since near the samples the winding number's own gradient is noise. The nearest one, not a mean, keeps sampled edges sharp.
 - **Refusals:** inward normals (the divergence sum is not positive) are refused.
+- **Without normals** (`normals` NULL): they are estimated as Hoppe et al. (1992) do. Each point's normal is the direction its 10 neighbours spread least along (the smallest eigenvector of their covariance). The normals are oriented along a minimum spanning tree of the neighbour graph weighted 1 − |nᵢ·nⱼ|, each connected part from its highest point facing up, and all turned when they bound a negative volume. A part inside another (a cavity) is oriented as an outer one.
 
-Test 161: a sphere's 2,000 Fibonacci points give a closed surface with radii 0.9997 to 1.0050 and volume 4.204 (against 4.189); a cube's 2,400 face samples give volume 1.0007 with sharp edges. Figure 48 (key M) shows the ring of figure 40 rebuilt from its points, noisy points still closed, and a cube rebuilt from its points.
+Test 161: a sphere's 2,000 Fibonacci points give a closed surface with radii 0.9997 to 1.0050 and volume 4.204 (against 4.189); a cube's 2,400 face samples give volume 1.0007 with sharp edges. Without normals the same clouds give the sphere's volume exactly, the cube's within 0.5% (1.0059) and a torus's within 0.04% (2.4501 against 2.4510), all closed. Figure 48 (key M) shows the ring of figure 40 rebuilt from its points, noisy points still closed, a cube rebuilt from its points, and the noisy points rebuilt without normals.
 
 ## Self-intersections resolved
 

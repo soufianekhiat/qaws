@@ -380,6 +380,78 @@ static void test_points(void)
 	free(cn);
 }
 
+/* the same clouds without normals (estimated, oriented): a sphere, a cube's faces, a torus (R 1, r 0.35); each surface
+   closed, its volume the one with the true normals' */
+static void test_points_unoriented(void)
+{
+	unsigned int n = 2000, nt = 0, nc = 0, i, j, k;
+	qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n), *nr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	qaws_scalar *tx = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 80 * 24), *tn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 80 * 24);
+	qaws_scalar *cx = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 6 * 400), *cn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * 6 * 400);
+	qaws_watertight_desc d;
+	double v[3][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 } };
+	int closed = 1;
+	char msg[400];
+	for (i = 0; i < n; i++)
+	{
+		double zz = 1 - 2 * (i + 0.5) / n, r = sqrt(1 - zz * zz), ph = 2.399963229728653 * i;
+		x[3 * i] = nr[3 * i] = (qaws_scalar)(r * cos(ph));
+		x[3 * i + 1] = nr[3 * i + 1] = (qaws_scalar)(r * sin(ph));
+		x[3 * i + 2] = nr[3 * i + 2] = (qaws_scalar)zz;
+	}
+	for (i = 0; i < 80; i++)
+		for (j = 0; j < 24; j++, nt++)
+		{
+			double u = 6.283185307179586 * (i + 0.5 * (j & 1)) / 80, w = 6.283185307179586 * j / 24;
+			tn[3 * nt] = (qaws_scalar)(cos(w) * cos(u));
+			tn[3 * nt + 1] = (qaws_scalar)(cos(w) * sin(u));
+			tn[3 * nt + 2] = (qaws_scalar)sin(w);
+			tx[3 * nt] = (qaws_scalar)((1 + 0.35 * cos(w)) * cos(u));
+			tx[3 * nt + 1] = (qaws_scalar)((1 + 0.35 * cos(w)) * sin(u));
+			tx[3 * nt + 2] = (qaws_scalar)(0.35 * sin(w));
+		}
+	for (k = 0; k < 6; k++)
+	{
+		unsigned int a = k / 2, u = (a + 1) % 3, w = (a + 2) % 3;
+		double sg = k % 2 ? 0.5 : -0.5;
+		for (i = 0; i < 20; i++)
+			for (j = 0; j < 20; j++, nc++)
+			{
+				cx[3 * nc + a] = (qaws_scalar)sg;
+				cx[3 * nc + u] = (qaws_scalar)((i + 0.5) / 20 - 0.5);
+				cx[3 * nc + w] = (qaws_scalar)((j + 0.5) / 20 - 0.5);
+				cn[3 * nc] = cn[3 * nc + 1] = cn[3 * nc + 2] = 0;
+				cn[3 * nc + a] = (qaws_scalar)(sg > 0 ? 1 : -1);
+			}
+	}
+	memset(&d, 0, sizeof d);
+	d.resolution = 32;
+	for (k = 0; k < 3; k++)
+		for (j = 0; j < 2; j++)
+		{
+			qaws_mesh_3d* m = NULL;
+			qaws_watertight_report r;
+			qaws_scalar const* px = k == 0 ? x : k == 1 ? cx : tx;
+			qaws_scalar const* pn = j ? NULL : (k == 0 ? nr : k == 1 ? cn : tn);
+			memset(&r, 0, sizeof r);
+			if (qaws_mesh_make_watertight_points(&m, &r, px, pn, k == 0 ? n : k == 1 ? nc : nt, &d) == QAWS_STATUS_OK && m)
+				v[k][j] = wt_points_volume(m);
+			closed &= m && r.closed;
+			qaws_mesh_3d_destroy(m);
+		}
+	sprintf(msg, "point clouds without normals: volumes against the true normals' a sphere %.4f / %.4f, a cube %.4f / %.4f, a torus %.4f / %.4f; closed %d",
+		v[0][1], v[0][0], v[1][1], v[1][0], v[2][1], v[2][0], closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(closed && fabs(v[0][1] - v[0][0]) < 0.01 * v[0][0] && fabs(v[1][1] - v[1][0]) < 0.01 * v[1][0] && fabs(v[2][1] - v[2][0]) < 0.01 * v[2][0] &&
+		v[2][0] > 0.5, msg);
+	free(x);
+	free(nr);
+	free(tx);
+	free(tn);
+	free(cx);
+	free(cn);
+}
+
 int test_161_watertight_main(void)
 {
 	g_pass = 0;
@@ -389,6 +461,7 @@ int test_161_watertight_main(void)
 	test_union();
 	test_sheet();
 	test_points();
+	test_points_unoriented();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

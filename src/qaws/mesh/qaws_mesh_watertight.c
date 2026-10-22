@@ -723,9 +723,180 @@ static int wtp_dcmp(void const* p, void const* q)
 	return a < b ? -1 : a > b ? 1 : 0;
 }
 
+typedef struct wtp_edge
+{
+	double w;
+	unsigned int a, b;
+} wtp_edge;
+
+typedef struct wtp_zi
+{
+	double z;
+	unsigned int i;
+} wtp_zi;
+
+static int wtp_zi_cmp(void const* p, void const* q)
+{
+	wtp_zi const *a = (wtp_zi const*)p, *b = (wtp_zi const*)q;
+	return a->z > b->z ? -1 : (a->z < b->z ? 1 : (a->i < b->i ? -1 : (a->i > b->i)));
+}
+
+/* the cheapest edge first: a binary heap of edges by weight; 0 on allocation failure */
+static int wtp_heap_push(wtp_edge** H, unsigned int* n, unsigned int* cap, double w, unsigned int a, unsigned int b)
+{
+	unsigned int i;
+	if (*n == *cap)
+	{
+		unsigned int c2 = *cap ? 2 * *cap : 1024;
+		wtp_edge* g = (wtp_edge*)qaws_internal_realloc(*H, sizeof(wtp_edge) * (size_t)c2);
+		if (!g)
+			return 0;
+		*H = g;
+		*cap = c2;
+	}
+	for (i = (*n)++; i && (*H)[(i - 1) / 2].w > w; i = (i - 1) / 2)
+		(*H)[i] = (*H)[(i - 1) / 2];
+	(*H)[i].w = w;
+	(*H)[i].a = a;
+	(*H)[i].b = b;
+	return 1;
+}
+
+static wtp_edge wtp_heap_pop(wtp_edge* H, unsigned int* n)
+{
+	wtp_edge top = H[0], last = H[--*n];
+	unsigned int i = 0;
+	for (;;)
+	{
+		unsigned int c = 2 * i + 1;
+		if (c >= *n)
+			break;
+		if (c + 1 < *n && H[c + 1].w < H[c].w)
+			c++;
+		if (H[c].w >= last.w)
+			break;
+		H[i] = H[c];
+		i = c;
+	}
+	if (*n)
+		H[i] = last;
+	return top;
+}
+
+/* normals for points without them (Hoppe et al. 1992): each the direction its K neighbours spread least along (the
+   smallest eigenvector of their covariance), then oriented along a minimum spanning tree of the neighbour graph weighted
+   1 - |n_i . n_j| (agreeing with the parent across each edge), each connected part from its highest point facing up
+   (shortcut: a part inside another, a cavity, is oriented as an outer one). 0 on allocation failure */
+static int wtp_estimate_normals(qaws_scalar* out, qaws_scalar const* P, unsigned int n, unsigned int const* nbr)
+{
+	unsigned int *cnt = (unsigned int*)qaws_internal_scratch_zalloc((size_t)n + 2, sizeof(unsigned int)), *adj = NULL, *fill = NULL, nh = 0, caph = 0, i, s, k, q;
+	unsigned char* done = (unsigned char*)qaws_internal_scratch_zalloc((size_t)n + 1, 1);
+	wtp_zi* ord = (wtp_zi*)qaws_internal_scratch_malloc(sizeof(wtp_zi) * ((size_t)n + 1));
+	double* N = (double*)qaws_internal_scratch_malloc(sizeof(double) * (3 * (size_t)n + 1));
+	wtp_edge* H = NULL;
+	int ok = 0;
+	if (!cnt || !done || !ord || !N)
+		goto done;
+	for (i = 0; i < n; i++)
+	{
+		double m[3] = { 0, 0, 0 }, C[9], V[9];
+		unsigned int best = 0;
+		for (s = 0; s <= WTP_K; s++)
+		{
+			unsigned int j = s ? nbr[(size_t)i * WTP_K + s - 1] : i;
+			for (k = 0; k < 3; k++) m[k] += (double)P[3 * (size_t)j + k] / (WTP_K + 1);
+		}
+		for (k = 0; k < 9; k++) C[k] = 0;
+		for (s = 0; s <= WTP_K; s++)
+		{
+			unsigned int j = s ? nbr[(size_t)i * WTP_K + s - 1] : i, a, b;
+			for (a = 0; a < 3; a++)
+				for (b = 0; b < 3; b++) C[3 * a + b] += ((double)P[3 * (size_t)j + a] - m[a]) * ((double)P[3 * (size_t)j + b] - m[b]);
+		}
+		wt_sym_eigen3(C, V);
+		for (k = 1; k < 3; k++)
+			if (C[4 * k] < C[4 * best])
+				best = k;
+		for (k = 0; k < 3; k++) N[3 * (size_t)i + k] = V[3 * k + best];
+		ord[i].z = (double)P[3 * (size_t)i + 2];
+		ord[i].i = i;
+	}
+	/* the neighbour graph, both ways */
+	for (i = 0; i < n; i++)
+		for (s = 0; s < WTP_K; s++)
+			if (nbr[(size_t)i * WTP_K + s] != i)
+			{
+				cnt[i + 1]++;
+				cnt[nbr[(size_t)i * WTP_K + s] + 1]++;
+			}
+	for (i = 0; i < n; i++) cnt[i + 1] += cnt[i];
+	adj = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)cnt[n] + 1));
+	fill = (unsigned int*)qaws_internal_scratch_zalloc((size_t)n + 1, sizeof(unsigned int));
+	if (!adj || !fill)
+		goto done;
+	for (i = 0; i < n; i++)
+		for (s = 0; s < WTP_K; s++)
+		{
+			unsigned int j = nbr[(size_t)i * WTP_K + s];
+			if (j == i)
+				continue;
+			adj[cnt[i] + fill[i]++] = j;
+			adj[cnt[j] + fill[j]++] = i;
+		}
+	/* Prim's tree from each part's highest point */
+	qsort(ord, n, sizeof(wtp_zi), wtp_zi_cmp);
+	for (q = 0; q < n; q++)
+	{
+		unsigned int seed = ord[q].i;
+		if (done[seed])
+			continue;
+		if (N[3 * (size_t)seed + 2] < 0)
+			for (k = 0; k < 3; k++) N[3 * (size_t)seed + k] = -N[3 * (size_t)seed + k];
+		done[seed] = 1;
+		for (s = cnt[seed]; s < cnt[seed + 1]; s++)
+		{
+			unsigned int j = adj[s];
+			double d = N[3 * (size_t)seed] * N[3 * (size_t)j] + N[3 * (size_t)seed + 1] * N[3 * (size_t)j + 1] + N[3 * (size_t)seed + 2] * N[3 * (size_t)j + 2];
+			if (!done[j] && !wtp_heap_push(&H, &nh, &caph, 1 - fabs(d), seed, j))
+				goto done;
+		}
+		while (nh)
+		{
+			wtp_edge e = wtp_heap_pop(H, &nh);
+			double d;
+			if (done[e.b])
+				continue;
+			d = N[3 * (size_t)e.a] * N[3 * (size_t)e.b] + N[3 * (size_t)e.a + 1] * N[3 * (size_t)e.b + 1] + N[3 * (size_t)e.a + 2] * N[3 * (size_t)e.b + 2];
+			if (d < 0)
+				for (k = 0; k < 3; k++) N[3 * (size_t)e.b + k] = -N[3 * (size_t)e.b + k];
+			done[e.b] = 1;
+			for (s = cnt[e.b]; s < cnt[e.b + 1]; s++)
+			{
+				unsigned int j = adj[s];
+				double dj = N[3 * (size_t)e.b] * N[3 * (size_t)j] + N[3 * (size_t)e.b + 1] * N[3 * (size_t)j + 1] + N[3 * (size_t)e.b + 2] * N[3 * (size_t)j + 2];
+				if (!done[j] && !wtp_heap_push(&H, &nh, &caph, 1 - fabs(dj), e.b, j))
+					goto done;
+			}
+		}
+	}
+	for (i = 0; i < 3 * n; i++) out[i] = (qaws_scalar)N[i];
+	ok = 1;
+done:
+	qaws_internal_free(cnt);
+	qaws_internal_free(adj);
+	qaws_internal_free(fill);
+	qaws_internal_free(done);
+	qaws_internal_free(ord);
+	qaws_internal_free(N);
+	qaws_internal_free(H);
+	return ok;
+}
+
 qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight_report* report, qaws_scalar const* positions,
 	qaws_scalar const* normals, unsigned int count, qaws_watertight_desc const* desc)
 {
+	qaws_scalar* est = NULL;
+	unsigned int* nbr = NULL;
 	qaws_watertight_report local;
 	wtp_field f;
 	wt_contour_info ci;
@@ -741,10 +912,10 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 	if (!out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
-	if (!positions || !normals || count < 4 || (desc && desc->offset != 0))
+	if (!positions || count < 4 || (desc && desc->offset != 0))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < 3 * count; i++)
-		if (!isfinite((double)positions[i]) || !isfinite((double)normals[i]))
+		if (!isfinite((double)positions[i]) || (normals && !isfinite((double)normals[i])))
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&f, 0, sizeof f);
 	for (i = 0; i < count; i++)
@@ -765,7 +936,9 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 	cellp = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)count + 1));
 	tri = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (3 * (size_t)count + 1));
 	tx = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (9 * (size_t)count + 1));
-	if (!area || !d2 || !cell0 || !cellp || !tri || !tx)
+	if (!normals)
+		nbr = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)count * WTP_K + 1));
+	if (!area || !d2 || !cell0 || !cellp || !tri || !tx || (!normals && !nbr))
 		goto done;
 	{
 		size_t nc = (size_t)g[0] * g[1] * g[2], cc;
@@ -793,7 +966,7 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 	{
 		/* rings of cells round the point until K neighbours are found and the ring's distance passes the K-th */
 		double best[WTP_K];
-		unsigned int nb = 0, ring, c3[3];
+		unsigned int nb = 0, ring, c3[3], bi[WTP_K];
 		double pp[3];
 		for (k = 0; k < 3; k++)
 		{
@@ -822,7 +995,10 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 								continue;
 							for (k = 0; k < 3; k++) dd += ((double)positions[3 * (size_t)o + k] - pp[k]) * ((double)positions[3 * (size_t)o + k] - pp[k]);
 							if (nb < WTP_K)
+							{
+								bi[nb] = o;
 								best[nb++] = dd;
+							}
 							else
 							{
 								double worst = best[0];
@@ -830,7 +1006,10 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 								for (s = 1; s < WTP_K; s++)
 									if (best[s] > worst) { worst = best[s]; wi = s; }
 								if (dd < worst)
+								{
 									best[wi] = dd;
+									bi[wi] = o;
+								}
 							}
 						}
 					}
@@ -849,6 +1028,7 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 			for (s = 0; s < nb; s++) worst = fmax(worst, best[s]);
 			d2[i] = worst;
 			area[i] = nb ? 3.14159265358979323846 * worst / nb : 0;
+			for (s = 0; nbr && s < WTP_K; s++) nbr[(size_t)i * WTP_K + s] = s < nb ? bi[s] : i;
 		}
 	}
 	/* the spacing: the median K-th distance */
@@ -861,8 +1041,16 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 		spacing = sqrt(tmp[count / 2] / WTP_K) * 1.7724538509;   /* (sqrt pi r^2 / K: a point's share of the surface, its side) */
 		qaws_internal_free(tmp);
 	}
+	if (!normals)
 	{
-		/* outward normals: sum a n . (p - centre) is three times the volume they bound (the divergence theorem), positive */
+		est = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)count + 1));
+		if (!est || !wtp_estimate_normals(est, positions, count, nbr))
+			goto done;
+		normals = est;
+	}
+	{
+		/* outward normals: sum a n . (p - centre) is three times the volume they bound (the divergence theorem), positive
+		   (estimated ones turned all over when not) */
 		double cen[3] = { 0, 0, 0 }, s = 0;
 		for (i = 0; i < count; i++)
 			for (k = 0; k < 3; k++) cen[k] += (double)positions[3 * (size_t)i + k] / count;
@@ -876,7 +1064,9 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 			}
 			s += l > 0 ? area[i] * dp / sqrt(l) : 0;
 		}
-		if (!(s > 0))
+		if (!(s > 0) && est)
+			for (i = 0; i < 3 * count; i++) est[i] = -est[i];
+		else if (!(s > 0))
 		{
 			st = QAWS_STATUS_INVALID_TOPOLOGY;
 			goto done;
@@ -953,5 +1143,7 @@ done:
 	qaws_mesh_bvh_destroy(f.b);
 	qaws_internal_free(area); qaws_internal_free(d2); qaws_internal_free(cell0); qaws_internal_free(cellp); qaws_internal_free(tri); qaws_internal_free(tx);
 	qaws_internal_free(dn);
+	qaws_internal_free(est);
+	qaws_internal_free(nbr);
 	return st;
 }
