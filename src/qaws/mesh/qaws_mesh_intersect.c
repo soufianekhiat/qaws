@@ -3272,9 +3272,10 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 			goto oom;
 		for (i = 0; i < 6 * npatch; i++)
 			mid[i] = (double)pts[i];
-		if (work <= 3.2e7)
+		if (work <= 2e6)
 		{
-			/* few patches: the solid angles summed over the triangles, no BVH built */
+			/* few patches: the solid angles summed over the triangles, no BVH built (past about 2e6 solid angles the BVH's
+			   queries are cheaper: a rounded cube's 2,330 patches 250 ms to 80) */
 			st = sx_fan(a, &ta, &nta);
 			if (st == QAWS_STATUS_OK)
 				st = sx_direct_winding(wa, NULL, a->positions, ta, nta, mid, 2 * npatch, 0, ex);

@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `executor` in `qaws_mesh_offset_desc` (the distance queries and the Booleans on the caller's threads); mesh Booleans
+  sample their patches through a BVH past 2e6 solid angles (a rounded cube's offset 25% faster on one thread).
 - Contoured offsets and watertight surfaces in less memory: dual contouring stores the crossed cells only, the grid
   only its values and sides (about 10 bytes a point from 142; a 64-cell offset 51.5 MB to 25 MB, the same surfaces).
 - Memoryless decimation: Lindstrom and Turk's border constraint (the border chain's area vector kept): a planar region's

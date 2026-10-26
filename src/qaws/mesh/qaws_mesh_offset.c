@@ -25,6 +25,7 @@ typedef struct ofs_field
 	double const* P;               /* the input's positions */
 	int sgn;                       /* signed distance (SURFACE, SHELL) or unsigned (THICKEN) */
 	double level;                  /* phi = distance - level */
+	qaws_batch_executor const* ex; /* the queries and the Booleans through it; NULL: this thread */
 } ofs_field;
 
 /* phi at n points (3 each) and, if grad, its unit gradient (3 each), in chunks */
@@ -46,7 +47,7 @@ static qaws_status ofs_eval(ofs_field const* f, double const* x, size_t n, doubl
 	{
 		unsigned int m = (unsigned int)(n - c0 < OFS_CHUNK ? n - c0 : OFS_CHUNK);
 		for (i = 0; i < 3 * (size_t)m; i++) xs[i] = (qaws_scalar)x[3 * c0 + i];
-		st = f->sgn ? qaws_mesh_bvh_signed_distance(dist, hits, f->b, xs, m, NULL) : qaws_mesh_bvh_closest(hits, f->b, xs, m, 0, NULL);
+		st = f->sgn ? qaws_mesh_bvh_signed_distance(dist, hits, f->b, xs, m, f->ex) : qaws_mesh_bvh_closest(hits, f->b, xs, m, 0, f->ex);
 		for (i = 0; st == QAWS_STATUS_OK && i < m; i++)
 		{
 			double d = f->sgn ? (double)dist[i] : (double)hits[i].distance, g[3], l = 0;
@@ -1129,7 +1130,7 @@ done:
 /* ROUND: SURFACE outward the input united with the pieces at d, inward the input less the pieces at |d|; SHELL the input
    meeting the pieces at |d|; THICKEN the pieces at |d| / 2 alone. The pieces' circles split every step at most */
 static qaws_status ofs_round(qaws_mesh_3d** out, qaws_boolean_report* br, double const* P, qaws_scalar const* ps, unsigned int nv,
-	unsigned int const* t, unsigned int nt, qaws_mesh_offset_kind kind, double d, double step)
+	unsigned int const* t, unsigned int nt, qaws_mesh_offset_kind kind, double d, double step, qaws_intersect_desc const* id)
 {
 	ofs_soup s;
 	unsigned int i;
@@ -1155,9 +1156,9 @@ static qaws_status ofs_round(qaws_mesh_3d** out, qaws_boolean_report* br, double
 	b.face_vertices = s.t;
 	b.face_count = s.nt;
 	if (kind == QAWS_MESH_OFFSET_THICKEN)
-		st = qaws_mesh_boolean(out, br, &b, NULL, QAWS_BOOLEAN_UNION, NULL);
+		st = qaws_mesh_boolean(out, br, &b, NULL, QAWS_BOOLEAN_UNION, id);
 	else
-		st = qaws_mesh_boolean(out, br, &a, &b, kind == QAWS_MESH_OFFSET_SHELL ? QAWS_BOOLEAN_INTERSECTION : d > 0 ? QAWS_BOOLEAN_UNION : QAWS_BOOLEAN_DIFFERENCE, NULL);
+		st = qaws_mesh_boolean(out, br, &a, &b, kind == QAWS_MESH_OFFSET_SHELL ? QAWS_BOOLEAN_INTERSECTION : d > 0 ? QAWS_BOOLEAN_UNION : QAWS_BOOLEAN_DIFFERENCE, id);
 done:
 	qaws_internal_free(s.x);
 	qaws_internal_free(s.t);
@@ -1201,6 +1202,7 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 {
 	qaws_mesh_offset_report local;
 	ofs_field f;
+	qaws_intersect_desc idesc;
 	unsigned int nv, nt, i, k;
 	double d, lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL };
 	double *P = NULL, *m = NULL, *Y = NULL;
@@ -1244,6 +1246,9 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 		goto done;
 	f.P = P;
 	f.sgn = desc->kind != QAWS_MESH_OFFSET_THICKEN;
+	f.ex = desc->executor;
+	memset(&idesc, 0, sizeof idesc);
+	idesc.executor = desc->executor;
 	if (desc->method == QAWS_MESH_OFFSET_CONTOUR)
 	{
 		unsigned int res = desc->resolution ? desc->resolution : 64;
@@ -1279,7 +1284,7 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 		qaws_boolean_report br;
 		memset(&br, 0, sizeof br);
 		st = ofs_round(&c, &br, P, ps, nv, t, nt, desc->kind == QAWS_MESH_OFFSET_THICKEN ? QAWS_MESH_OFFSET_THICKEN : QAWS_MESH_OFFSET_SURFACE,
-			desc->kind == QAWS_MESH_OFFSET_SHELL ? -fabs(d) : d, desc->round_angle > 0 ? (double)desc->round_angle : 3.14159265358979323846 / 8);
+			desc->kind == QAWS_MESH_OFFSET_SHELL ? -fabs(d) : d, desc->round_angle > 0 ? (double)desc->round_angle : 3.14159265358979323846 / 8, &idesc);
 		report->intersect = br.intersect;
 		report->closed = br.closed;
 		if (st == QAWS_STATUS_OK && c)
@@ -1351,7 +1356,7 @@ qaws_status qaws_mesh_3d_offset(qaws_mesh_3d** out, qaws_mesh_offset_report* rep
 		md.face_vertices = T;
 		md.face_count = nf;
 		memset(&br, 0, sizeof br);
-		st = qaws_mesh_boolean(out, &br, &md, NULL, QAWS_BOOLEAN_UNION, NULL);
+		st = qaws_mesh_boolean(out, &br, &md, NULL, QAWS_BOOLEAN_UNION, &idesc);
 		report->intersect = br.intersect;
 		report->closed = br.closed;
 	}

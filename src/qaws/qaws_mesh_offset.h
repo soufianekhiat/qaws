@@ -110,6 +110,7 @@ typedef struct qaws_mesh_offset_desc
 	unsigned int resolution;            /* CONTOUR: cells along the result's box's longest side; 0: 64 */
 	qaws_scalar const* distances;       /* MOVE: per input vertex its own distance (signed for SURFACE, its size for SHELL and THICKEN); NULL: distance everywhere */
 	qaws_scalar round_angle;            /* ROUND: the arcs' largest step, radians, 0.01 to 1.6; 0: pi / 8 */
+	qaws_batch_executor const* executor;   /* the distance queries and the Booleans' pair tests and samples through it; NULL: this thread */
 } qaws_mesh_offset_desc;
 
 typedef struct qaws_mesh_offset_report
