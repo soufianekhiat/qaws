@@ -80,21 +80,116 @@ static int swp_rail_cmp(void const* p, void const* q)
 	return x < y ? -1 : x > y;
 }
 
-/* the convex hull of face tv's two positions (its vertices at layers oa and ob of positions x), when a corner moves out of
+/* a triangle edge's record: its vertices (smaller first), its triangle and corner */
+typedef struct swp_erec
+{
+	unsigned int a, b, t, c;
+} swp_erec;
+
+static int swp_erec_cmp(void const* p, void const* q)
+{
+	swp_erec const *x = (swp_erec const*)p, *y = (swp_erec const*)q;
+	if (x->a != y->a)
+		return x->a < y->a ? -1 : 1;
+	if (x->b != y->b)
+		return x->b < y->b ? -1 : 1;
+	return x->t < y->t ? -1 : x->t > y->t;
+}
+
+/* the triangles t (nt) as flat faces: each paired with a neighbour across an edge in its plane (positions x, the plane
+   within eps) into a quad, else alone; per face its vertices gv (4 each, in turn), their corners gc, its size gs; per
+   triangle its face tg. The face count (0: out of memory) */
+static unsigned int swp_flat_faces(unsigned int* gv, unsigned int* gc, unsigned int* gs, unsigned int* tg, unsigned int const* t, unsigned int nt,
+	qaws_scalar const* x, double eps)
+{
+	swp_erec* e = (swp_erec*)qaws_internal_scratch_malloc(sizeof(swp_erec) * (3 * (size_t)nt + 1));
+	unsigned int i, k, ng = 0;
+	if (!e)
+		return 0;
+	for (i = 0; i < 3 * nt; i++)
+	{
+		unsigned int a = t[i], b = t[3 * (i / 3) + (i % 3 + 1) % 3];
+		e[i].a = a < b ? a : b;
+		e[i].b = a < b ? b : a;
+		e[i].t = i / 3;
+		e[i].c = i;
+	}
+	qsort(e, 3 * (size_t)nt, sizeof(swp_erec), swp_erec_cmp);
+	for (i = 0; i < nt; i++)
+		tg[i] = 0xFFFFFFFFu;
+	for (i = 0; i < 3 * nt; i++)
+	{
+		unsigned int ti, tj, ci, cj, s;
+		double u[3], w[3], n1[3], n2[3], l1, l2, d;
+		if (i + 1 >= 3 * nt || e[i].a != e[i + 1].a || e[i].b != e[i + 1].b || (i + 2 < 3 * nt && e[i + 2].a == e[i].a && e[i + 2].b == e[i].b))
+			continue;
+		ti = e[i].t;
+		tj = e[i + 1].t;
+		ci = e[i].c;
+		cj = e[i + 1].c;
+		if (ti == tj || tg[ti] != 0xFFFFFFFFu || tg[tj] != 0xFFFFFFFFu || t[ci] == t[cj])
+			continue;   /* (the same edge run the same way: not a pair) */
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = (double)x[3 * (size_t)t[3 * ti + 1] + k] - (double)x[3 * (size_t)t[3 * ti] + k];
+			w[k] = (double)x[3 * (size_t)t[3 * ti + 2] + k] - (double)x[3 * (size_t)t[3 * ti] + k];
+		}
+		n1[0] = u[1] * w[2] - u[2] * w[1]; n1[1] = u[2] * w[0] - u[0] * w[2]; n1[2] = u[0] * w[1] - u[1] * w[0];
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = (double)x[3 * (size_t)t[3 * tj + 1] + k] - (double)x[3 * (size_t)t[3 * tj] + k];
+			w[k] = (double)x[3 * (size_t)t[3 * tj + 2] + k] - (double)x[3 * (size_t)t[3 * tj] + k];
+		}
+		n2[0] = u[1] * w[2] - u[2] * w[1]; n2[1] = u[2] * w[0] - u[0] * w[2]; n2[2] = u[0] * w[1] - u[1] * w[0];
+		l1 = sqrt(n1[0] * n1[0] + n1[1] * n1[1] + n1[2] * n1[2]);
+		l2 = sqrt(n2[0] * n2[0] + n2[1] * n2[1] + n2[2] * n2[2]);
+		if (!(l1 > 0) || !(l2 > 0) || (n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]) / (l1 * l2) < 1 - 1e-12)
+			continue;
+		s = t[3 * tj + (cj % 3 + 2) % 3];   /* (tj's third vertex, off the shared edge) */
+		d = 0;
+		for (k = 0; k < 3; k++)
+			d += ((double)x[3 * (size_t)s + k] - (double)x[3 * (size_t)t[3 * ti] + k]) * n1[k] / l1;
+		if (fabs(d) > eps)
+			continue;
+		/* ti runs a -> b (corner ci), tj b -> a then s: the quad a, s, b, ti's third */
+		gv[4 * ng] = t[ci]; gc[4 * ng] = ci;
+		gv[4 * ng + 1] = s; gc[4 * ng + 1] = 3 * tj + (cj % 3 + 2) % 3;
+		gv[4 * ng + 2] = t[3 * ti + (ci % 3 + 1) % 3]; gc[4 * ng + 2] = 3 * ti + (ci % 3 + 1) % 3;
+		gv[4 * ng + 3] = t[3 * ti + (ci % 3 + 2) % 3]; gc[4 * ng + 3] = 3 * ti + (ci % 3 + 2) % 3;
+		gs[ng] = 4;
+		tg[ti] = tg[tj] = ng++;
+	}
+	for (i = 0; i < nt; i++)
+		if (tg[i] == 0xFFFFFFFFu)
+		{
+			for (k = 0; k < 3; k++)
+			{
+				gv[4 * ng + k] = t[3 * i + k];
+				gc[4 * ng + k] = 3 * i + k;
+			}
+			gs[ng] = 3;
+			tg[i] = ng++;
+		}
+	qaws_internal_free(e);
+	return ng;
+}
+
+/* the convex hull of a flat face's two positions (its gn vertices tv, 3 or 4, at layers oa and ob of positions x; tc their
+   corners), when a corner moves out of
    the solid by more than out_min (less is within the tolerance: a face sliding along itself): its triangles (3 soup vertices each) into out, their face flags (f; bit 31 a cap turned against the face, bit 30
-   a side) into of, their corners (the face's) into oc; their count, at most 8 (0: none, or flat). caps: the caps it has (1 the
+   a side) into of, their corners (the face's) into oc; their count, at most 12 (0: none, or flat). caps: the caps it has (1 the
    start's, 2 the end's; 4 and 8 when turned), those in skip left out. Coplanar hull points (a translated face's sides) make one polygon, fanned
    once; eps: the plane distance below which points are on it */
 static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* oc, unsigned int* caps, qaws_scalar const* x, unsigned int const* tv,
-	unsigned int f, unsigned int oa, unsigned int ob, double eps, double out_min, unsigned int skip)
+	unsigned int const* tc, unsigned int gn, unsigned int f, unsigned int oa, unsigned int ob, double eps, double out_min, unsigned int skip)
 {
-	double P[6][3], fn[3], u[3], w[3], fl, smax = 0;
-	unsigned int id[6], cor[6], np = 0, i, j, k, m, n = 0, masks[20], nm = 0;
-	int side[20];
+	double P[8][3], fn[3], u[3], w[3], fl, smax = 0;
+	unsigned int id[8], cor[8], np = 0, i, j, k, m, n = 0, masks[56], nm = 0;
+	int side[56];
 	*caps = 0;
-	for (i = 0; i < 6; i++)
+	for (i = 0; i < 2 * gn; i++)
 	{
-		unsigned int v = (i < 3 ? oa : ob) + tv[i % 3], dup = 0;
+		unsigned int v = (i < gn ? oa : ob) + tv[i % gn], dup = 0;
 		double q[3];
 		for (k = 0; k < 3; k++)
 			q[k] = (double)x[3 * (size_t)v + k];
@@ -104,7 +199,7 @@ static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* 
 			continue;
 		memcpy(P[np], q, sizeof q);
 		id[np] = v;
-		cor[np++] = 3 * f + i % 3;
+		cor[np++] = tc[i % gn];
 	}
 	/* a corner moving out: its displacement against the face's normal at the start */
 	for (k = 0; k < 3; k++)
@@ -116,7 +211,7 @@ static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* 
 	fl = sqrt(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
 	if (!(fl > 0) || np < 4)
 		return 0;
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < gn; i++)
 	{
 		double s = 0;
 		for (k = 0; k < 3; k++)
@@ -165,8 +260,8 @@ static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* 
 				side[nm++] = sd;
 				/* the plane's points in turn round their centroid, seen from outside, fanned */
 				{
-					unsigned int pts[6], c = 0, r, s2;
-					double cen[3] = { 0, 0, 0 }, e1[3], e2[3], on[3], ang[6], el;
+					unsigned int pts[8], c = 0, r, s2;
+					double cen[3] = { 0, 0, 0 }, e1[3], e2[3], on[3], ang[8], el;
 					for (m = 0; m < np; m++)
 						if (mask >> m & 1)
 							pts[c++] = m;
@@ -219,7 +314,7 @@ static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* 
 					}
 					/* (fanned from its lowest soup vertex: two hulls sharing the polygon fan it alike, their triangles cancel exactly) */
 					{
-						unsigned int low = 0, rt[6];
+						unsigned int low = 0, rt[8];
 						for (r = 1; r < c; r++)
 							if (id[pts[r]] < id[pts[low]])
 								low = r;
@@ -227,7 +322,7 @@ static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* 
 							rt[r] = pts[(low + r) % c];
 						memcpy(pts, rt, sizeof(unsigned int) * c);
 					}
-					for (s2 = 1; s2 + 1 < c && n < 8; s2++)
+					for (s2 = 1; s2 + 1 < c && n < 12; s2++)
 					{
 						unsigned int tri[3], lay = 0;
 						double tn;
@@ -734,6 +829,7 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	qaws_scalar *px = NULL, *sx = NULL;
 	unsigned int *sf = NULL, *sof = NULL, *soc = NULL, snv = 0, snf = 0, capv = 0, capf = 0;
 	unsigned char* fr = NULL;
+	unsigned int *gv = NULL, *gc = NULL, *gs = NULL, *tg = NULL, ng = 0;
 	qaws_intersect_desc id;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!report)
@@ -855,9 +951,13 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 		sx = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)capv + 1));
 		sf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)capf + 1));
 		fr = (unsigned char*)qaws_internal_scratch_zalloc(qaws_internal_mul2((size_t)nt, S) + 1, 1);
+		gv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (size_t)nt + 1));
+		gc = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (size_t)nt + 1));
+		gs = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+		tg = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
 		sof = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)capf + 1));
 		soc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)capf + 1));
-		if (!sx || !sf || !fr || !sof || !soc)
+		if (!sx || !sf || !fr || !sof || !soc || !gv || !gc || !gs || !tg)
 			goto oom;
 	}
 	for (ns = 0; ns <= report->slabs; ns++)
@@ -868,21 +968,25 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 		for (i = 0; i < 3 * nv; i++) sx[3 * (size_t)ns * nv + i] = (qaws_scalar)Xa[i];
 	}
 	snv = nv * (report->slabs + 1);
+	/* the flat faces: two triangles sharing an edge in one plane make a quad, hulled as one (the hulls of two halves of one
+	   face would overlap in its plane, and the union resolves coincident pieces less well than none) */
+	if (!(ng = swp_flat_faces(gv, gc, gs, tg, t, nt, sx, 1e-12 * diag)))
+		goto oom;
 	/* each face's caps per slab (fr: 1 start, 2 end), then the soup */
 	for (ns = 0; ns < report->slabs; ns++)
 	{
 		unsigned int f, cp;
-		for (f = 0; f < nt; f++)
+		for (f = 0; f < ng; f++)
 		{
-			swp_hull(sf, sof, soc, &cp, sx, t + 3 * (size_t)f, f, ns * nv, (ns + 1) * nv, 1e-12 * diag, tol, 3);
+			swp_hull(sf, sof, soc, &cp, sx, gv + 4 * (size_t)f, gc + 4 * (size_t)f, gs[f], gc[4 * (size_t)f] / 3, ns * nv, (ns + 1) * nv, 1e-12 * diag, tol, 3);
 			fr[(size_t)ns * nt + f] = (unsigned char)cp;
 		}
 	}
 	snf = 0;
 	for (i = 0; i < nt; i++)
 	{
-		if (report->slabs && (fr[i] & 1) && (fr[i] & 4))
-			continue;   /* (cancelled by its first hull's start, turned) */
+		if (report->slabs && (fr[tg[i]] & 1) && (fr[tg[i]] & 4))
+			continue;   /* (cancelled by its face's first hull's start, turned) */
 		for (k = 0; k < 3; k++)
 		{
 			sf[3 * (size_t)snf + k] = t[3 * (size_t)i + k];
@@ -893,12 +997,13 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	for (ns = 0; ns < report->slabs; ns++)
 	{
 		unsigned int f, cp;
-		for (f = 0; f < nt; f++)
+		for (f = 0; f < ng; f++)
 		{
 			/* a cap left out with the one it meets turned the other way (the solid at 0's face: an end cap not turned) */
 			unsigned char here = fr[(size_t)ns * nt + f], next = ns + 1 < report->slabs ? fr[((size_t)ns + 1) * nt + f] : 0, prev = ns ? fr[((size_t)ns - 1) * nt + f] : 2;
 			unsigned int skip = ((here & 1) && (prev & 2) && !(here & 4) != !(prev & 8) ? 1u : 0u) | ((here & 2) && (next & 1) && !(here & 8) != !(next & 4) ? 2u : 0u), n0;
-			n0 = swp_hull(sf + 3 * (size_t)snf, sof + snf, soc + 3 * (size_t)snf, &cp, sx, t + 3 * (size_t)f, f, ns * nv, (ns + 1) * nv, 1e-12 * diag, tol, skip);
+			n0 = swp_hull(sf + 3 * (size_t)snf, sof + snf, soc + 3 * (size_t)snf, &cp, sx, gv + 4 * (size_t)f, gc + 4 * (size_t)f, gs[f], gc[4 * (size_t)f] / 3,
+				ns * nv, (ns + 1) * nv, 1e-12 * diag, tol, skip);
 			snf += n0;
 			report->front_faces += n0 > 0;
 		}
@@ -934,6 +1039,7 @@ oom:
 done:
 	qaws_internal_free(px); qaws_internal_free(c.buf); qaws_internal_free(t);
 	qaws_internal_free(Xa); qaws_internal_free(Xb); qaws_internal_free(Xm); qaws_internal_free(times);
+	qaws_internal_free(gv); qaws_internal_free(gc); qaws_internal_free(gs); qaws_internal_free(tg);
 	qaws_internal_free(sx); qaws_internal_free(sf); qaws_internal_free(fr); qaws_internal_free(sof); qaws_internal_free(soc);
 	return st;
 }
