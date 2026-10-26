@@ -810,17 +810,21 @@ static wtp_edge wtp_heap_pop(wtp_edge* H, unsigned int* n)
 
 /* normals for points without them (Hoppe et al. 1992): each the direction its K neighbours spread least along (the
    smallest eigenvector of their covariance), then oriented along a minimum spanning tree of the neighbour graph weighted
-   1 - |n_i . n_j| (agreeing with the parent across each edge), each connected part from its highest point facing up
-   (shortcut: a part inside another, a cavity, is oriented as an outer one). 0 on allocation failure */
-static int wtp_estimate_normals(qaws_scalar* out, qaws_scalar const* P, unsigned int n, unsigned int const* nbr)
+   1 - |n_i . n_j| (agreeing with the parent across each edge), each connected part from its highest point facing up, then
+   turned to bound a positive volume of its own (sum of area n . (p - its centre)); a part inside an odd number of others
+   (the others' dipole winding numbers at its highest point, area the points' shares) is a cavity, turned inward. 0 on
+   allocation failure */
+static int wtp_estimate_normals(qaws_scalar* out, qaws_scalar const* P, unsigned int n, unsigned int const* nbr, double const* area)
 {
 	unsigned int *cnt = (unsigned int*)qaws_internal_scratch_zalloc((size_t)n + 2, sizeof(unsigned int)), *adj = NULL, *fill = NULL, nh = 0, caph = 0, i, s, k, q;
 	unsigned char* done = (unsigned char*)qaws_internal_scratch_zalloc((size_t)n + 1, 1);
+	unsigned int *part = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)n + 1)), *seeds = NULL, np = 0;
 	wtp_zi* ord = (wtp_zi*)qaws_internal_scratch_malloc(sizeof(wtp_zi) * ((size_t)n + 1));
 	double* N = (double*)qaws_internal_scratch_malloc(sizeof(double) * (3 * (size_t)n + 1));
 	wtp_edge* H = NULL;
 	int ok = 0;
-	if (!cnt || !done || !ord || !N)
+	seeds = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	if (!cnt || !done || !ord || !N || !part || !seeds)
 		goto done;
 	for (i = 0; i < n; i++)
 	{
@@ -878,6 +882,8 @@ static int wtp_estimate_normals(qaws_scalar* out, qaws_scalar const* P, unsigned
 		if (N[3 * (size_t)seed + 2] < 0)
 			for (k = 0; k < 3; k++) N[3 * (size_t)seed + k] = -N[3 * (size_t)seed + k];
 		done[seed] = 1;
+		part[seed] = np;
+		seeds[np++] = seed;
 		for (s = cnt[seed]; s < cnt[seed + 1]; s++)
 		{
 			unsigned int j = adj[s];
@@ -895,6 +901,7 @@ static int wtp_estimate_normals(qaws_scalar* out, qaws_scalar const* P, unsigned
 			if (d < 0)
 				for (k = 0; k < 3; k++) N[3 * (size_t)e.b + k] = -N[3 * (size_t)e.b + k];
 			done[e.b] = 1;
+			part[e.b] = part[e.a];
 			for (s = cnt[e.b]; s < cnt[e.b + 1]; s++)
 			{
 				unsigned int j = adj[s];
@@ -904,9 +911,67 @@ static int wtp_estimate_normals(qaws_scalar* out, qaws_scalar const* P, unsigned
 			}
 		}
 	}
+	if (np > 1)
+	{
+		/* each part outward of its own volume, then the cavities (inside an odd number of others) turned */
+		double* acc = (double*)qaws_internal_scratch_zalloc(5 * (size_t)np + 1, sizeof(double));   /* centre (3), count, sign sum */
+		unsigned char* flip = (unsigned char*)qaws_internal_scratch_zalloc((size_t)np + 1, 1);
+		unsigned int a, b;
+		if (!acc || !flip)
+		{
+			qaws_internal_free(acc);
+			qaws_internal_free(flip);
+			goto done;
+		}
+		for (i = 0; i < n; i++)
+		{
+			for (k = 0; k < 3; k++) acc[5 * (size_t)part[i] + k] += (double)P[3 * (size_t)i + k];
+			acc[5 * (size_t)part[i] + 3] += 1;
+		}
+		for (i = 0; i < n; i++)
+		{
+			double const* c = acc + 5 * (size_t)part[i];
+			for (k = 0; k < 3; k++) acc[5 * (size_t)part[i] + 4] += area[i] * N[3 * (size_t)i + k] * ((double)P[3 * (size_t)i + k] - c[k] / c[3]);
+		}
+		for (i = 0; i < n; i++)
+			if (acc[5 * (size_t)part[i] + 4] < 0)
+				for (k = 0; k < 3; k++) N[3 * (size_t)i + k] = -N[3 * (size_t)i + k];
+		for (a = 0; a < np; a++)
+		{
+			double const* x = NULL;
+			double xs[3];
+			unsigned int depth = 0;
+			for (k = 0; k < 3; k++) xs[k] = (double)P[3 * (size_t)seeds[a] + k];
+			x = xs;
+			for (b = 0; b < np; b++)
+			{
+				double w = 0;
+				if (b == a)
+					continue;
+				for (i = 0; i < n; i++)
+					if (part[i] == b)
+					{
+						double r[3], l2;
+						for (k = 0; k < 3; k++) r[k] = (double)P[3 * (size_t)i + k] - x[k];
+						l2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+						if (l2 > 0)
+							w += area[i] * (N[3 * (size_t)i] * r[0] + N[3 * (size_t)i + 1] * r[1] + N[3 * (size_t)i + 2] * r[2]) / (4 * 3.14159265358979323846 * l2 * sqrt(l2));
+					}
+				depth += w >= 0.5;
+			}
+			flip[a] = (unsigned char)(depth & 1);
+		}
+		for (i = 0; i < n; i++)
+			if (flip[part[i]])
+				for (k = 0; k < 3; k++) N[3 * (size_t)i + k] = -N[3 * (size_t)i + k];
+		qaws_internal_free(acc);
+		qaws_internal_free(flip);
+	}
 	for (i = 0; i < 3 * n; i++) out[i] = (qaws_scalar)N[i];
 	ok = 1;
 done:
+	qaws_internal_free(part);
+	qaws_internal_free(seeds);
 	qaws_internal_free(cnt);
 	qaws_internal_free(adj);
 	qaws_internal_free(fill);
@@ -1069,7 +1134,7 @@ qaws_status qaws_mesh_make_watertight_points(qaws_mesh_3d** out, qaws_watertight
 	if (!normals)
 	{
 		est = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)count + 1));
-		if (!est || !wtp_estimate_normals(est, positions, count, nbr))
+		if (!est || !wtp_estimate_normals(est, positions, count, nbr, area))
 			goto done;
 		normals = est;
 	}

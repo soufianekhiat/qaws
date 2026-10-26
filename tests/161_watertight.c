@@ -452,6 +452,43 @@ static void test_points_unoriented(void)
 	free(cn);
 }
 
+/* a hollow sphere's points without normals (radii 1 and 0.5): the inner part a cavity, turned inward, so the volume the
+   shell's, 4/3 pi (1 - 1/8), not the full ball's */
+static void test_points_cavity(void)
+{
+	unsigned int no = 1500, ni = 600, n = no + ni, i, j;
+	qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n), *nr = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	qaws_watertight_desc d;
+	double v[2] = { 0, 0 }, want = 4.0 / 3 * 3.14159265358979323846 * (1 - 0.125);
+	int closed = 1;
+	char msg[300];
+	for (i = 0; i < n; i++)
+	{
+		unsigned int m = i < no ? no : ni, q = i < no ? i : i - no;
+		double R = i < no ? 1 : 0.5, zz = 1 - 2 * (q + 0.5) / m, r = sqrt(1 - zz * zz), ph = 2.399963229728653 * q, sg = i < no ? 1 : -1;
+		x[3 * i] = (qaws_scalar)(R * r * cos(ph)); nr[3 * i] = (qaws_scalar)(sg * r * cos(ph));
+		x[3 * i + 1] = (qaws_scalar)(R * r * sin(ph)); nr[3 * i + 1] = (qaws_scalar)(sg * r * sin(ph));
+		x[3 * i + 2] = (qaws_scalar)(R * zz); nr[3 * i + 2] = (qaws_scalar)(sg * zz);
+	}
+	memset(&d, 0, sizeof d);
+	d.resolution = 40;
+	for (j = 0; j < 2; j++)
+	{
+		qaws_mesh_3d* m = NULL;
+		qaws_watertight_report r;
+		memset(&r, 0, sizeof r);
+		if (qaws_mesh_make_watertight_points(&m, &r, x, j ? NULL : nr, n, &d) == QAWS_STATUS_OK && m)
+			v[j] = wt_points_volume(m);
+		closed &= m && r.closed;
+		qaws_mesh_3d_destroy(m);
+	}
+	sprintf(msg, "a hollow sphere's points without normals: volume %.4f (true normals %.4f, the shell %.4f, the full ball 4.1888); closed %d", v[1], v[0], want, closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(closed && fabs(v[1] - v[0]) < 0.01 * v[0] && fabs(v[1] - want) < 0.03 * want, msg);
+	free(x);
+	free(nr);
+}
+
 int test_161_watertight_main(void)
 {
 	g_pass = 0;
@@ -462,6 +499,7 @@ int test_161_watertight_main(void)
 	test_sheet();
 	test_points();
 	test_points_unoriented();
+	test_points_cavity();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

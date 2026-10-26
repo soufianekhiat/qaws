@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Point clouds without normals with cavities: a part inside an odd number of others is turned inward (a hollow
+  sphere's volume as with its true normals). Test 161.
 - Curved tetrahedra's Jacobian bound tightened by simplex subdivision where loose (bisection of the longest edge): the
   cubic sphere keeps 2 more cells curved, test 174 in 5 s from 9.
 - Curved elements' untangling: border nodes slide on the reference when the free nodes alone do not suffice, and a move
