@@ -112,6 +112,7 @@
 #include "qaws_shell_region.h"
 #include "qaws_skeleton.h"
 #include "qaws_motion.h"
+#include "qaws_mesh_sweep.h"
 #include "qaws_alloc.h"
 #include "qaws_inline.h"
 #include "qaws_diff.h"

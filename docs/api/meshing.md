@@ -1669,6 +1669,31 @@ other, and halved where a cell would turn over: every corner's Jacobian
 is positive. `report.moves` counts the stacks thinned, `iterations` the
 halving rounds. Test 156.
 
+## Swept solids
+
+```c
+qaws_motion* m;                                   /* qaws_motion.h (docs/api/motion.md): two poses, a curve, or per vertex */
+qaws_motion_create_poses(&m, &start, &end, 0);
+qaws_sweep_desc d = { 0 };                        /* tolerance: the chords' deviation; 0: 1e-3 of the box diagonal */
+qaws_sweep_report r;
+qaws_mesh_3d_sweep(&out, &r, mesh, m, &d);        /* the region the closed mesh covers while it moves */
+```
+
+- **Slabs.** Time is cut into slabs, each halved until every vertex's trajectory lies within the tolerance of its chord over it. The deviation is checked at the slab's middle and quarters, not bounded from the derivatives: it is measured, not certified. A straight motion is one slab.
+- **One slab.** The vertices move along their chords. A point the solid covers during the slab and not at its start was crossed by a face moving toward it: a front face (its normal at the start against its vertices' mean displacement). The slab's sweep is the solid at its start with its front faces extruded: those faces at the start (turned), at the end, and walls along their region's border, each border edge's quad between its two positions split along a diagonal. Only front faces are extruded, about half of them.
+- **All slabs.** The slabs' ends are layers of vertices shared by the slabs on either side, and a face front in two slabs in a row is not capped between them, so consecutive extrusions join instead of meeting in coincident faces. The solid at 0 and every extrusion go to the Boolean's self-union, whose winding-number rule resolves their overlaps and an extrusion's folds.
+- **Accuracy.** A translation is exact: a cube moved along a segment is its Minkowski sum with it. A curved motion is within the tolerance (its chords); a rotating wall within its twist (a bilinear quad split in two).
+- **Limits.** Planar motions put the walls of every slab in the planes of the solid's own faces; the Boolean then sometimes leaves a few edges open (a box 0.1 thick turned a quarter closes, 0.05 thick does not at some tolerances). A vertex motion must have the mesh's vertex count.
+
+| Check (test 180, f64) | Result |
+|---|---|
+| A unit cube moved by (1, 1, 0) | volume 3 to 1e-15, one slab, closed |
+| A box 1 × 0.02 × 1 turned a quarter about z beside it: the annular sector π/4 (r₁² − r₀²) plus the boxes at both ends half outside it | 2.37525 against 2.37627, 32 slabs, closed |
+| A ball (80 faces, radius 0.2) along a Hermite curve of length 2.35: the tube (the polyhedral ball's cross-section along the length, plus the ball) | 0.3041 against 0.2991, 16 slabs, closed |
+| A vertex motion of another vertex count | INVALID_ARGUMENT |
+
+Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along a Hermite curve, and a box turned a quarter.
+
 ## Example: a NURBS torus, its surface, tetrahedra and hexahedra
 
 ```c

@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `qaws_mesh_3d_sweep` (`qaws_mesh_sweep.h`): the solid a closed mesh sweeps under a `qaws_motion`, time cut by the
+  chords' deviation, each slab's front faces extruded, all united by the Boolean; translations exact. Test 180, figure 60.
 - `qaws_motion.h`: motions for sweeps. Rigid from two poses (Hermite translations, cubic or quintic; rotations by the
   Cayley map of a Hermite Gibbs vector, rational in t), along a 3D curve, or per vertex. Test 179, docs/api/motion.md.
 - Point clouds without normals with cavities: a part inside an odd number of others is turned inward (a hollow

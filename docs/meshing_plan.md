@@ -272,6 +272,13 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    characteristic curves (where the velocity runs along the surface) on each slab mark the silhouette that bounds it.
    Check: a cube translated along a line is a box exactly; a box turned about an axis gives the annular sector's
    volume; a ball along a Hermite curve gives a tube (pi r^2 L + 4/3 pi r^3) within the tolerance.
+   Done in part (2026-10-26): `qaws_mesh_3d_sweep` (test 180, figure 60 key Y): slabs halved until the chords are within
+   tolerance (measured at the middles and quarters, not certified from the derivatives), each slab's front faces
+   extruded between layers of vertices shared by consecutive slabs, the solid at 0 and all extrusions through the
+   Boolean's self-union. A cube translated is exact (volume 3 to 1e-15); a box turned a quarter 2.37525 against 2.37627;
+   a ball's tube within 1.7%. Not done: the certified bound (the trajectories' derivatives), the twist of rotating walls
+   (bilinear quads split), the envelope's characteristic curves; the Boolean sometimes leaves a planar motion's
+   coplanar walls open.
 3. **Exact where the motion allows.** Translations along polylines and polynomial paths with the exact kernel:
    the sweep of a polyhedron along a segment is exact (its faces' prisms and the union), so G-code's linear moves give
    exact carving; polynomial and rational motions exact up to the slabs' certified bound, the Booleans exact on them.

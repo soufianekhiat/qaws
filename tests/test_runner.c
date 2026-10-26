@@ -193,6 +193,7 @@ extern int test_176_hexahedra_polycube_main(void);
 extern int test_177_quads_pairing_main(void);
 extern int test_178_quad_layout_main(void);
 extern int test_179_motion_main(void);
+extern int test_180_mesh_sweep_main(void);
 
 /* Test registry */
 typedef struct {
@@ -381,6 +382,7 @@ static test_suite const g_test_suites[] = {
 	{"177_quads_pairing", test_177_quads_pairing_main},
 	{"178_quad_layout", test_178_quad_layout_main},
 	{"179_motion", test_179_motion_main},
+	{"180_mesh_sweep", test_180_mesh_sweep_main},
 };
 
 int main(void) {
