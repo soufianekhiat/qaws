@@ -47,7 +47,11 @@
  * wall along its edge the front face's corners' there; directions (NORMAL,
  * TANGENT, VECTOR, and NORMALIZED of 3 components) turn with a rigid
  * motion's rotation, a QUATERNION is composed with it, and a NORMAL face
- * attribute on a wall is the wall's own normal.
+ * attribute on a wall is the wall's own normal. Features: the mesh's at the
+ * first and last layers, the paths its feature corners trace (where the
+ * walls on either side meet at an angle) and the cuts, those that are
+ * creases of the result kept; an edge sliding along itself (an envelope)
+ * traces no feature.
  */
 
 typedef struct qaws_sweep_desc

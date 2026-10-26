@@ -100,7 +100,8 @@ outside; indices stay dense through edits.
   (a split's halves); new edges (a split's cross edge, a flip's diagonal)
   take zeros. Booleans, sweeps and subdivision carry them the same way (√3
   subdivision flips an edge between two faces away, its value with it;
-  borders and features stay); the connector leaves them out, remeshing
+  borders and features stay); the connector keeps each side's edges' values
+  (the bridge's edges zeros), remeshing
   from a reference starts them at zero, and a reference cannot evaluate
   one (INVALID_ARGUMENT).
 - **Footpoints**: each vertex's location on the reference an operator
@@ -1072,7 +1073,7 @@ qaws_mesh_3d_boolean(&out, &report, a, b, QAWS_BOOLEAN_DIFFERENCE, &desc);   /* 
 - **Vertices and corners:** each result corner is placed in its source face (the fan triangle holding it, barycentric, clamped to it, never extrapolated) and its values mixed there by the rule. Both sides of a cut keep their own values, so vertex attributes come out per corner (same name): the cut stays sharp in the normals, and two solids' colours or UV charts do not bleed into each other.
 - **Turned pieces:** `NORMAL` attributes are negated on the pieces the Boolean turns over (B's in A − B), `TANGENT` ones' handedness too.
 - **Edges:** a result edge lying on an input edge (a piece of it) takes that edge's values, the others zeros.
-- **Features:** result edges on the operands' feature edges stay features, and the cuts become features: edges between pieces of two source faces that lie on no input edge, i.e. the curves where the operands meet.
+- **Features:** result edges on the operands' feature edges stay features, and the cuts become features: edges between pieces of two source faces that lie on no input edge and are not coplanar, i.e. the curves where the operands meet (pieces of one flat face, as a box face's two triangles, make no cut).
 - **Flat regions:** with attributes, edges inside flat regions are turned only between pieces of one source face.
 - **Not carried:** footpoints.
 
@@ -1784,7 +1785,8 @@ Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along 
 - a wall takes, along its edge, the values of the front face's corners there;
 - directions (`NORMAL`, `TANGENT`, `VECTOR`, and `NORMALIZED` of 3 components) turn with a rigid motion's rotation at the layer's time, so a turning tool's normals stay on it; a `QUATERNION` is composed with that rotation (the tool's orientation where each piece was swept);
 - a `NORMAL` face attribute on a wall is the wall's own normal;
-- a soup edge repeating an edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values and feature flag, the others zeros; the self-union then marks its cuts as features;
+- a soup edge repeating an edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values, the others zeros;
+- features: the mesh's feature edges at the first and last layers (copies between slabs are artifacts: on a wall bent only by the chords, or inside a face), the rails a feature corner runs along where its two walls meet at an angle (a swept box's long edges), and the self-union's cuts; the result keeps those that are creases of it. A crease traced by an edge sliding along itself (an envelope, as a silhouette) is not marked;
 - `qaws_mesh_sweep_boolean` matches the tool's and the stock's attributes by name.
 
 Test 181:

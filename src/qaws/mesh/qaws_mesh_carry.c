@@ -204,6 +204,7 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 	unsigned int *sfv[2] = { NULL, NULL }, *sfs[2] = { NULL, NULL }, *rt = NULL, *on = NULL, *fpart = NULL, *re = NULL, *rs = NULL;
 	unsigned long long* rk = NULL;
 	unsigned char *turned = NULL, *rflag = NULL;
+	double* rfn = NULL;
 	qaws_mesh_3d_desc d[2];
 	qaws_status st = QAWS_STATUS_OK;
 	if (!out)
@@ -380,7 +381,8 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 	re = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nre + 1));
 	rs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nre + 1));
 	rflag = (unsigned char*)qaws_internal_zalloc((size_t)nre + 1, 1);
-	if (!rx || !rt || !rsrc || !ov || !on || !fpart || !re || !rs || !rflag || qaws_mesh_3d_find_attribute(&src_at, *out, "source") != QAWS_STATUS_OK)
+	rfn = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nre + 1));
+	if (!rx || !rt || !rsrc || !ov || !on || !fpart || !re || !rs || !rflag || !rfn || qaws_mesh_3d_find_attribute(&src_at, *out, "source") != QAWS_STATUS_OK)
 		goto oom;
 	qaws_mesh_3d_get_positions(rx, *out);
 	qaws_mesh_3d_get_faces(rt, NULL, *out);
@@ -389,18 +391,33 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 	if (!(rk = cy_keys(re, nre)))
 		goto oom;
 	/* each result edge on an input edge (its index in the part, on[]), and the features: input features kept, and the cuts
-	   (an edge between pieces of two source faces, on no input edge); rflag: 1 seen, 2 on an input edge, 4 a cut, 8 a feature */
+	   (an edge between pieces of two source faces, on no input edge, the two not coplanar); rflag: 1 seen, 2 on an input
+	   edge, 4 a cut, 8 a feature; rfn: the first face's unit normal */
 	for (i = 0; i < nre; i++)
 		rs[i] = QAWS_MESH_NONE;
 	for (i = 0; i < nt; i++)
 	{
 		unsigned int s = (unsigned int)rsrc[i], pi = 0, sf, c;
 		cy_part const* p;
+		double fn[3];
 		while (pi + 1 < np && P[pi + 1].base <= s)
 			pi++;
 		p = &P[pi];
 		sf = s - p->base;
 		fpart[i] = pi;
+		{
+			qaws_scalar const *p0 = rx + 3 * (size_t)rt[3 * (size_t)i], *p1 = rx + 3 * (size_t)rt[3 * (size_t)i + 1], *p2 = rx + 3 * (size_t)rt[3 * (size_t)i + 2];
+			double u[3], w[3], l;
+			for (j = 0; j < 3; j++)
+			{
+				u[j] = (double)p1[j] - (double)p0[j];
+				w[j] = (double)p2[j] - (double)p0[j];
+			}
+			fn[0] = u[1] * w[2] - u[2] * w[1]; fn[1] = u[2] * w[0] - u[0] * w[2]; fn[2] = u[0] * w[1] - u[1] * w[0];
+			l = sqrt(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
+			for (j = 0; j < 3; j++)
+				fn[j] = l > 0 ? fn[j] / l : 0;
+		}
 		for (c = 0; c < 3; c++)
 		{
 			unsigned int u = rt[3 * (size_t)i + c], v = rt[3 * (size_t)i + (c + 1) % 3], r = cy_find(rk, nre, u, v), q;
@@ -421,8 +438,10 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 				continue;
 			if (on[3 * (size_t)i + c] != QAWS_MESH_NONE)
 				rflag[r] |= (unsigned char)(2 | (p->ef[on[3 * (size_t)i + c]] ? 8 : 0));
-			else if ((rflag[r] & 1) && rs[r] != s)
+			else if ((rflag[r] & 1) && rs[r] != s && rfn[3 * (size_t)r] * fn[0] + rfn[3 * (size_t)r + 1] * fn[1] + rfn[3 * (size_t)r + 2] * fn[2] < 1 - 1e-9)
 				rflag[r] |= 4;
+			if (!(rflag[r] & 1))
+				memcpy(rfn + 3 * (size_t)r, fn, sizeof fn);
 			rflag[r] |= 1;
 			rs[r] = s;
 		}
@@ -541,7 +560,7 @@ done:
 		qaws_internal_free(sfs[j]);
 	}
 	qaws_internal_free(rx); qaws_internal_free(rt); qaws_internal_free(rsrc); qaws_internal_free(ov); qaws_internal_free(turned);
-	qaws_internal_free(on); qaws_internal_free(fpart); qaws_internal_free(re); qaws_internal_free(rs); qaws_internal_free(rflag); qaws_internal_free(rk);
+	qaws_internal_free(on); qaws_internal_free(fpart); qaws_internal_free(re); qaws_internal_free(rs); qaws_internal_free(rflag); qaws_internal_free(rfn); qaws_internal_free(rk);
 	return st;
 }
 

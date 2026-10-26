@@ -82,8 +82,8 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out_mesh, qaws_boolean_report* repo
  *   - edge attributes: a result edge on an input edge (a piece of it) takes
  *     its value, the others zeros;
  *   - feature edges: those on the operands' feature edges stay features, and
- *     the cuts (edges between pieces of two source faces, on no input edge:
- *     where the operands meet) become features.
+ *     the cuts (edges between pieces of two source faces, on no input edge,
+ *     not coplanar: where the operands meet) become features.
  * With attributes, edges inside flat regions are turned only between pieces
  * of one source face (values are never carried across faces). Footpoints
  * are not carried.

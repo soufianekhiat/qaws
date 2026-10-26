@@ -41,12 +41,18 @@
  *     values on a quad's edges kept by their pieces after two Catmull-Clark
  *     levels (4 each, the inner edges 0), on two triangles' edges after one
  *     Loop level (2 each);
+ *   - features along a sweep's walls: a cube (its creases features) swept
+ *     along (1, 0.5, 0): the result's features are exactly its creases, the
+ *     long edges its corners trace included;
+ *   - edge values through the connector: two tubes joined, each tube's edges
+ *     their values (a's 1 + i, b's 100 + i), the bridge's 0;
  *   - refused: one name of two elements, a NORMAL of 2 components.
  */
 
 #include "test_common.h"
 #include "qaws_mesh_sweep.h"
 #include "qaws_mesh_subdivide.h"
+#include "qaws_mesh_connect.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -859,6 +865,127 @@ static void test_subdivision_rules(void)
 	qaws_mesh_3d_destroy(quad); qaws_mesh_3d_destroy(tri); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(ot);
 }
 
+/* m's feature length, crease length (edges whose faces turn) and the edges a feature without a crease or the reverse */
+static void ac_crease_check(qaws_mesh_3d const* m, double* feat, double* crease, unsigned int* mism)
+{
+	unsigned int ne = qaws_mesh_3d_get_edge_count(m), nf = qaws_mesh_3d_get_triangle_count(m), nfeat = qaws_mesh_3d_get_feature_edge_count(m), k, j, f;
+	unsigned int *e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfeat + 1));
+	unsigned int* t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+	double* fn = (double*)malloc(sizeof(double) * 3 * nf);
+	*feat = *crease = 0;
+	*mism = 0;
+	qaws_mesh_3d_get_edges(e, m);
+	qaws_mesh_3d_get_feature_edges(fe, m);
+	qaws_mesh_3d_get_triangles(t, m);
+	for (f = 0; f < nf; f++) ac_tri_normal(m, f, fn + 3 * f);
+	for (k = 0; k < ne; k++)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(m, e[2 * k]), q = qaws_mesh_3d_get_vertex(m, e[2 * k + 1]);
+		double len = sqrt(pow((double)p.x - q.x, 2) + pow((double)p.y - q.y, 2) + pow((double)p.z - q.z, 2)), turn = 0;
+		int is_feat = 0, side = 0;
+		unsigned int g[2] = { 0, 0 };
+		for (j = 0; j < nfeat; j++)
+			if ((fe[2 * j] == e[2 * k] && fe[2 * j + 1] == e[2 * k + 1]) || (fe[2 * j] == e[2 * k + 1] && fe[2 * j + 1] == e[2 * k]))
+				is_feat = 1;
+		for (f = 0; f < nf && side < 2; f++)
+			for (j = 0; j < 3; j++)
+				if ((t[3 * f + j] == e[2 * k] && t[3 * f + (j + 1) % 3] == e[2 * k + 1]) || (t[3 * f + j] == e[2 * k + 1] && t[3 * f + (j + 1) % 3] == e[2 * k]))
+					g[side++] = f;
+		if (side == 2)
+			turn = 1 - (fn[3 * g[0]] * fn[3 * g[1]] + fn[3 * g[0] + 1] * fn[3 * g[1] + 1] + fn[3 * g[0] + 2] * fn[3 * g[1] + 2]);
+		*feat += is_feat * len;
+		*crease += (turn > 1e-9) * len;
+		*mism += (unsigned int)((turn > 1e-9) != is_feat);
+	}
+	free(e); free(fe); free(t); free(fn);
+}
+
+static void test_sweep_features(void)
+{
+	qaws_mesh_3d *c = ac_box(0, 1, 0, 1, 0, 1), *o = NULL;
+	qaws_motion* m = ac_move(0, 0, 0, 1, 0.5, 0);
+	double feat = 0, crease = 0;
+	unsigned int mism = 1000;
+	qaws_status st;
+	char msg[300];
+	qaws_mesh_3d_detect_features(c, (qaws_scalar)0.5, 0, 0);
+	st = qaws_mesh_3d_sweep(&o, NULL, c, m, NULL);
+	if (st == QAWS_STATUS_OK && o)
+		ac_crease_check(o, &feat, &crease, &mism);
+	sprintf(msg, "a featured cube swept along (1, 0.5, 0): features along %.12f, creases along %.12f, %u edges a feature without a crease or the reverse",
+		feat, crease, mism);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && mism == 0 && fabs(feat - crease) < 1e-12 && feat > 12, msg);
+	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o);
+	qaws_motion_destroy(m);
+}
+
+/* an open tube of 8 sides and one row about z, from z0 to z1, its edges valued base + index */
+static qaws_mesh_3d* ac_tube(double z0, double z1, double base)
+{
+	qaws_scalar x[48], w[64];
+	unsigned int t[48], i, k = 0, ne;
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (i = 0; i < 16; i++)
+	{
+		double a = 2 * 3.14159265358979323846 * (i % 8) / 8;
+		x[3 * i] = (qaws_scalar)(0.5 * cos(a)); x[3 * i + 1] = (qaws_scalar)(0.5 * sin(a)); x[3 * i + 2] = (qaws_scalar)(i < 8 ? z0 : z1);
+	}
+	for (i = 0; i < 8; i++)
+	{
+		unsigned int a = i, b = (i + 1) % 8;
+		t[k++] = a; t[k++] = b; t[k++] = b + 8;
+		t[k++] = a; t[k++] = b + 8; t[k++] = a + 8;
+	}
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 16; d.face_vertices = t; d.face_count = 16;
+	qaws_mesh_3d_create(&m, &d);
+	ne = qaws_mesh_3d_get_edge_count(m);
+	for (i = 0; i < ne; i++) w[i] = (qaws_scalar)(base + i);
+	ac_add(m, "w", QAWS_MESH_EDGE, 1, QAWS_ATTRIBUTE_LINEAR, w);
+	return m;
+}
+
+static void test_connect_edges(void)
+{
+	qaws_mesh_3d *a = ac_tube(0, 1, 1), *b = ac_tube(1.6, 2.6, 100), *m = NULL;
+	qaws_connect_desc cd;
+	unsigned int ia = 0, ib = 0, im = 0, ne = 0, bad = 0, kept = 0, bridge = 0, i;
+	qaws_status st;
+	char msg[300];
+	memset(&cd, 0, sizeof cd);
+	cd.quads = 1;
+	qaws_mesh_3d_find_attribute(&ia, a, "w");
+	qaws_mesh_3d_find_attribute(&ib, b, "w");
+	st = qaws_mesh_3d_connect(&m, NULL, a, 8, b, 0, &cd);
+	if (st == QAWS_STATUS_OK && m && qaws_mesh_3d_find_attribute(&im, m, "w") == QAWS_STATUS_OK)
+	{
+		unsigned int* e;
+		qaws_scalar* w;
+		ne = qaws_mesh_3d_get_edge_count(m);
+		e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+		w = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ne);
+		qaws_mesh_3d_get_edges(e, m);
+		qaws_mesh_3d_get_attribute(w, m, im);
+		for (i = 0; i < ne; i++)
+		{
+			unsigned int x = e[2 * i], y = e[2 * i + 1];
+			double want = x < 16 && y < 16 ? ac_edge_value(a, ia, x, y) : x >= 16 && y >= 16 && x < 32 && y < 32 ? ac_edge_value(b, ib, x - 16, y - 16) : 0;
+			if (want < 0)
+				want = 0;   /* (two of a's vertices on no edge of a: a bridge edge) */
+			bad += (double)w[i] != want;
+			kept += want != 0;
+			bridge += want == 0;
+		}
+		free(e); free(w);
+	}
+	sprintf(msg, "two tubes joined: %u edges, %u keeping their tube's value, %u of the bridge at 0, %u off", ne, kept, bridge, bad);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && m && bad == 0 && kept == 64 && bridge > 0, msg);   /* (32 edges per tube) */
+	qaws_mesh_3d_destroy(a); qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(m);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *a = ac_box(0, 1, 0, 1, 0, 1), *b = ac_box(0.5, 1.5, 0.5, 1.5, 0.5, 1.5), *o = NULL;
@@ -893,6 +1020,8 @@ int test_181_mesh_attribute_carry_main(void)
 	test_edge_boolean();
 	test_vector_quaternion();
 	test_subdivision_rules();
+	test_sweep_features();
+	test_connect_edges();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

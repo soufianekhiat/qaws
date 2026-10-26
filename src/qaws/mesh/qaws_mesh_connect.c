@@ -264,6 +264,64 @@ typedef struct cn_carry
 	double const* fsh;              /* per bridge face: its share */
 } cn_carry;
 
+/* edge attribute i on the joined mesh (a's vertices first, then b's, then the bridge's): an edge of a or of b keeps its
+   value (matched by name on b, else zeros there), the bridge's edges zeros */
+static qaws_status cn_edge_attribute(qaws_mesh_3d* out, cn_carry const* C, unsigned int i, qaws_attribute_desc const* da)
+{
+	unsigned int ne = qaws_mesh_3d_get_edge_count(out), nea = qaws_mesh_3d_get_edge_count(C->a), neb = C->same ? 0 : qaws_mesh_3d_get_edge_count(C->b);
+	unsigned int n = da->components, ib = QAWS_MESH_NONE, k, at;
+	unsigned int *e = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)(ne > nea ? (ne > neb ? ne : neb) : (nea > neb ? nea : neb)) + 1));
+	unsigned long long *ka = NULL, *kb = NULL;
+	qaws_scalar *va = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, (size_t)nea + 1)), *vb = NULL;
+	qaws_scalar* vo = (qaws_scalar*)qaws_internal_scratch_zalloc((size_t)n * ne + 1, sizeof(qaws_scalar));
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!e || !va || !vo)
+		goto done;
+	qaws_mesh_3d_get_attribute(va, C->a, i);
+	qaws_mesh_3d_get_edges(e, C->a);
+	if (!(ka = cy_keys(e, nea)))
+		goto done;
+	if (!C->same && da->name && qaws_mesh_3d_find_attribute(&ib, C->b, da->name) == QAWS_STATUS_OK)
+	{
+		qaws_attribute_desc db;
+		qaws_mesh_3d_get_attribute_desc(&db, C->b, ib);
+		if (db.element != QAWS_MESH_EDGE || db.components != n)
+			ib = QAWS_MESH_NONE;
+	}
+	if (ib != QAWS_MESH_NONE)
+	{
+		vb = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, (size_t)neb + 1));
+		if (!vb)
+			goto done;
+		qaws_mesh_3d_get_attribute(vb, C->b, ib);
+		qaws_mesh_3d_get_edges(e, C->b);
+		if (!(kb = cy_keys(e, neb)))
+			goto done;
+	}
+	qaws_mesh_3d_get_edges(e, out);
+	for (k = 0; k < ne; k++)
+	{
+		unsigned int x = e[2 * (size_t)k], y = e[2 * (size_t)k + 1], s = QAWS_MESH_NONE;
+		qaws_scalar const* src = NULL;
+		if (x < C->nva && y < C->nva)
+		{
+			s = cy_find(ka, nea, x, y);
+			src = va;
+		}
+		else if (kb && x >= C->nva && y >= C->nva && x < C->nva + C->nvb && y < C->nva + C->nvb)
+		{
+			s = cy_find(kb, neb, x - C->nva, y - C->nva);
+			src = vb;
+		}
+		if (s != QAWS_MESH_NONE)
+			memcpy(vo + (size_t)n * k, src + (size_t)n * s, sizeof(qaws_scalar) * n);
+	}
+	st = qaws_mesh_3d_add_attribute(&at, out, vo, da);
+done:
+	qaws_internal_free(e); qaws_internal_free(ka); qaws_internal_free(kb); qaws_internal_free(va); qaws_internal_free(vb); qaws_internal_free(vo);
+	return st;
+}
+
 static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 {
 	unsigned int na = qaws_mesh_3d_get_attribute_count(C->a), i, k, j;
@@ -294,8 +352,13 @@ static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 		unsigned int ib = i, dim, nel, ela, elb, at;
 		qaws_scalar *va = NULL, *vb = NULL, *vo = NULL;
 		double *la = NULL, *lb = NULL;
-		if (qaws_mesh_3d_get_attribute_desc(&da, C->a, i) != QAWS_STATUS_OK || da.element == QAWS_MESH_EDGE)
+		if (qaws_mesh_3d_get_attribute_desc(&da, C->a, i) != QAWS_STATUS_OK)
 			continue;
+		if (da.element == QAWS_MESH_EDGE)
+		{
+			st = cn_edge_attribute(out, C, i, &da);
+			continue;
+		}
 		if (!C->same)
 		{
 			if (!da.name || qaws_mesh_3d_find_attribute(&ib, C->b, da.name) != QAWS_STATUS_OK

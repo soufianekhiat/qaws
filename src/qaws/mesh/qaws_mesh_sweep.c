@@ -66,6 +66,85 @@ static void swp_compose(qaws_scalar* o, qaws_scalar const* q, double const* R)
 	}
 }
 
+/* a rail's copy in the soup: its given vertices' key, its soup edge, its wall's normal */
+typedef struct swp_rail
+{
+	unsigned long long key;
+	unsigned int a, b;
+	double n[3];
+} swp_rail;
+
+static int swp_rail_cmp(void const* p, void const* q)
+{
+	unsigned long long x = ((swp_rail const*)p)->key, y = ((swp_rail const*)q)->key;
+	return x < y ? -1 : x > y;
+}
+
+/* soup vertex v's given index (creation splits the soup's non-manifold vertices: copies past its count) */
+static unsigned int swp_src(qaws_mesh_3d const* m, unsigned int v, unsigned int n)
+{
+	unsigned int s = qaws_mesh_3d_get_vertex_source(m, v);
+	return s < n ? s : v;
+}
+
+/* the swept solid's features: those that are creases of it (a copy of an input crease left inside a flat face of the
+   solid dropped) */
+static qaws_status swp_crease_features(qaws_mesh_3d* m)
+{
+	unsigned int ne = qaws_mesh_3d_get_edge_count(m), nt = qaws_mesh_3d_get_triangle_count(m), nfe = qaws_mesh_3d_get_feature_edge_count(m), i, j, k, kept = 0;
+	unsigned int *e = NULL, *t = NULL, *fe = NULL;
+	unsigned char* rc = NULL;
+	double* rn = NULL;
+	unsigned long long* key = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!nfe)
+		return QAWS_STATUS_OK;
+	e = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)ne + 1));
+	t = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + 1));
+	fe = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nfe + 1));
+	rc = (unsigned char*)qaws_internal_scratch_zalloc((size_t)ne + 1, 1);
+	rn = (double*)qaws_internal_scratch_zalloc(6 * (size_t)ne + 1, sizeof(double));
+	if (!e || !t || !fe || !rc || !rn)
+		goto done;
+	qaws_mesh_3d_get_edges(e, m);
+	qaws_mesh_3d_get_triangles(t, m);
+	qaws_mesh_3d_get_feature_edges(fe, m);
+	if (!(key = cy_keys(e, ne)))
+		goto done;
+	for (i = 0; i < nt; i++)
+	{
+		qaws_vec3 a = qaws_mesh_3d_get_vertex(m, t[3 * (size_t)i]), b = qaws_mesh_3d_get_vertex(m, t[3 * (size_t)i + 1]), c = qaws_mesh_3d_get_vertex(m, t[3 * (size_t)i + 2]);
+		double u[3], w[3], n[3], l;
+		u[0] = (double)b.x - (double)a.x; u[1] = (double)b.y - (double)a.y; u[2] = (double)b.z - (double)a.z;
+		w[0] = (double)c.x - (double)a.x; w[1] = (double)c.y - (double)a.y; w[2] = (double)c.z - (double)a.z;
+		n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
+		l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		for (j = 0; j < 3 && l > 0; j++)
+		{
+			unsigned int x = cy_find(key, ne, t[3 * (size_t)i + j], t[3 * (size_t)i + (j + 1) % 3]);
+			if (x == QAWS_MESH_NONE || rc[x] >= 2)
+				continue;
+			for (k = 0; k < 3; k++)
+				rn[6 * (size_t)x + 3 * rc[x] + k] = n[k] / l;
+			rc[x]++;
+		}
+	}
+	for (i = 0; i < nfe; i++)
+	{
+		unsigned int x = cy_find(key, ne, fe[2 * (size_t)i], fe[2 * (size_t)i + 1]);
+		double const* r = rn + 6 * (size_t)(x == QAWS_MESH_NONE ? 0 : x);
+		if (x == QAWS_MESH_NONE || (rc[x] == 2 && r[0] * r[3] + r[1] * r[4] + r[2] * r[5] > 1 - 1e-9))
+			continue;
+		fe[2 * (size_t)kept] = fe[2 * (size_t)i];
+		fe[2 * (size_t)kept + 1] = fe[2 * (size_t)i + 1];
+		kept++;
+	}
+	st = kept == nfe ? QAWS_STATUS_OK : qaws_mesh_3d_set_feature_edges(m, fe, kept);
+done:
+	qaws_internal_free(e); qaws_internal_free(t); qaws_internal_free(fe); qaws_internal_free(rc); qaws_internal_free(rn); qaws_internal_free(key);
+	return st;
+}
+
 static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d_desc const* md,
 	unsigned int const* sof, unsigned int const* soc, unsigned int nv, double const* layer_t, unsigned int layers)
 {
@@ -113,14 +192,74 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 		qaws_mesh_3d_get_edges(se, *out);
 		for (i = 0; i < sne; i++)
 		{
-			unsigned int x = se[2 * (size_t)i], y = se[2 * (size_t)i + 1];
-			smap[i] = x / nv == y / nv ? cy_find(ik, ine, x % nv, y % nv) : QAWS_MESH_NONE;
-			if (smap[i] != QAWS_MESH_NONE && ifeat[smap[i]])
+			unsigned int x = se[2 * (size_t)i], y = se[2 * (size_t)i + 1], sx = swp_src(*out, x, md->vertex_count), sy = swp_src(*out, y, md->vertex_count);
+			smap[i] = sx / nv == sy / nv ? cy_find(ik, ine, sx % nv, sy % nv) : QAWS_MESH_NONE;
+			if (smap[i] != QAWS_MESH_NONE && ifeat[smap[i]] && (sx / nv == 0 || sx / nv + 1 == layers))   /* (a copy between two slabs is an artifact: on a wall bent only by the chords, or inside a face) */
 			{
 				se[2 * (size_t)nfe] = x;
 				se[2 * (size_t)nfe + 1] = y;
 				nfe++;
 			}
+		}
+		/* the rails a feature corner runs along (its positions at two layers, between walls of two edges) where those walls
+		   meet at an angle: a swept box's long edges; each wall holds its own copy of a rail (the soup's vertices split
+		   there), so the copies are grouped by their given vertices */
+		{
+			swp_rail* rl = (swp_rail*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(swp_rail), 3, (size_t)md->face_count + 1));
+			unsigned char* corner = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nv + 1, 1);
+			unsigned int nr = 0, r0;
+			if (!rl || !corner)
+			{
+				qaws_internal_free(rl); qaws_internal_free(corner);
+				goto done;
+			}
+			for (i = 0; i < nv; i++)
+				corner[i] = (unsigned char)qaws_mesh_3d_is_feature_corner(mesh, i);
+			for (i = 0; i < md->face_count; i++)
+			{
+				unsigned int t[3], g[3];
+				double u[3], w[3], n[3], l;
+				qaws_mesh_3d_get_triangle(t, *out, i);
+				for (j = 0; j < 3; j++)
+					g[j] = swp_src(*out, t[j], md->vertex_count);
+				for (k = 0; k < 3; k++)
+				{
+					u[k] = (double)md->positions[3 * (size_t)g[1] + k] - (double)md->positions[3 * (size_t)g[0] + k];
+					w[k] = (double)md->positions[3 * (size_t)g[2] + k] - (double)md->positions[3 * (size_t)g[0] + k];
+				}
+				n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
+				l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+				for (j = 0; j < 3 && l > 0; j++)
+				{
+					unsigned int ga = g[j], gb = g[(j + 1) % 3];
+					if (ga % nv != gb % nv || ga == gb || !corner[ga % nv])
+						continue;
+					rl[nr].key = ((unsigned long long)(ga < gb ? ga : gb) << 32) | (ga < gb ? gb : ga);
+					rl[nr].a = t[j];
+					rl[nr].b = t[(j + 1) % 3];
+					for (k = 0; k < 3; k++)
+						rl[nr].n[k] = n[k] / l;
+					nr++;
+				}
+			}
+			qsort(rl, nr, sizeof(swp_rail), swp_rail_cmp);
+			for (r0 = 0; r0 < nr; )
+			{
+				unsigned int r1 = r0 + 1, q;
+				int sharp = 0;
+				while (r1 < nr && rl[r1].key == rl[r0].key)
+					r1++;
+				for (q = r0 + 1; q < r1; q++)
+					sharp |= fabs(rl[r0].n[0] * rl[q].n[0] + rl[r0].n[1] * rl[q].n[1] + rl[r0].n[2] * rl[q].n[2]) < 1 - 1e-9;
+				if (sharp)
+				{
+					se[2 * (size_t)nfe] = rl[r0].a;
+					se[2 * (size_t)nfe + 1] = rl[r0].b;
+					nfe++;
+				}
+				r0 = r1;
+			}
+			qaws_internal_free(rl); qaws_internal_free(corner);
 		}
 		if (nfe && qaws_mesh_3d_set_feature_edges(*out, se, nfe) != QAWS_STATUS_OK)
 			goto done;
@@ -497,6 +636,8 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			st = swp_soup(&soup, mesh, motion, &md, sof, soc, nv, times, report->slabs + 1);
 			if (st == QAWS_STATUS_OK)
 				st = cy_boolean(out, &report->boolean, (qaws_mesh_3d const* const*)&soup, 1, NULL, 0, QAWS_BOOLEAN_UNION, &id);
+			if (st == QAWS_STATUS_OK && *out)
+				st = swp_crease_features(*out);
 			qaws_mesh_3d_destroy(soup);
 		}
 		report->closed = report->boolean.closed;
