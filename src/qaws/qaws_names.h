@@ -1689,6 +1689,7 @@
 #define vim_unsplit_border QAWS_SFX(vim_unsplit_border)
 #define vm_attr_carry QAWS_SFX(vm_attr_carry)
 #define vm_attr_continuous QAWS_SFX(vm_attr_continuous)
+#define vm_attr_from_surface QAWS_SFX(vm_attr_from_surface)
 #define vm_attr_size QAWS_SFX(vm_attr_size)
 #define vm_corners QAWS_SFX(vm_corners)
 #define vm_create QAWS_SFX(vm_create)

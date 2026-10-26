@@ -1142,6 +1142,145 @@ done:
 	return st;
 }
 
+/* the cell owning facet f of m */
+static unsigned int cn_facet_cell(qaws_volume_mesh const* m, unsigned int f)
+{
+	unsigned int lo = 0, hi = m->nc;
+	while (hi - lo > 1)
+	{
+		unsigned int mid = (lo + hi) / 2;
+		if (m->f0[mid] <= f)
+			lo = mid;
+		else
+			hi = mid;
+	}
+	return lo;
+}
+
+/* cell c's corner at vertex v, HM_NONE if none */
+static unsigned int cn_cell_corner(qaws_volume_mesh const* m, unsigned int c, unsigned int v)
+{
+	unsigned int k;
+	for (k = m->c0[c]; k < m->c0[c + 1]; k++)
+		if (m->cv[k] == v)
+			return k;
+	return HM_NONE;
+}
+
+/* attribute t's values at element i (zeros when absent) */
+static double const* cn_vals(vm_attr const* t, unsigned int i)
+{
+	static double const zero[16] = { 0 };
+	return t && i != HM_NONE ? t->v + (size_t)t->n * i : zero;
+}
+
+/* the volumes' attributes on the joined mesh, matched by name (one name: one element, rule and component count, else
+   INVALID_ARGUMENT; absent on one side: zeros there): a's and b's elements keep theirs, the bridge's vertices, corners and
+   cells mixed by their rules from a's side to b's across the layers, its facets zeros */
+static qaws_status cn_volume_attributes(qaws_volume_mesh* out, qaws_volume_mesh const* A, qaws_volume_mesh const* B, int same,
+	unsigned int const* af, unsigned int const* bf, cn_patch const* PA, cn_patch const* PB, unsigned int const* match, unsigned int R)
+{
+	unsigned int nva = A->nv, nvb = same ? 0 : B->nv, nca = A->nc, ncb = same ? 0 : B->nc, ka = A->c0[A->nc], kb = same ? 0 : B->c0[B->nc];
+	unsigned int fa = A->f0[A->nc], fb = same ? 0 : B->f0[B->nc], s, i, j, k, r, p;
+	unsigned int* bmatch = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)PA->nf + 1));
+	qaws_status st = QAWS_STATUS_OK;
+	if (!bmatch)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	/* each of a's patch facets: b's patch facet on its matched vertices */
+	for (i = 0; i < PA->nf; i++)
+	{
+		bmatch[i] = HM_NONE;
+		for (j = 0; j < PB->nf && bmatch[i] == HM_NONE; j++)
+		{
+			unsigned int hits = 0;
+			if (PB->fsz[j] != PA->fsz[i])
+				continue;
+			for (k = 0; k < PA->fsz[i]; k++)
+				for (p = 0; p < PB->fsz[j]; p++)
+					hits += PB->fvv[4 * (size_t)j + p] == match[PA->fvv[4 * (size_t)i + k]];
+			if (hits == PA->fsz[i])
+				bmatch[i] = j;
+		}
+	}
+	for (s = 0; s < 2 && st == QAWS_STATUS_OK; s++)
+	{
+		qaws_volume_mesh const* M = s ? B : A;
+		for (i = 0; i < (s && same ? 0 : M->na) && st == QAWS_STATUS_OK; i++)
+		{
+			vm_attr const *ta = NULL, *tb = NULL, *t = &M->attr[i];
+			qaws_attribute_desc d;
+			unsigned int id, n = t->n, nb = PA->nf;
+			double* o;
+			for (j = 0; s && j < A->na; j++)
+				if (!strcmp(A->attr[j].name, t->name))
+					break;
+			if (s && j < A->na)
+				continue;   /* (done with a's) */
+			ta = s ? NULL : t;
+			for (j = 0; j < B->na && !tb; j++)
+				if (!strcmp(B->attr[j].name, t->name))
+					tb = &B->attr[j];
+			if (tb && (tb->element != t->element || tb->rule != t->rule || tb->n != t->n))
+			{
+				st = QAWS_STATUS_INVALID_ARGUMENT;
+				break;
+			}
+			d.name = t->name;
+			d.element = (qaws_mesh_element)t->element;
+			d.components = n;
+			d.rule = (qaws_attribute_rule)t->rule;
+			if ((st = qaws_volume_mesh_add_attribute(&id, out, NULL, &d)) != QAWS_STATUS_OK)
+				break;
+			o = out->attr[id].v;
+			if (t->element == QAWS_MESH_VERTEX)
+			{
+				for (j = 0; ta && j < nva; j++) memcpy(o + (size_t)n * j, ta->v + (size_t)n * j, sizeof(double) * n);
+				for (j = 0; tb && j < nvb; j++) memcpy(o + (size_t)n * (nva + j), tb->v + (size_t)n * j, sizeof(double) * n);
+				for (r = 1; r < R; r++)
+					for (j = 0; j < PA->nv; j++)
+						hm_lerp(o + (size_t)n * (nva + nvb + (size_t)(r - 1) * PA->nv + j), cn_vals(ta, PA->vol[j]), cn_vals(tb, PB->vol[match[j]]),
+							(double)r / R, n, t->rule);
+			}
+			else if (t->element == QAWS_MESH_CELL)
+			{
+				for (j = 0; ta && j < nca; j++) memcpy(o + (size_t)n * j, ta->v + (size_t)n * j, sizeof(double) * n);
+				for (j = 0; tb && j < ncb; j++) memcpy(o + (size_t)n * (nca + j), tb->v + (size_t)n * j, sizeof(double) * n);
+				for (r = 0; r < R; r++)
+					for (j = 0; j < nb; j++)
+					{
+						unsigned int cb = bmatch[j] == HM_NONE ? HM_NONE : cn_facet_cell(B, bf[bmatch[j]]);
+						hm_lerp(o + (size_t)n * (nca + ncb + (size_t)r * nb + j), cn_vals(ta, cn_facet_cell(A, af[j])), cn_vals(tb, cb), (r + 0.5) / R, n, t->rule);
+					}
+			}
+			else if (t->element == QAWS_MESH_CORNER)
+			{
+				unsigned int at = ka + kb;
+				for (j = 0; ta && j < ka; j++) memcpy(o + (size_t)n * j, ta->v + (size_t)n * j, sizeof(double) * n);
+				for (j = 0; tb && j < kb; j++) memcpy(o + (size_t)n * (ka + j), tb->v + (size_t)n * j, sizeof(double) * n);
+				for (r = 0; r < R; r++)
+					for (j = 0; j < nb; j++)
+					{
+						unsigned int ca = cn_facet_cell(A, af[j]), cb = bmatch[j] == HM_NONE ? HM_NONE : cn_facet_cell(B, bf[bmatch[j]]);
+						for (k = 0; k < 2; k++)
+							for (p = 0; p < PA->fsz[j]; p++, at++)
+							{
+								unsigned int lv = PA->fvv[4 * (size_t)j + p];
+								hm_lerp(o + (size_t)n * at, cn_vals(ta, cn_cell_corner(A, ca, PA->vol[lv])),
+									cn_vals(tb, cb == HM_NONE ? HM_NONE : cn_cell_corner(B, cb, PB->vol[match[lv]])), (double)(r + k) / R, n, t->rule);
+							}
+					}
+			}
+			else
+			{
+				for (j = 0; ta && j < fa; j++) memcpy(o + (size_t)n * j, ta->v + (size_t)n * j, sizeof(double) * n);
+				for (j = 0; tb && j < fb; j++) memcpy(o + (size_t)n * (fa + j), tb->v + (size_t)n * j, sizeof(double) * n);
+			}
+		}
+	}
+	qaws_internal_free(bmatch);
+	return st;
+}
+
 qaws_status qaws_volume_mesh_connect(qaws_volume_mesh** out, qaws_connect_report* report, qaws_volume_mesh const* a, unsigned int const* af,
 	qaws_volume_mesh const* b, unsigned int const* bf, unsigned int nafc, unsigned int nbfc, qaws_connect_desc const* desc)
 {
@@ -1339,6 +1478,12 @@ qaws_status qaws_volume_mesh_connect(qaws_volume_mesh** out, qaws_connect_report
 			d.cell_types = types;
 			d.cell_count = ncell;
 			st = qaws_volume_mesh_create(out, &d);
+			if (st == QAWS_STATUS_OK && (a->na || (!same && b->na)))
+				if ((st = cn_volume_attributes(*out, a, same ? a : b, same, af, bf, &PA, &PB, match, R)) != QAWS_STATUS_OK)
+				{
+					qaws_volume_mesh_destroy(*out);
+					*out = NULL;
+				}
 			if (st != QAWS_STATUS_OK)
 				goto done;
 		}

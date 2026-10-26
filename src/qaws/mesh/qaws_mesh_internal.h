@@ -232,6 +232,9 @@ qaws_status vm_attr_carry(qaws_volume_mesh* dst, qaws_volume_mesh const* src, un
 int vm_attr_continuous(qaws_volume_mesh const* m, unsigned int f);
 /* per dst facet the src facet on the same vertices turned the same way (the same side), QAWS_MESH_NONE if none; 0 out of memory */
 int vm_facet_map(unsigned int* out, qaws_volume_mesh const* dst, qaws_volume_mesh const* src);
+/* a surface's attributes on a volume meshing its inside: vertex and corner ones per vertex (at each vertex's nearest point of
+   the surface, by their rules), face ones per border facet (its centroid's nearest face; inner facets zeros); edge ones not */
+qaws_status vm_attr_from_surface(qaws_volume_mesh* out, qaws_mesh_3d const* surface);
 
 /* corners and facets per cell type; facet f's corners, outward (*n of them) */
 extern unsigned char const vm_corners[4], vm_facets[4];

@@ -99,8 +99,11 @@ qaws_status qaws_volume_mesh_validate(qaws_volume_mesh const* mesh);
  * regions where they are continuous (a facet between cells of different
  * values, with corner values differing at its vertices, or a nonzero facet
  * value stays as a wall, its vertices fixed); qaws_volume_mesh_tetrahedralize
- * takes the border surface's (vertex and corner ones per vertex, at each
- * vertex's nearest point of the surface; face ones on the border facets).
+ * and qaws_volume_mesh_hexahedralize take the border surface's (vertex and
+ * corner ones per vertex, at each vertex's nearest point of the surface; face
+ * ones on the border facets); qaws_volume_mesh_grow_layers maps them up its
+ * stacks (face ones per cell); qaws_volume_mesh_connect keeps both volumes'
+ * and mixes them across the bridge.
  */
 
 /* values: components per element; NULL: zeros. INVALID_ARGUMENT for an edge or face element, a rule and component count

@@ -41,6 +41,10 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- `qaws_volume_mesh_hexahedralize` (GRID): the inside test cast its rays along the grid lines, so a line along two
+  triangles' shared edge (a box face's diagonal) missed both and the misses cancelled: whole rows of cubes were taken
+  as outside (a unit box at a quarter refused, at a fifth 44 cubes instead of 159). The rays now always run just off
+  the lines.
 - Mesh Booleans: a self-union of parts overlapping in a plane (copies facing
   the same way or folded back) kept every copy, leaving the result open; the
   lowest input face's pieces now stand for the overlap.
@@ -64,6 +68,7 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Volume attributes through hexahedralization, boundary layers and the volume connector (test 182, figure 66).
 - Attributes on volume meshes: per vertex, corner, cell (`QAWS_MESH_CELL`) and facet (`QAWS_MESH_FACET`), with the surface
   API; kept by cloning and the border, by improvement (flips only inside regions where they are continuous), taken from
   the border surface by tetrahedralization. Test 182, figure 65.

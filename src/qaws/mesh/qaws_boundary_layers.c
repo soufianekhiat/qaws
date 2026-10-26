@@ -107,6 +107,52 @@ static int bl_box_hit(double const* o, double const* d, double tmax, double cons
 	return 1;
 }
 
+/* the surface's attributes on the stacks: a vertex's value on each of its copies, a corner's on the cells' corners over it,
+   a face's on its stack's cells; edge ones not */
+static qaws_status bl_attributes(qaws_volume_mesh* out, qaws_hm const* hm, unsigned int const* fo, unsigned int nl, int outward)
+{
+	unsigned int a, nv = hm->nv, nf = hm->nf, k, f, j, i;
+	for (a = 0; a < hm->na; a++)
+	{
+		hm_attr const* t = &hm->attr[a];
+		qaws_attribute_desc d;
+		unsigned int id, n = t->n, at = 0;
+		double* o;
+		qaws_status st;
+		if (t->element == QAWS_MESH_EDGE)
+			continue;
+		d.name = t->name;
+		d.element = t->element == QAWS_MESH_FACE ? QAWS_MESH_CELL : (qaws_mesh_element)t->element;
+		d.components = n;
+		d.rule = (qaws_attribute_rule)t->rule;
+		if ((st = qaws_volume_mesh_add_attribute(&id, out, NULL, &d)) != QAWS_STATUS_OK)
+			return st;
+		o = out->attr[id].v;
+		if (t->element == QAWS_MESH_VERTEX)
+			for (k = 0; k <= nl; k++)
+				for (i = 0; i < nv; i++)
+					memcpy(o + (size_t)n * ((size_t)k * nv + i), hm_attr_at(hm, a, i), sizeof(double) * n);
+		else
+			for (k = 0; k < nl; k++)
+				for (f = 0; f < nf; f++)
+				{
+					if (t->element == QAWS_MESH_FACE)
+					{
+						memcpy(o + (size_t)n * ((size_t)k * nf + f), hm_attr_at(hm, a, f), sizeof(double) * n);
+						continue;
+					}
+					for (j = 0; j < fo[f]; j++)
+					{
+						double const* v = hm_attr_at(hm, a, hm->fc[f] + (outward ? j : (fo[f] - j) % fo[f]));
+						memcpy(o + (size_t)n * (at + j), v, sizeof(double) * n);
+						memcpy(o + (size_t)n * (at + fo[f] + j), v, sizeof(double) * n);
+					}
+					at += 2 * fo[f];
+				}
+	}
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_volume_mesh_grow_layers(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* surface,
 	qaws_boundary_layers_desc const* desc)
 {
@@ -358,6 +404,8 @@ qaws_status qaws_volume_mesh_grow_layers(qaws_volume_mesh** out_mesh, qaws_mesh_
 	for (i = 0; i < nv; i++)
 		rep.moves += hm->vc[i] != HM_NONE && sc[i] < 1;
 	st = vm_create(y, (nl + 1) * nv, cells, types, nl * nf, out_mesh);
+	if (st == QAWS_STATUS_OK)
+		st = bl_attributes(*out_mesh, hm, fo, nl, desc->outward);
 	if (st == QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d* b = NULL;

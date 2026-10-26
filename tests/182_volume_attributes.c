@@ -13,13 +13,23 @@
  *     exactly, every corner its cell's material, the vertex values as given;
  *   - tetrahedralization of a cube carrying x + 2 y + 3 z per vertex and a
  *     side label per face: every border vertex the field exactly, every
- *     border facet its side's label, the inner facets 0.
+ *     border facet its side's label, the inner facets 0;
+ *   - hexahedralization of the same cube: the same, on hexahedra;
+ *   - boundary layers grown inside it: every copy of a vertex its value,
+ *     every cell its face's label (per cell), every corner its base
+ *     corner's value;
+ *   - two blocks of hexahedra a unit apart, joined (4 layers): a vertex
+ *     value 0 on a and 1 on b runs linearly across the bridge (exactly z - 1),
+ *     the cells' materials 1 and 2 meet at its middle.
  */
 
 #include "test_common.h"
 #include "qaws_volume_mesh.h"
 #include "qaws_volume_improve.h"
 #include "qaws_tetrahedralize.h"
+#include "qaws_hexahedralize.h"
+#include "qaws_boundary_layers.h"
+#include "qaws_mesh_connect.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -335,6 +345,226 @@ static void test_tetrahedralize(void)
 	qaws_mesh_3d_destroy(box); qaws_volume_mesh_destroy(t);
 }
 
+/* the unit box carrying "field" (x + 2 y + 3 z per vertex), "fc" (the same per corner) and "side" (1 + 2 axis + far, per face) */
+static qaws_mesh_3d* va_labelled_box(void)
+{
+	qaws_mesh_3d* box = va_box(1);
+	qaws_scalar fv[8], fc[36], side[12];
+	unsigned int f[36], i;
+	qaws_attribute_desc ad;
+	qaws_mesh_3d_get_triangles(f, box);
+	for (i = 0; i < 8; i++)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(box, i);
+		fv[i] = p.x + 2 * p.y + 3 * p.z;
+	}
+	for (i = 0; i < 36; i++) fc[i] = fv[f[i]];
+	for (i = 0; i < 12; i++)
+	{
+		qaws_vec3 a = qaws_mesh_3d_get_vertex(box, f[3 * i]), b = qaws_mesh_3d_get_vertex(box, f[3 * i + 1]), c = qaws_mesh_3d_get_vertex(box, f[3 * i + 2]);
+		unsigned int ax = a.x == b.x && b.x == c.x ? 0 : a.y == b.y && b.y == c.y ? 1 : 2;
+		double coord = ax == 0 ? (double)a.x : ax == 1 ? (double)a.y : (double)a.z;
+		side[i] = (qaws_scalar)(1 + 2 * ax + (coord > 0.5));
+	}
+	ad.name = "field"; ad.element = QAWS_MESH_VERTEX; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(NULL, box, fv, &ad);
+	ad.name = "fc"; ad.element = QAWS_MESH_CORNER;
+	qaws_mesh_3d_add_attribute(NULL, box, fc, &ad);
+	ad.name = "side"; ad.element = QAWS_MESH_FACE; ad.rule = QAWS_ATTRIBUTE_NEAREST;
+	qaws_mesh_3d_add_attribute(NULL, box, side, &ad);
+	return box;
+}
+
+static void test_hexahedralize(void)
+{
+	static unsigned char const hf[6][4] = { { 0, 3, 2, 1 }, { 4, 5, 6, 7 }, { 0, 1, 5, 4 }, { 1, 2, 6, 5 }, { 2, 3, 7, 6 }, { 3, 0, 4, 7 } };
+	qaws_mesh_3d* box = va_labelled_box();
+	qaws_volume_mesh* h = NULL;
+	qaws_hexahedralize_desc hd;
+	unsigned int nborder = 0, nfb = 0, fbad = 0, inner_bad = 0, i;
+	double ferr = 0;
+	char msg[300];
+	memset(&hd, 0, sizeof hd);
+	hd.cell_size = (qaws_scalar)0.25;
+	qaws_mesh_3d_detect_features(box, (qaws_scalar)0.5, 0, 0);   /* (its creases kept: the reference flat between them, not a rounded blob) */
+	if (qaws_volume_mesh_hexahedralize(&h, NULL, box, &hd) == QAWS_STATUS_OK && h)
+	{
+		unsigned int nv = qaws_volume_mesh_get_vertex_count(h), nc = qaws_volume_mesh_get_cell_count(h), nf = qaws_volume_mesh_get_facet_count(h), c, k;
+		qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+		unsigned int *cv = (unsigned int*)malloc(sizeof(unsigned int) * 8 * nc), *adj = (unsigned int*)malloc(sizeof(unsigned int) * nf);
+		qaws_cell_type* ty = (qaws_cell_type*)malloc(sizeof(qaws_cell_type) * nc);
+		qaws_scalar *field = va_get(h, "field", nv), *side = va_get(h, "side", nf);
+		qaws_volume_mesh_get_positions(x, h);
+		qaws_volume_mesh_get_cells(cv, ty, h);
+		qaws_volume_mesh_get_cell_adjacency(adj, h);
+		for (i = 0; field && i < nv; i++)
+		{
+			double px = (double)x[3 * i], py = (double)x[3 * i + 1], pz = (double)x[3 * i + 2];
+			if (!(fabs(px) < 1e-6 || fabs(px - 1) < 1e-6 || fabs(py) < 1e-6 || fabs(py - 1) < 1e-6 || fabs(pz) < 1e-6 || fabs(pz - 1) < 1e-6))
+				continue;
+			nborder++;
+			ferr = fmax(ferr, fabs((double)field[i] - (px + 2 * py + 3 * pz)));
+		}
+		for (c = 0; side && c < nc; c++)
+			for (k = 0; k < 6; k++)
+			{
+				unsigned int fi = 6 * c + k, j, ax = 3;
+				double cen[3] = { 0, 0, 0 };
+				if (ty[c] != QAWS_CELL_HEXAHEDRON)
+					break;
+				if (adj[fi] != QAWS_MESH_NONE)
+				{
+					inner_bad += side[fi] != 0;
+					continue;
+				}
+				nfb++;
+				for (j = 0; j < 4; j++)
+				{
+					unsigned int v = cv[8 * c + hf[k][j]];
+					cen[0] += (double)x[3 * v] / 4; cen[1] += (double)x[3 * v + 1] / 4; cen[2] += (double)x[3 * v + 2] / 4;
+				}
+				for (j = 0; j < 3; j++)
+					if (fabs(cen[j]) < 1e-6 || fabs(cen[j] - 1) < 1e-6)
+						ax = j;
+				fbad += ax == 3 || (double)side[fi] != 1 + 2 * ax + (cen[ax] > 0.5);
+			}
+		if (!field || !side)
+			fbad = 1000000;
+		free(x); free(cv); free(adj); free(ty); free(field); free(side);
+	}
+	sprintf(msg, "hexahedralized: %u border vertices, the field off by %.1e; %u border facets, %u off their side's label, %u inner facets nonzero",
+		nborder, ferr, nfb, fbad, inner_bad);
+	printf("  %s\n", msg);
+	TEST_ASSERT(h && nborder > 8 && ferr < 1e-6 && nfb > 0 && fbad == 0 && inner_bad == 0, msg);
+	qaws_mesh_3d_destroy(box); qaws_volume_mesh_destroy(h);
+}
+
+static void test_layers(void)
+{
+	qaws_mesh_3d* box = va_labelled_box();
+	qaws_volume_mesh* l = NULL;
+	qaws_boundary_layers_desc bd;
+	unsigned int vbad = 0, cbad = 0, kbad = 0, nc = 0;
+	char msg[300];
+	memset(&bd, 0, sizeof bd);
+	bd.layer_count = 2;
+	bd.first_height = (qaws_scalar)0.05;
+	if (qaws_volume_mesh_grow_layers(&l, NULL, box, &bd) == QAWS_STATUS_OK && l)
+	{
+		unsigned int nv = qaws_volume_mesh_get_vertex_count(l), nk = qaws_volume_mesh_get_corner_count(l), i;
+		qaws_scalar *field = va_get(l, "field", nv), *fc = va_get(l, "fc", nk), *side = NULL, sf[12];
+		unsigned int* cv = (unsigned int*)malloc(sizeof(unsigned int) * nk);
+		unsigned int id;
+		nc = qaws_volume_mesh_get_cell_count(l);
+		side = va_get(l, "side", nc);
+		qaws_mesh_3d_find_attribute(&id, box, "side");
+		qaws_mesh_3d_get_attribute(sf, box, id);
+		qaws_volume_mesh_get_cells(cv, NULL, l);
+		for (i = 0; field && i < nv; i++)
+		{
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(box, i % 8);
+			vbad += field[i] != p.x + 2 * p.y + 3 * p.z;
+		}
+		for (i = 0; side && i < nc; i++) cbad += side[i] != sf[i % 12];
+		for (i = 0; fc && field && i < nk; i++) kbad += fc[i] != field[cv[i] % 8];
+		if (!field || !side || !fc)
+			vbad = 1000000;
+		free(field); free(fc); free(side); free(cv);
+	}
+	sprintf(msg, "two layers grown: %u cells; vertex values off %u, cells off their face's label %u, corners off %u", nc, vbad, cbad, kbad);
+	printf("  %s\n", msg);
+	TEST_ASSERT(l && nc == 24 && vbad == 0 && cbad == 0 && kbad == 0, msg);
+	qaws_mesh_3d_destroy(box); qaws_volume_mesh_destroy(l);
+}
+
+/* an n x n x 1 block of unit hexahedra at height z0 */
+static qaws_volume_mesh* va_block(unsigned int n, double z0)
+{
+	unsigned int s = n + 1, i, j, k, c = 0;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * s * s * 2);
+	unsigned int* cv = (unsigned int*)malloc(sizeof(unsigned int) * 8 * n * n);
+	qaws_cell_type* ty = (qaws_cell_type*)malloc(sizeof(qaws_cell_type) * n * n);
+	qaws_volume_mesh_desc d;
+	qaws_volume_mesh* m = NULL;
+	for (k = 0; k < 2; k++)
+		for (j = 0; j < s; j++)
+			for (i = 0; i < s; i++)
+			{
+				unsigned int v = (k * s + j) * s + i;
+				x[3 * v] = (qaws_scalar)i; x[3 * v + 1] = (qaws_scalar)j; x[3 * v + 2] = (qaws_scalar)(z0 + k);
+			}
+	for (j = 0; j < n; j++)
+		for (i = 0; i < n; i++, c++)
+		{
+			unsigned int b0 = j * s + i, t0 = s * s + b0;
+			unsigned int const q[8] = { b0, b0 + 1, b0 + s + 1, b0 + s, t0, t0 + 1, t0 + s + 1, t0 + s };
+			memcpy(cv + 8 * c, q, sizeof q);
+			ty[c] = QAWS_CELL_HEXAHEDRON;
+		}
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 2 * s * s; d.cell_vertices = cv; d.cell_types = ty; d.cell_count = n * n;
+	qaws_volume_mesh_create(&m, &d);
+	free(x); free(cv); free(ty);
+	return m;
+}
+
+static void test_connect(void)
+{
+	qaws_volume_mesh *a = va_block(2, 0), *b = va_block(2, 2), *m = NULL;
+	unsigned int top[4], bot[4], i, nv = 0, nc = 0, cbad = 0;
+	qaws_scalar t18[18], m4[4];
+	qaws_connect_desc cd;
+	double terr = 0;
+	char msg[300];
+	for (i = 0; i < 4; i++)
+	{
+		top[i] = 6 * i + 1;
+		bot[i] = 6 * i;
+	}
+	for (i = 0; i < 18; i++) t18[i] = 0;
+	for (i = 0; i < 4; i++) m4[i] = 1;
+	va_add(a, "t", QAWS_MESH_VERTEX, 1, QAWS_ATTRIBUTE_LINEAR, t18);
+	va_add(a, "m", QAWS_MESH_CELL, 1, QAWS_ATTRIBUTE_NEAREST, m4);
+	for (i = 0; i < 18; i++) t18[i] = 1;
+	for (i = 0; i < 4; i++) m4[i] = 2;
+	va_add(b, "t", QAWS_MESH_VERTEX, 1, QAWS_ATTRIBUTE_LINEAR, t18);
+	va_add(b, "m", QAWS_MESH_CELL, 1, QAWS_ATTRIBUTE_NEAREST, m4);
+	memset(&cd, 0, sizeof cd);
+	cd.rows = 4;
+	if (qaws_volume_mesh_connect(&m, NULL, a, top, b, bot, 4, 4, &cd) == QAWS_STATUS_OK && m)
+	{
+		qaws_scalar *x, *t, *mat;
+		unsigned int* cv;
+		nv = qaws_volume_mesh_get_vertex_count(m);
+		nc = qaws_volume_mesh_get_cell_count(m);
+		x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+		cv = (unsigned int*)malloc(sizeof(unsigned int) * 8 * nc);
+		t = va_get(m, "t", nv);
+		mat = va_get(m, "m", nc);
+		qaws_volume_mesh_get_positions(x, m);
+		qaws_volume_mesh_get_cells(cv, NULL, m);
+		for (i = 0; t && i < nv; i++)
+		{
+			double z = (double)x[3 * i + 2];
+			terr = fmax(terr, fabs((double)t[i] - (z <= 1 ? 0 : z >= 2 ? 1 : z - 1)));
+		}
+		for (i = 0; mat && i < nc; i++)
+		{
+			double z = 0;
+			unsigned int k;
+			for (k = 0; k < 8; k++) z += (double)x[3 * cv[8 * i + k] + 2] / 8;
+			cbad += mat[i] != (z < 1.5 ? 1 : 2);
+		}
+		if (!t || !mat)
+			cbad = 1000000;
+		free(x); free(cv); free(t); free(mat);
+	}
+	sprintf(msg, "two blocks joined by 4 layers: %u vertices, %u cells; the value off z - 1 by %.1e, %u cells off their side's material", nv, nc, terr, cbad);
+	printf("  %s\n", msg);
+	TEST_ASSERT(m && nc == 24 && terr < 1e-12 && cbad == 0, msg);
+	qaws_volume_mesh_destroy(a); qaws_volume_mesh_destroy(b); qaws_volume_mesh_destroy(m);
+}
+
 int test_182_volume_attributes_main(void)
 {
 	g_pass = 0;
@@ -343,6 +573,9 @@ int test_182_volume_attributes_main(void)
 	test_api();
 	test_improve();
 	test_tetrahedralize();
+	test_hexahedralize();
+	test_layers();
+	test_connect();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

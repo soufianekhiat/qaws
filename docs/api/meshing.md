@@ -1097,13 +1097,18 @@ qaws_volume_mesh_add_attribute(&id, volume, values, &desc);   /* desc.element: V
 - **API:** add, count, find, desc, get, set, remove, as on surfaces.
 - **Clone and border:** `qaws_volume_mesh_clone` keeps them; `qaws_volume_mesh_get_boundary` hands them to the surface by name: vertex ones per vertex, corner ones per corner (the facet's corners in its cell), cell and facet ones per face.
 - **Improvement:** `qaws_volume_mesh_improve` keeps them. A facet across which they jump (different cell values, corner values differing at its vertices, a nonzero facet value) is a wall, as the border is: its vertices stay, no flip crosses it. So every flip stays inside one region, its new cells take the replaced cells' values, and each material's volume is exact.
-- **Tetrahedralization:** `qaws_volume_mesh_tetrahedralize` takes the border surface's attributes: vertex and corner ones per vertex (each vertex's value at its nearest point of the surface, so the border's vertices are exact and the inside takes the nearest border value), face ones on the border facets (inner facets zero); edge ones are not taken.
-- **Not yet:** hexahedra, boundary layers and the volume connector make meshes without attributes.
+- **Tetrahedra and hexahedra:** `qaws_volume_mesh_tetrahedralize` and `qaws_volume_mesh_hexahedralize` take the border surface's attributes: vertex and corner ones per vertex (each vertex's value at its nearest point of the surface, so the border's vertices are exact and the inside takes the nearest border value), face ones on the border facets (inner facets zero); edge ones are not taken.
+- **Boundary layers:** `qaws_volume_mesh_grow_layers` maps them by its stacks: a vertex's value on each of its copies, a corner's on the cells' corners over it, a face's on its stack's cells (as a cell attribute).
+- **The volume connector:** `qaws_volume_mesh_connect` matches the two volumes' attributes by name (one element, rule and component count per name, else INVALID_ARGUMENT; absent on one side: zeros there). Each volume's own elements keep their values. The bridge's vertices, corners and cells are mixed by their rules from a's side to b's across the layers, and its facets are zero.
 
 Test 182:
 - two tetrahedra: every element's values read back, set, removed, cloned, and found on the border exactly;
 - a cube's tetrahedra in two materials improved with flips and smoothing (12 edge removals, 77 moves): each material's volume the same to the last digit, every corner its cell's material;
-- a cube carrying x + 2 y + 3 z and side labels tetrahedralized: the field exact at the border vertices, every border facet its side's label.
+- a cube carrying x + 2 y + 3 z and side labels tetrahedralized, then hexahedralized: the field exact at the border vertices, every border facet its side's label;
+- two boundary layers grown in it: every copy of a vertex its value, every cell its face's label, every corner its base corner's;
+- two blocks joined by 4 layers: a value 0 on one and 1 on the other runs exactly as z − 1 across the bridge, the materials meet at its middle.
+
+Figure 66 (key ^) shows a coloured ball as hexahedra and as boundary layers (each stack one colour), and two blocks, blue and orange, joined by a bridge blended in Oklab.
 
 Figure 65 (key ~) shows a ball's colours carried into its tetrahedra, a box's side labels on its border facets, and an inclusion of a second material improved (worst dihedral 25.5° to 33.8°, the materials' volumes unchanged).
 

@@ -6,6 +6,7 @@
 #include "qaws_mesh_internal.h"
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_volume_mesh.h"
+#include "../qaws_mesh_reference.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -388,6 +389,87 @@ int vm_facet_map(unsigned int* out, qaws_volume_mesh const* dst, qaws_volume_mes
 	}
 	qaws_internal_free(keys);
 	return 1;
+}
+
+/* the border surface's attributes on the cells: vertex and corner ones per vertex (at each vertex's nearest point of the
+   surface, by their rules: the border's vertices exact), face ones per border facet (its centroid's nearest face, inner
+   facets zeros); edge ones not */
+qaws_status vm_attr_from_surface(qaws_volume_mesh* out, qaws_mesh_3d const* surface)
+{
+	qaws_mesh_reference* ref = NULL;
+	qaws_mesh_reference_desc rd;
+	unsigned int nv = out->nv, nf = out->f0[out->nc], na = qaws_mesh_3d_get_attribute_count(surface), nb = 0, c, k, j, a, i;
+	qaws_scalar* p = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)(nv > nf ? nv : nf) + 1));
+	qaws_mesh_location* loc = (qaws_mesh_location*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (size_t)nv + 1));
+	qaws_mesh_location* floc = (qaws_mesh_location*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (size_t)nf + 1));
+	unsigned int* bf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	qaws_scalar* vals = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 16, (size_t)(nv > nf ? nv : nf) + 1));
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!p || !loc || !floc || !bf || !vals)
+		goto done;
+	memset(&rd, 0, sizeof rd);
+	rd.interpolant = QAWS_INTERPOLANT_LINEAR;
+	if ((st = qaws_mesh_reference_create(&ref, surface, &rd)) != QAWS_STATUS_OK)
+		goto done;
+	for (i = 0; i < 3 * nv; i++)
+		p[i] = (qaws_scalar)out->x[i];
+	if ((st = qaws_mesh_reference_project(loc, NULL, ref, p, NULL, nv)) != QAWS_STATUS_OK)
+		goto done;
+	for (c = 0; c < out->nc; c++)
+		for (k = 0; k < vm_facets[out->type[c]]; k++)
+		{
+			unsigned int f = out->f0[c] + k, n;
+			unsigned char const* lc;
+			if (out->fo[f] != HM_NONE)
+				continue;
+			lc = vm_facet(out->type[c], k, &n);
+			for (j = 0; j < 3; j++)
+			{
+				double s = 0;
+				for (i = 0; i < n; i++)
+					s += out->x[3 * (size_t)out->cv[out->c0[c] + lc[i]] + j];
+				p[3 * (size_t)nb + j] = (qaws_scalar)(s / n);
+			}
+			bf[nb++] = f;
+		}
+	if ((st = qaws_mesh_reference_project(floc, NULL, ref, p, NULL, nb)) != QAWS_STATUS_OK)
+		goto done;
+	for (a = 0; a < na && st == QAWS_STATUS_OK; a++)
+	{
+		qaws_attribute_desc d;
+		qaws_mesh_3d_get_attribute_desc(&d, surface, a);
+		if (d.element == QAWS_MESH_EDGE)
+			continue;
+		if (d.element == QAWS_MESH_FACE)
+		{
+			qaws_scalar* fv = (qaws_scalar*)qaws_internal_scratch_zalloc((size_t)d.components * nf + 1, sizeof(qaws_scalar));
+			if (!fv)
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				break;
+			}
+			st = qaws_mesh_reference_evaluate_attribute(vals, ref, floc, nb, a);
+			for (i = 0; st == QAWS_STATUS_OK && i < nb; i++)
+				memcpy(fv + (size_t)d.components * bf[i], vals + (size_t)d.components * i, sizeof(qaws_scalar) * d.components);
+			d.element = QAWS_MESH_FACET;
+			if (st == QAWS_STATUS_OK)
+				st = qaws_volume_mesh_add_attribute(NULL, out, fv, &d);
+			qaws_internal_free(fv);
+			continue;
+		}
+		st = qaws_mesh_reference_evaluate_attribute(vals, ref, loc, nv, a);
+		d.element = QAWS_MESH_VERTEX;
+		if (st == QAWS_STATUS_OK)
+			st = qaws_volume_mesh_add_attribute(NULL, out, vals, &d);
+	}
+done:
+	qaws_mesh_reference_destroy(ref);
+	qaws_internal_free(p);
+	qaws_internal_free(loc);
+	qaws_internal_free(floc);
+	qaws_internal_free(bf);
+	qaws_internal_free(vals);
+	return st;
 }
 
 qaws_status qaws_volume_mesh_add_attribute(unsigned int* out_attribute, qaws_volume_mesh* mesh, qaws_scalar const* values,

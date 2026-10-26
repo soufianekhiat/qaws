@@ -131,7 +131,7 @@ static int hx_inside(hx_grid* g, double const* x, unsigned int const* tri, unsig
 		unsigned int j = i % (g->n[1] + 1), k = i / (g->n[1] + 1), tries, q, nc = 0, a;
 		for (tries = 0; tries < 4; tries++)
 		{
-			double y = g->o[1] + j * g->h[1] + tries * 1.3e-7 * g->h[1], z = g->o[2] + k * g->h[2] + tries * 0.7e-7 * g->h[2];
+			double y = g->o[1] + j * g->h[1] + (tries + 1) * 1.3e-7 * g->h[1], z = g->o[2] + k * g->h[2] + (tries + 1) * 0.7e-7 * g->h[2];   /* (always off the grid line: a line along two triangles' shared edge, as a box face's diagonal, misses both and two such misses cancel) */
 			nc = 0;
 			for (q = l0[i]; q < l0[i + 1]; q++)
 			{
@@ -1855,6 +1855,8 @@ done:
 	qaws_internal_free(csr.v0); qaws_internal_free(csr.cell);
 	mr_scratch_free(&s);
 	qaws_mesh_reference_destroy(ref);
+	if (st == QAWS_STATUS_OK && *out_mesh && qaws_mesh_3d_get_attribute_count(boundary))
+		st = vm_attr_from_surface(*out_mesh, boundary);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_volume_mesh_destroy(*out_mesh);
