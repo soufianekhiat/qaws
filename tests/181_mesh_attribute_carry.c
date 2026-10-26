@@ -49,6 +49,13 @@
  *     more than 25 degrees (the slabs' chords bend less), and the cube at
  *     101 times along the motion inside it (points 0.01 within its sides, at
  *     mid height and by the top: nothing a turning face sweeps left out);
+ *   - a sweep simplified (qaws_sweep_desc.simplify): a featured cube with
+ *     a LINEAR field, per-face UVs (seams) and edge values, along a curve
+ *     while turning a quarter: every corner's values the plain sweep's at
+ *     its place (a point just inside its triangle), the edge values'
+ *     lengths and the features as the plain sweep's (the collapses keep
+ *     each wedge's values, the lines carrying values and the features), on
+ *     far fewer faces;
  *   - edge values through the connector: two tubes joined, each tube's edges
  *     their values (a's 1 + i, b's 100 + i), the bridge's 0;
  *   - refused: one name of two elements, a NORMAL of 2 components.
@@ -1019,6 +1026,163 @@ static qaws_mesh_3d* ac_tube(double z0, double z1, double base)
 	return m;
 }
 
+/* the largest difference between t's corner values of the corner attribute name (LINEAR) and r's at the same places (a point a
+   millionth of the way into t's triangle, on r's triangle of the same plane holding it, interpolated); *unmatched: places on
+   no such triangle */
+static double ac_corner_match(qaws_mesh_3d const* r, qaws_mesh_3d const* t, char const* name, unsigned int* unmatched)
+{
+	qaws_mesh_element er, et;
+	unsigned int nr = 0, nt = 0, ntr = qaws_mesh_3d_get_triangle_count(r), ntt = qaws_mesh_3d_get_triangle_count(t), f, g, j, k;
+	qaws_scalar *vr = ac_get(r, name, &er, &nr), *vt = ac_get(t, name, &et, &nt);
+	double worst = 0;
+	*unmatched = 0;
+	for (f = 0; vr && vt && f < ntt; f++)
+	{
+		unsigned int c[3];
+		double P[3][3], n[3];
+		qaws_mesh_3d_get_triangle(c, t, f);
+		ac_tri_normal(t, f, n);
+		for (j = 0; j < 3; j++)
+		{
+			qaws_vec3 x = qaws_mesh_3d_get_vertex(t, c[j]);
+			P[j][0] = x.x; P[j][1] = x.y; P[j][2] = x.z;
+		}
+		for (j = 0; j < 3; j++)
+		{
+			double x[3], best = 1e30, val[4] = { 0, 0, 0, 0 };
+			for (k = 0; k < 3; k++)
+				x[k] = P[j][k] + 1e-6 * ((P[0][k] + P[1][k] + P[2][k]) / 3 - P[j][k]);
+			for (g = 0; g < ntr; g++)
+			{
+				unsigned int d[3], i;
+				double Q[3][3], m[3], u[3], v[3], q[3], d00 = 0, d01 = 0, d11 = 0, d20 = 0, d21 = 0, den, w1, w2, hgt = 0, out;
+				ac_tri_normal(r, g, m);
+				if (m[0] * n[0] + m[1] * n[1] + m[2] * n[2] < 0.999)
+					continue;
+				qaws_mesh_3d_get_triangle(d, r, g);
+				for (i = 0; i < 3; i++)
+				{
+					qaws_vec3 y = qaws_mesh_3d_get_vertex(r, d[i]);
+					Q[i][0] = y.x; Q[i][1] = y.y; Q[i][2] = y.z;
+				}
+				for (k = 0; k < 3; k++)
+				{
+					u[k] = Q[1][k] - Q[0][k];
+					v[k] = Q[2][k] - Q[0][k];
+					q[k] = x[k] - Q[0][k];
+					hgt += q[k] * m[k];
+					d00 += u[k] * u[k]; d01 += u[k] * v[k]; d11 += v[k] * v[k]; d20 += q[k] * u[k]; d21 += q[k] * v[k];
+				}
+				den = d00 * d11 - d01 * d01;
+				w1 = (d11 * d20 - d01 * d21) / den;
+				w2 = (d00 * d21 - d01 * d20) / den;
+				out = fabs(hgt) + fmax(0, -fmin(fmin(w1, w2), 1 - w1 - w2));
+				if (out < best)
+				{
+					best = out;
+					for (k = 0; k < nr && k < 4; k++)
+						val[k] = (1 - w1 - w2) * (double)vr[(3 * g) * nr + k] + w1 * (double)vr[(3 * g + 1) * nr + k] + w2 * (double)vr[(3 * g + 2) * nr + k];
+				}
+			}
+			if (best > 1e-9)
+			{
+				(*unmatched)++;
+				continue;
+			}
+			for (k = 0; k < nt && k < 4; k++)
+				worst = fmax(worst, fabs(val[k] - (double)vt[(3 * f + j) * nt + k]));
+		}
+	}
+	free(vr); free(vt);
+	return worst;
+}
+
+/* the length of m's edges whose value (edge attribute name) rounds to each of 1 .. 5, into l[0 .. 4] */
+static void ac_edge_lengths(qaws_mesh_3d const* m, char const* name, double* l)
+{
+	unsigned int id, ne = qaws_mesh_3d_get_edge_count(m), i, *ev = (unsigned int*)malloc(sizeof(unsigned int) * (2 * ne + 1));
+	qaws_scalar* v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (ne + 1));
+	for (i = 0; i < 5; i++)
+		l[i] = 0;
+	if (qaws_mesh_3d_find_attribute(&id, m, name) == QAWS_STATUS_OK && ev && v)
+	{
+		qaws_mesh_3d_get_edges(ev, m);
+		qaws_mesh_3d_get_attribute(v, m, id);
+		for (i = 0; i < ne; i++)
+		{
+			long k = lround((double)v[i]);
+			qaws_vec3 a = qaws_mesh_3d_get_vertex(m, ev[2 * i]), b = qaws_mesh_3d_get_vertex(m, ev[2 * i + 1]);
+			if (k >= 1 && k <= 5)
+				l[k - 1] += sqrt(((double)a.x - b.x) * ((double)a.x - b.x) + ((double)a.y - b.y) * ((double)a.y - b.y) + ((double)a.z - b.z) * ((double)a.z - b.z));
+		}
+	}
+	free(ev); free(v);
+}
+
+static void test_sweep_simplify(void)
+{
+	qaws_mesh_3d *c = ac_box(0, 1, 0, 1, 0, 0.6), *o = NULL, *s = NULL;
+	qaws_scalar uv[72], *ev;
+	unsigned int f[36], i, k, ne, fo = 0, fs = 0;
+	qaws_motion_pose p0, p1;
+	qaws_motion* mo = NULL;
+	qaws_sweep_desc d;
+	qaws_sweep_report ro, rs;
+	double const h = sqrt(0.5);
+	double lo[5], ls[5], err = 0, vals = 1;
+	unsigned int um = 1, um2 = 1;
+	char msg[400];
+	qaws_mesh_3d_detect_features(c, (qaws_scalar)0.5, 0, 0);
+	ac_vertex_field(c, "lin", 1, 2, 3, 0);
+	qaws_mesh_3d_get_triangles(f, c);
+	for (i = 0; i < 12; i++)
+		for (k = 0; k < 3; k++)
+		{
+			qaws_vec3 x = qaws_mesh_3d_get_vertex(c, f[3 * i + k]);
+			uv[6 * i + 2 * k] = (qaws_scalar)(x.x + x.z + (double)(i / 2));   /* (each side its own chart: seams at the creases) */
+			uv[6 * i + 2 * k + 1] = (qaws_scalar)(x.y - x.z);
+		}
+	ac_add(c, "uv", QAWS_MESH_CORNER, 2, QAWS_ATTRIBUTE_LINEAR, uv);
+	ne = qaws_mesh_3d_get_edge_count(c);
+	ev = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ne);
+	for (i = 0; i < ne; i++)
+		ev[i] = (qaws_scalar)(1 + i % 5);
+	ac_add(c, "e", QAWS_MESH_EDGE, 1, QAWS_ATTRIBUTE_LINEAR, ev);
+	free(ev);
+	memset(&p0, 0, sizeof p0);
+	memset(&p1, 0, sizeof p1);
+	p0.rotation[0] = 1;
+	p1.rotation[0] = (qaws_scalar)h; p1.rotation[3] = (qaws_scalar)h;
+	p0.angular_velocity.z = p1.angular_velocity.z = (qaws_scalar)(3.14159265358979323846 / 2);
+	p1.position.x = 3; p1.position.y = 1;
+	p0.velocity.x = 4; p1.velocity.x = 2; p1.velocity.y = 2;
+	qaws_motion_create_poses(&mo, &p0, &p1, 0);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)0.004;
+	memset(&ro, 0, sizeof ro);
+	memset(&rs, 0, sizeof rs);
+	if (mo && qaws_mesh_3d_sweep(&o, &ro, c, mo, &d) == QAWS_STATUS_OK && o)
+	{
+		d.simplify = 1;
+		if (qaws_mesh_3d_sweep(&s, &rs, c, mo, &d) == QAWS_STATUS_OK && s)
+		{
+			vals = fmax(ac_corner_match(o, s, "lin", &um), ac_corner_match(o, s, "uv", &um2));
+			ac_edge_lengths(o, "e", lo);
+			ac_edge_lengths(s, "e", ls);
+			for (i = 0; i < 5; i++)
+				err = fmax(err, fabs(lo[i] - ls[i]) / fmax(lo[i], 1e-300));
+			fo = qaws_mesh_3d_get_face_count(o);
+			fs = qaws_mesh_3d_get_face_count(s);
+		}
+	}
+	sprintf(msg, "a sweep simplified: %u faces from %u, its corners' values off the plain sweep's there by %.1e (%u places off it), edge values' lengths by %.1e (relative), features %u (%u), closed %d",
+		fs, fo, vals, um + um2, err, s ? qaws_mesh_3d_get_feature_edge_count(s) : 0, o ? qaws_mesh_3d_get_feature_edge_count(o) : 0, rs.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && s && fs > 0 && 2 * fs < fo && vals < 1e-5 && um + um2 == 0 && err < 1e-9 && rs.closed && qaws_mesh_3d_get_feature_edge_count(s) == qaws_mesh_3d_get_feature_edge_count(o), msg);
+	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(s);
+	qaws_motion_destroy(mo);
+}
+
 static void test_connect_edges(void)
 {
 	qaws_mesh_3d *a = ac_tube(0, 1, 1), *b = ac_tube(1.6, 2.6, 100), *m = NULL;
@@ -1093,6 +1257,7 @@ int test_181_mesh_attribute_carry_main(void)
 	test_vector_quaternion();
 	test_subdivision_rules();
 	test_sweep_features();
+	test_sweep_simplify();
 	test_connect_edges();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

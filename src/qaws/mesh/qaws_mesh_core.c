@@ -382,7 +382,7 @@ void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned i
 }
 
 /* the weighted mean of s values (vals + stride * pos[i]) by rule; NEAREST: the heaviest */
-static void hm_blend(double* out, double const* vals, unsigned int stride, unsigned int const* pos, double const* w,
+void hm_blend(double* out, double const* vals, unsigned int stride, unsigned int const* pos, double const* w,
 	unsigned int s, unsigned int n, unsigned int rule)
 {
 	unsigned int i, j;
@@ -1298,6 +1298,18 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 			for (k = 0; k < m->na; k++)
 				if (m->attr[k].element == QAWS_MESH_EDGE)
 					memcpy(hm_attr_at(m, k, nc[t]), hm_attr_at(m, k, o), sizeof(double) * m->attr[k].n);
+		/* two edges merged (a collapse joins the removed vertex's edge with the kept one's): both sides one value, the
+		   outside's unless it has none (a value on either is kept) */
+		if (sel[t] != HM_NONE && o != HM_NONE && o < nc[0])
+			for (k = 0; k < m->na; k++)
+				if (m->attr[k].element == QAWS_MESH_EDGE)
+				{
+					double *x = hm_attr_at(m, k, nc[t]), *y = hm_attr_at(m, k, o);
+					unsigned int q, zero = 1;
+					for (q = 0; q < m->attr[k].n; q++)
+						zero = zero && y[q] == 0;
+					memcpy(zero ? y : x, zero ? x : y, sizeof(double) * m->attr[k].n);
+				}
 	}
 	/* corner attributes from their sources */
 	for (t = 0; ca && t < p->ncv; t++)

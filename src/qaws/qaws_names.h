@@ -25,6 +25,7 @@
 #define hm_attr_add QAWS_SFX(hm_attr_add)
 #define hm_attr_at QAWS_SFX(hm_attr_at)
 #define hm_attr_remove QAWS_SFX(hm_attr_remove)
+#define hm_blend QAWS_SFX(hm_blend)
 #define hm_build QAWS_SFX(hm_build)
 #define hm_build_paired QAWS_SFX(hm_build_paired)
 #define hm_can_collapse QAWS_SFX(hm_can_collapse)

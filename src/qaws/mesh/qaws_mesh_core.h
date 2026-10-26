@@ -145,6 +145,9 @@ void hm_compact(qaws_hm* m);
 unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, unsigned int rule, unsigned int n);
 void hm_attr_remove(qaws_hm* m, unsigned int a);
 double* hm_attr_at(qaws_hm const* m, unsigned int a, unsigned int i);
+/* the weighted mean of s values (vals + stride * pos[i]) by rule (in its space, aligned to the first); NEAREST: the heaviest */
+void hm_blend(double* out, double const* vals, unsigned int stride, unsigned int const* pos, double const* w, unsigned int s, unsigned int n,
+	unsigned int rule);
 void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned int n, unsigned int rule);
 /* a value into the space its rule blends in (colours: sRGB decoded to linear light, then Oklab; weighted by alpha) and
    back (unit rules normalized); mixing between the two is linear */

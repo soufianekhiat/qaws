@@ -893,23 +893,69 @@ static int swp_flat_delaunay(qaws_hm* m, double eps)
 }
 
 /* the overlapping hulls and cuts leave many vertices in flat regions and on straight creases: those whose removal moves
-   nothing (an error within a thousandth of the tolerance) are collapsed, features and attributes kept (seams made
-   features), then the flat regions turned toward Delaunay. The Boolean's
+   nothing (an error within a thousandth of the tolerance) are collapsed, features and attributes kept (seams are lines
+   the collapses keep), then the flat regions turned toward Delaunay. The Boolean's
    "source" (the soup's faces, internal) is dropped first: every cut would be a seam */
 static qaws_status swp_tidy(qaws_mesh_3d* m, double tol)
 {
 	qaws_decimate_desc d;
-	unsigned int a;
+	qaws_attribute_desc ad;
+	unsigned int a, i, ne, nf = 0, *ev = NULL;
+	qaws_scalar* fv = NULL;
 	qaws_status st;
-	if (m && qaws_mesh_3d_find_attribute(&a, m, "source") == QAWS_STATUS_OK && (st = qaws_mesh_3d_remove_attribute(m, a)) != QAWS_STATUS_OK)
-		return st;
-	memset(&d, 0, sizeof d);
-	d.max_error = (qaws_scalar)(1e-3 * tol);
 	if (!m)
 		return QAWS_STATUS_OK;
-	if ((st = qaws_mesh_3d_decimate(NULL, m, &d)) != QAWS_STATUS_OK)
+	if (qaws_mesh_3d_find_attribute(&a, m, "source") == QAWS_STATUS_OK && (st = qaws_mesh_3d_remove_attribute(m, a)) != QAWS_STATUS_OK)
 		return st;
-	return swp_flat_delaunay(&m->hm, 1e-3 * tol) ? QAWS_STATUS_OK : QAWS_STATUS_ALLOCATION_FAILURE;
+	/* the features carried as an edge value (pieces keep it): the decimation makes every seam a feature, they are put back after */
+	ne = qaws_mesh_3d_get_edge_count(m);
+	ev = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
+	fv = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((size_t)ne + 1));
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!ev || !fv)
+		goto done;
+	qaws_mesh_3d_get_edges(ev, m);
+	for (i = 0; i < ne; i++)
+	{
+		unsigned int c = hm_find_edge(&m->hm, ev[2 * (size_t)i], ev[2 * (size_t)i + 1]);
+		fv[i] = (qaws_scalar)(c != HM_NONE && (m->hm.cflag[c] & HM_FEATURE) ? 1 : 0);
+	}
+	memset(&ad, 0, sizeof ad);
+	ad.name = "qaws_sweep_feature";
+	ad.element = QAWS_MESH_EDGE;
+	ad.components = 1;
+	ad.rule = QAWS_ATTRIBUTE_NEAREST;
+	if ((st = qaws_mesh_3d_add_attribute(&a, m, fv, &ad)) != QAWS_STATUS_OK)
+		goto done;
+	memset(&d, 0, sizeof d);
+	d.max_error = (qaws_scalar)(1e-3 * tol);
+	if ((st = qaws_mesh_3d_decimate(NULL, m, &d)) != QAWS_STATUS_OK)
+		goto done;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!swp_flat_delaunay(&m->hm, 1e-3 * tol))
+		goto done;
+	ne = qaws_mesh_3d_get_edge_count(m);
+	qaws_internal_free(ev);
+	qaws_internal_free(fv);
+	ev = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
+	fv = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((size_t)ne + 1));
+	if (!ev || !fv || qaws_mesh_3d_find_attribute(&a, m, "qaws_sweep_feature") != QAWS_STATUS_OK)
+		goto done;
+	qaws_mesh_3d_get_edges(ev, m);
+	qaws_mesh_3d_get_attribute(fv, m, a);
+	for (i = 0; i < ne; i++)
+		if (fv[i] != 0)
+		{
+			ev[2 * (size_t)nf] = ev[2 * (size_t)i];
+			ev[2 * (size_t)nf + 1] = ev[2 * (size_t)i + 1];
+			nf++;
+		}
+	if ((st = qaws_mesh_3d_remove_attribute(m, a)) == QAWS_STATUS_OK)
+		st = qaws_mesh_3d_set_feature_edges(m, ev, nf);
+done:
+	qaws_internal_free(ev);
+	qaws_internal_free(fv);
+	return st;
 }
 
 qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion,

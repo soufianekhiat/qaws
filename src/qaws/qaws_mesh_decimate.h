@@ -80,11 +80,13 @@
  * attributes (of up to 4 components) by wedges (Hoppe): the corners round the
  * edge grouped (equal values at a vertex, to round-off, joined across the
  * edge's faces), each group's value the one at the new position on the
- * nearest of its corners' triangles before the collapse (LINEAR, VECTOR and
- * the unit rules interpolated, the others its nearest corner's). Their seams
- * stay: an inside edge whose faces' corner attributes differ at either end
- * (UVs cut apart, split normals) or whose faces' attributes differ
- * (materials) is made a feature first, kept as the lines are.
+ * nearest of its corners' triangles before the collapse, interpolated by its
+ * rule (colours in their space, quaternions sign-free, angles the short
+ * way). Their seams stay: an inside edge whose faces' corner attributes
+ * differ at either end (UVs cut apart, split normals), whose faces'
+ * attributes differ (materials) or which carries an edge value is made a
+ * feature first, kept as the lines are (a vertex where a line's edge values
+ * change a corner).
  *
  * It stops at the target face count, before a collapse whose error passes
  * max_error, or when no collapse is left. With QAWS_DECIMATE_MEASURE the

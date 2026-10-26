@@ -538,15 +538,6 @@ static double dc_closest(double const* x, double const* p0, double const* p1, do
 	return r;
 }
 
-/* Corner attributes through a collapse of a into b at x (Hoppe's wedges): per corner attribute (of 4 components at most), the
-   corners at a and b grouped (equal values at one vertex; across the edge's faces, the corner at a with the one at b), each
-   group's value the one at x of its corners' triangles before the collapse, interpolated on the nearest (LINEAR, VECTOR
-   and the unit rules; the others take its nearest corner's). Into tab: per
-   attribute, pairs (the old value, the new one) for each corner, matched by value after the collapse; *nt their counts.
-   shortcut: 64 corners round the edge at most (more: the attribute left as the collapse copies it), upgrade by growing the
-   scratch */
-#define DC_WEDGE_MAX 64
-
 /* two corner values one wedge's: equal to round-off (tol, relative), q and -q one orientation */
 static int dc_wedge_same(double const* p, double const* q, unsigned int n, unsigned int rule, double tol)
 {
@@ -560,6 +551,14 @@ static int dc_wedge_same(double const* p, double const* q, unsigned int n, unsig
 	return same || opp;
 }
 
+/* Corner attributes through a collapse of a into b at x (Hoppe's wedges): per corner attribute (of 4 components at most), the
+   corners at a and b grouped (equal values at one vertex; across the edge's faces, the corner at a with the one at b), each
+   group's value the one at x of its corners' triangles before the collapse, interpolated on the nearest by its rule. Into
+   tab: per attribute, pairs (the old value, the new one) for each corner, matched by value after the collapse; *nt their
+   counts. shortcut: 256 corners round the edge at most (the overlapping pieces of a sweep's flat faces pass 64; more: the
+   attribute left as the collapse copies it), upgrade by growing the scratch */
+#define DC_WEDGE_MAX 256
+
 static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, double const* x, double* tab, unsigned int* nt, unsigned int stride)
 {
 	unsigned int ak, off = 0;
@@ -568,7 +567,6 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 		unsigned int n = m->attr[ak].n, cs[DC_WEDGE_MAX], grp[DC_WEDGE_MAX], nc = 0, i, j, v, c;
 		double best[DC_WEDGE_MAX], val[DC_WEDGE_MAX * 4];
 		nt[ak] = 0;
-		int blend = m->attr[ak].rule == QAWS_ATTRIBUTE_LINEAR || m->attr[ak].rule == QAWS_ATTRIBUTE_VECTOR || hm_rule_unit(m->attr[ak].rule);
 		if (m->attr[ak].element != QAWS_MESH_CORNER || n > 4)
 			continue;
 		for (v = 0; v < 2; v++)
@@ -610,22 +608,18 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 		/* each group's value at x: its corners' triangles (the corner and its face's neighbours), the nearest */
 		for (i = 0; i < nc; i++)
 		{
-			unsigned int g = grp[i], cn = hm_next(m, cs[i]), cp = hm_prev(m, cs[i]), k;
+			unsigned int g = grp[i], cn = hm_next(m, cs[i]), cp = hm_prev(m, cs[i]);
 			double wt[3], d2 = dc_closest(x, m->x + 3 * (size_t)m->cv[cs[i]], m->x + 3 * (size_t)m->cv[cn], m->x + 3 * (size_t)m->cv[cp], wt);
 			if (d2 < best[g])
 			{
 				best[g] = d2;
-				if (blend)
-					for (k = 0; k < n; k++)
-						val[4 * g + k] = wt[0] * hm_attr_at(m, ak, cs[i])[k] + wt[1] * hm_attr_at(m, ak, cn)[k] + wt[2] * hm_attr_at(m, ak, cp)[k];
-				else   /* (other rules: the nearest corner's value, exact at a vertex) */
-					memcpy(val + 4 * g, hm_attr_at(m, ak, wt[0] >= wt[1] && wt[0] >= wt[2] ? cs[i] : wt[1] >= wt[2] ? cn : cp), sizeof(double) * n);
+				unsigned int pos[3];
+				pos[0] = cs[i];
+				pos[1] = cn;
+				pos[2] = cp;
+				hm_blend(val + 4 * g, m->attr[ak].v, n, pos, wt, 3, n, m->attr[ak].rule);   /* (by its rule: colours in their space, quaternions aligned, angles the short way) */
 			}
 		}
-		if (hm_rule_unit(m->attr[ak].rule))
-			for (i = 0; i < nc; i++)
-				if (grp[i] == i)
-					hm_space_out(val + 4 * i, n, m->attr[ak].rule);
 		for (i = 0; i < nc; i++)
 		{
 			memcpy(tab + off + 2 * (size_t)n * i, hm_attr_at(m, ak, cs[i]), sizeof(double) * n);
@@ -763,7 +757,8 @@ static unsigned int dc_creases(qaws_hm* m, double angle)
 }
 
 /* the attributes' seams made features: an inside edge whose two faces' corner attributes differ at either end (UVs cut
-   apart, split normals) or whose faces' attributes differ (materials); the corners recounted; returns how many were made */
+   apart, split normals), whose faces' attributes differ (materials) or which carries an edge value (a vertex where a line's
+   values change a corner); the corners recounted; returns how many were made */
 static unsigned int dc_seams(qaws_hm* m)
 {
 	unsigned int c, v, n = 0, a;
@@ -789,6 +784,13 @@ static unsigned int dc_seams(qaws_hm* m)
 				for (k = 0; k < at->n && !seam; k++)
 					seam = fabs(p0[k] - p1[k]) > 1e-12 * (1 + fabs(p0[k]));
 			}
+			else if (at->element == QAWS_MESH_EDGE)
+			{
+				/* (an edge carrying a value is a line to keep: collapsed away, its value would be lost) */
+				double const* p0 = hm_attr_at(m, a, c);
+				for (k = 0; k < at->n && !seam; k++)
+					seam = p0[k] != 0;
+			}
 		}
 		if (seam)
 		{
@@ -802,6 +804,24 @@ static unsigned int dc_seams(qaws_hm* m)
 		unsigned int d = (m->vflag[v] & HM_DELETED) ? 0 : hm_feature_degree(m, v);
 		if (d && d != 2)
 			m->vflag[v] |= HM_CORNER;
+		else if (d == 2)
+		{
+			/* a line through v whose edge values change there: v stays (its two pieces keep their own) */
+			unsigned int first = HM_NONE;
+			for (c = m->vc[v]; c != HM_NONE && !(m->vflag[v] & HM_CORNER); c = hm_round(m, v, c))
+			{
+				unsigned int e = (m->cflag[c] & HM_FEATURE) ? c : (m->cflag[hm_prev(m, c)] & HM_FEATURE) ? hm_prev(m, c) : HM_NONE, k;
+				if (e == HM_NONE)
+					continue;
+				if (first == HM_NONE)
+					first = e;
+				for (a = 0; a < m->na; a++)
+					if (m->attr[a].element == QAWS_MESH_EDGE)
+						for (k = 0; k < m->attr[a].n; k++)
+							if (hm_attr_at(m, a, e)[k] != hm_attr_at(m, a, first)[k])
+								m->vflag[v] |= HM_CORNER;
+			}
+		}
 	}
 	return n;
 }

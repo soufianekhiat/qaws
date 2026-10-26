@@ -45,9 +45,14 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
-- Decimation: corner attributes of every rule follow the collapses by wedges (QUATERNION, ANGLE, colours and
-  NEAREST were copied from the removed vertex: a swept tool's orientation bled from an earlier pose into its end
-  corners); corners are matched to their wedges to round-off (a renormalized quaternion missed its own), q and -q as one.
+- Decimation: corner attributes of every rule follow the collapses by wedges, interpolated by their rules (QUATERNION,
+  ANGLE, colours and NEAREST were copied from the removed vertex: a swept tool's orientation bled from an earlier pose
+  into its end corners); corners are matched to their wedges to round-off (a renormalized quaternion missed its own),
+  q and -q as one; up to 256 corners round an edge (past 64 the values were left as the collapse copied them: a swept
+  cube's top up to 1.95 off in a linear field); edges carrying an edge value are kept as lines (they were collapsed
+  away, their values lost).
+- Mesh edits: where a collapse merges two edges, the merged edge keeps a value either had, on both its sides (one
+  side could read zero).
 - Sweeps: a face turning as it moves (out at some corners, in at others) was extruded whole or not at all, so a
   turning solid's sweep missed material (a swept cube up to 0.11 inside the true sweep at tolerance 0.004); each slab now
   adds the convex hull of every outgoing face's two positions. Test 181 checks the cube inside the result at 101 times.
