@@ -88,6 +88,6 @@ typedef struct qaws_sweep_boolean_report
 /* op: QAWS_BOOLEAN_DIFFERENCE, _UNION or _INTERSECTION (sweep op stock, the stock taken from for DIFFERENCE); report and desc
    may be NULL. INVALID_ARGUMENT for no move, a NULL move, an unknown op. An empty result: OK and NULL. */
 qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out_mesh, qaws_sweep_boolean_report* report, qaws_mesh_3d const* tool,
-	qaws_motion const* const* moves, unsigned int move_count, qaws_mesh_3d const* stock, qaws_boolean_op op, qaws_sweep_desc const* desc);
+	qaws_motion const* const* moves, qaws_mesh_3d const* stock, unsigned int move_count, qaws_boolean_op op, qaws_sweep_desc const* desc);
 
 #endif /* QAWS_MESH_SWEEP_H */

@@ -300,7 +300,7 @@ static double swp_volume(qaws_mesh_3d const* m)
 }
 
 qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out, qaws_sweep_boolean_report* report, qaws_mesh_3d const* tool, qaws_motion const* const* moves,
-	unsigned int move_count, qaws_mesh_3d const* stock, qaws_boolean_op op, qaws_sweep_desc const* desc)
+	qaws_mesh_3d const* stock, unsigned int move_count, qaws_boolean_op op, qaws_sweep_desc const* desc)
 {
 	qaws_sweep_boolean_report local;
 	qaws_scalar *bx = NULL, *ax = NULL;

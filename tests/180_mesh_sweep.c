@@ -236,9 +236,9 @@ static void test_carving(void)
 	one[0] = slot;
 	two[0] = la;
 	two[1] = lb;
-	s1 = qaws_mesh_sweep_boolean(&o1, &r1, tool, one, 1, block, QAWS_BOOLEAN_DIFFERENCE, NULL);
-	s2 = qaws_mesh_sweep_boolean(&o2, &r2, tool, two, 2, block, QAWS_BOOLEAN_DIFFERENCE, NULL);
-	s3 = qaws_mesh_sweep_boolean(&o3, &r3, tool, two, 2, block, QAWS_BOOLEAN_INTERSECTION, NULL);
+	s1 = qaws_mesh_sweep_boolean(&o1, &r1, tool, one, block, 1, QAWS_BOOLEAN_DIFFERENCE, NULL);
+	s2 = qaws_mesh_sweep_boolean(&o2, &r2, tool, two, block, 2, QAWS_BOOLEAN_DIFFERENCE, NULL);
+	s3 = qaws_mesh_sweep_boolean(&o3, &r3, tool, two, block, 2, QAWS_BOOLEAN_INTERSECTION, NULL);
 	sprintf(msg, "carving a 4 x 2 x 1 block with a 0.5 cube: a slot along its top removing %.15f (0.5); an L of two moves removing %.15f (0.375), its intersection %.15f; stock %.6f = result %.6f + removed; closed %d %d %d",
 		(double)r1.changed_volume, (double)r2.changed_volume, (double)r3.changed_volume, (double)r2.stock_volume, (double)r2.result_volume, r1.closed, r2.closed, r3.closed);
 	printf("  %s\n", msg);

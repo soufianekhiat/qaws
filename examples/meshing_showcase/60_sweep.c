@@ -149,7 +149,7 @@ static void demo_sweep(void)
 		cm[1] = mv[1];
 		memset(&d, 0, sizeof d);
 		d.tolerance = (qaws_scalar)0.005;
-		if (block && ball && mv[0] && mv[1] && qaws_mesh_sweep_boolean(&o, &br, ball, cm, 2, block, QAWS_BOOLEAN_DIFFERENCE, &d) == QAWS_STATUS_OK && o)
+		if (block && ball && mv[0] && mv[1] && qaws_mesh_sweep_boolean(&o, &br, ball, cm, block, 2, QAWS_BOOLEAN_DIFFERENCE, &d) == QAWS_STATUS_OK && o)
 		{
 			sprintf(sub, "%u moves, %u slabs, removed %.4f of %.1f, closed %d", br.moves, br.slabs, (double)br.changed_volume, (double)br.stock_volume, br.closed);
 			ms_panel(c, 1800, 0, 600, 640, o, -0.4, 0.8, "carving: two moves", sub);
