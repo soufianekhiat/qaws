@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <stdio.h>   /* DEBUG-GROUPS */
 
 typedef struct swp_ctx
 {
@@ -903,21 +902,6 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			snf += n0;
 			report->front_faces += n0 > 0;
 		}
-	}
-	if (getenv("QAWS_DUMP_GROUPS"))   /* DEBUG-GROUPS */
-	{
-		FILE* df = fopen(getenv("QAWS_DUMP_GROUPS"), "w");
-		unsigned int g[24], go[8], gc[24], gcp, gn, gi, gf, gs;
-		fprintf(df, "%u\n", snv);
-		for (gi = 0; gi < 3 * snv; gi += 3) fprintf(df, "%.17g %.17g %.17g\n", (double)sx[gi], (double)sx[gi + 1], (double)sx[gi + 2]);
-		for (gi = 0; gi < nt; gi++) fprintf(df, "-1 %u %u %u\n", t[3 * gi], t[3 * gi + 1], t[3 * gi + 2]);
-		for (gs = 0; gs < report->slabs; gs++)
-			for (gf = 0; gf < nt; gf++)
-			{
-				gn = swp_hull(g, go, gc, &gcp, sx, t + 3 * (size_t)gf, gf, gs * nv, (gs + 1) * nv, 1e-12 * diag, tol, 0);
-				for (gi = 0; gi < gn; gi++) fprintf(df, "%u %u %u %u\n", gs * nt + gf, g[3 * gi], g[3 * gi + 1], g[3 * gi + 2]);
-			}
-		fclose(df);
 	}
 	if ((st = swp_cancel(sf, sof, soc, &snf)) != QAWS_STATUS_OK)
 		goto done;
