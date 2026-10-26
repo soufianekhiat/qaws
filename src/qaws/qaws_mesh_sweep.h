@@ -63,6 +63,9 @@ typedef struct qaws_sweep_desc
 {
 	qaws_scalar tolerance;              /* the chords' largest deviation; 0: 1e-3 of the mesh's box diagonal */
 	unsigned int max_slabs;             /* 0: 256 */
+	int simplify;                       /* nonzero: the vertices in flat regions and on straight creases the overlapping slabs
+	                                       leave removed (each collapse within a thousandth of the tolerance), the flat regions
+	                                       then turned toward Delaunay: far fewer faces, the shape, features and attributes kept */
 	qaws_batch_executor const* executor;   /* the Boolean's pair tests and samples through it; NULL: this thread */
 } qaws_sweep_desc;
 

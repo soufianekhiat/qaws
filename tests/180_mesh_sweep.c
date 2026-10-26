@@ -5,7 +5,8 @@
  *     segment, volume 3 exactly, one slab;
  *   - a thin box turned a quarter about the z axis: the annular sector's
  *     volume (pi / 4 (r1^2 - r0^2) times its height, and the boxes at both
- *     ends half outside it: 2 h), within the chords;
+ *     ends half outside it: 2 h), within the chords; with simplify the same
+ *     volume (to round-off) on fewer faces, still closed;
  *   - a small ball along a Hermite curve: a tube, its volume the ball's
  *     cross-section along the length plus the ball (within the polyhedra's
  *     own error);
@@ -158,6 +159,20 @@ static void test_turn(void)
 		(double)r.deviation, r.closed);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && o && fabs(v - want) < 0.01 * want && r.slabs > 4 && r.closed, msg);
+	{
+		qaws_sweep_desc d;
+		qaws_mesh_3d* so = NULL;
+		qaws_sweep_report rs;
+		double vs;
+		memset(&d, 0, sizeof d);
+		d.simplify = 1;
+		st = qaws_mesh_3d_sweep(&so, &rs, b, m, &d);
+		vs = sw_volume(so);
+		sprintf(msg, "simplified: volume %.12f (%.12f), %u faces (%u), closed %d", vs, v, so ? qaws_mesh_3d_get_face_count(so) : 0, o ? qaws_mesh_3d_get_face_count(o) : 0, rs.closed);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && so && o && fabs(vs - v) < 1e-9 * v && qaws_mesh_3d_get_face_count(so) < qaws_mesh_3d_get_face_count(o) && rs.closed, msg);
+		qaws_mesh_3d_destroy(so);
+	}
 	qaws_mesh_3d_destroy(b);
 	qaws_mesh_3d_destroy(o);
 	qaws_motion_destroy(m);

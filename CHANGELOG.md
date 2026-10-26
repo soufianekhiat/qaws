@@ -29,6 +29,10 @@ All notable changes to Qaws are documented here.
 
 ### Changed
 
+- Sweeps: `qaws_sweep_desc.simplify` removes the vertices the overlapping slabs leave in flat regions and on straight
+  creases (each collapse within a thousandth of the tolerance) and turns the flat regions toward Delaunay: a turning
+  cube 1572 faces to 204, a thin box 1144 to 264, the shape, features and attributes kept. Off by default.
+
 - Self-intersections and Booleans scale: pairs from a grid fitted to the triangles
   (`qaws_internal_grid_create_fit`; the volume rule made a surface's cells hold
   dozens of boxes), filtered read-only through `qaws_intersect_desc.executor` and
@@ -41,6 +45,9 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Decimation: corner attributes of every rule follow the collapses by wedges (QUATERNION, ANGLE, colours and
+  NEAREST were copied from the removed vertex: a swept tool's orientation bled from an earlier pose into its end
+  corners); corners are matched to their wedges to round-off (a renormalized quaternion missed its own), q and -q as one.
 - Sweeps: a face turning as it moves (out at some corners, in at others) was extruded whole or not at all, so a
   turning solid's sweep missed material (a swept cube up to 0.11 inside the true sweep at tolerance 0.004); each slab now
   adds the convex hull of every outgoing face's two positions. Test 181 checks the cube inside the result at 101 times.

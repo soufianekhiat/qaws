@@ -26,6 +26,7 @@ static void demo_sweep_features(void)
 		qaws_mesh_3d_detect_features(cube, (qaws_scalar)0.5, 0, 0);
 		memset(&d, 0, sizeof d);
 		d.tolerance = (qaws_scalar)0.004;
+		d.simplify = 1;   /* (the flat regions and straight creases without the slabs' extra vertices) */
 		if (m && qaws_mesh_3d_sweep(&o, NULL, cube, m, &d) == QAWS_STATUS_OK && o)
 		{
 			sprintf(sub, "%u feature edges, %u faces", qaws_mesh_3d_get_feature_edge_count(o), qaws_mesh_3d_get_face_count(o));
@@ -49,6 +50,7 @@ static void demo_sweep_features(void)
 		mv[0] = m;
 		memset(&d, 0, sizeof d);
 		d.tolerance = (qaws_scalar)0.004;
+		d.simplify = 1;   /* (the flat regions and straight creases without the slabs' extra vertices) */
 		if (m && qaws_mesh_sweep_boolean(&o, NULL, tool, mv, block, 1, QAWS_BOOLEAN_DIFFERENCE, &d) == QAWS_STATUS_OK && o)
 		{
 			sprintf(sub, "%u feature edges, %u faces", qaws_mesh_3d_get_feature_edge_count(o), qaws_mesh_3d_get_face_count(o));

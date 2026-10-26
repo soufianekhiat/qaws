@@ -538,13 +538,28 @@ static double dc_closest(double const* x, double const* p0, double const* p1, do
 	return r;
 }
 
-/* Corner attributes through a collapse of a into b at x (Hoppe's wedges): per LINEAR or NORMALIZED corner attribute, the
+/* Corner attributes through a collapse of a into b at x (Hoppe's wedges): per corner attribute (of 4 components at most), the
    corners at a and b grouped (equal values at one vertex; across the edge's faces, the corner at a with the one at b), each
-   group's value the one at x of its corners' triangles before the collapse, interpolated on the nearest. Into tab: per
+   group's value the one at x of its corners' triangles before the collapse, interpolated on the nearest (LINEAR, VECTOR
+   and the unit rules; the others take its nearest corner's). Into tab: per
    attribute, pairs (the old value, the new one) for each corner, matched by value after the collapse; *nt their counts.
    shortcut: 64 corners round the edge at most (more: the attribute left as the collapse copies it), upgrade by growing the
    scratch */
 #define DC_WEDGE_MAX 64
+
+/* two corner values one wedge's: equal to round-off (tol, relative), q and -q one orientation */
+static int dc_wedge_same(double const* p, double const* q, unsigned int n, unsigned int rule, double tol)
+{
+	unsigned int k;
+	int same = 1, opp = rule == QAWS_ATTRIBUTE_QUATERNION;
+	for (k = 0; k < n; k++)
+	{
+		same = same && fabs(p[k] - q[k]) <= tol * (1 + fabs(p[k]));
+		opp = opp && fabs(p[k] + q[k]) <= tol * (1 + fabs(p[k]));
+	}
+	return same || opp;
+}
+
 static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, double const* x, double* tab, unsigned int* nt, unsigned int stride)
 {
 	unsigned int ak, off = 0;
@@ -553,7 +568,8 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 		unsigned int n = m->attr[ak].n, cs[DC_WEDGE_MAX], grp[DC_WEDGE_MAX], nc = 0, i, j, v, c;
 		double best[DC_WEDGE_MAX], val[DC_WEDGE_MAX * 4];
 		nt[ak] = 0;
-		if (m->attr[ak].element != QAWS_MESH_CORNER || (m->attr[ak].rule != QAWS_ATTRIBUTE_LINEAR && m->attr[ak].rule != QAWS_ATTRIBUTE_VECTOR && !hm_rule_unit(m->attr[ak].rule)) || n > 4)
+		int blend = m->attr[ak].rule == QAWS_ATTRIBUTE_LINEAR || m->attr[ak].rule == QAWS_ATTRIBUTE_VECTOR || hm_rule_unit(m->attr[ak].rule);
+		if (m->attr[ak].element != QAWS_MESH_CORNER || n > 4)
 			continue;
 		for (v = 0; v < 2; v++)
 			for (c = m->vc[v ? b : a]; c != HM_NONE && nc <= DC_WEDGE_MAX; c = hm_round(m, v ? b : a, c))
@@ -570,7 +586,9 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 			{
 				int join = 0;
 				if (m->cv[cs[i]] == m->cv[cs[j]])
-					join = !memcmp(hm_attr_at(m, ak, cs[i]), hm_attr_at(m, ak, cs[j]), sizeof(double) * n);
+				{
+					join = dc_wedge_same(hm_attr_at(m, ak, cs[i]), hm_attr_at(m, ak, cs[j]), n, m->attr[ak].rule, 1e-12);   /* (as dc_seams reads them) */
+				}
 				else
 					join = m->cf[cs[i]] == m->cf[cs[j]];   /* (a face holding the edge: a and b on the same side of any seam) */
 				if (join)
@@ -597,8 +615,11 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 			if (d2 < best[g])
 			{
 				best[g] = d2;
-				for (k = 0; k < n; k++)
-					val[4 * g + k] = wt[0] * hm_attr_at(m, ak, cs[i])[k] + wt[1] * hm_attr_at(m, ak, cn)[k] + wt[2] * hm_attr_at(m, ak, cp)[k];
+				if (blend)
+					for (k = 0; k < n; k++)
+						val[4 * g + k] = wt[0] * hm_attr_at(m, ak, cs[i])[k] + wt[1] * hm_attr_at(m, ak, cn)[k] + wt[2] * hm_attr_at(m, ak, cp)[k];
+				else   /* (other rules: the nearest corner's value, exact at a vertex) */
+					memcpy(val + 4 * g, hm_attr_at(m, ak, wt[0] >= wt[1] && wt[0] >= wt[2] ? cs[i] : wt[1] >= wt[2] ? cn : cp), sizeof(double) * n);
 			}
 		}
 		if (hm_rule_unit(m->attr[ak].rule))
@@ -628,7 +649,7 @@ static void dc_wedges_after(qaws_hm* m, unsigned int b, double const* tab, unsig
 		{
 			double* y = hm_attr_at(m, ak, c);
 			for (i = 0; i < nt[ak]; i++)
-				if (!memcmp(y, tab + off + 2 * (size_t)n * i, sizeof(double) * n))
+				if (dc_wedge_same(y, tab + off + 2 * (size_t)n * i, n, m->attr[ak].rule, 1e-9))
 				{
 					memcpy(y, tab + off + 2 * (size_t)n * i + n, sizeof(double) * n);
 					break;

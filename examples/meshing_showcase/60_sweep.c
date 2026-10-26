@@ -36,6 +36,7 @@ static void ms_sw_panel(er_canvas* c, int px, qaws_mesh_3d const* body, qaws_mot
 	char sub[200];
 	memset(&d, 0, sizeof d);
 	d.tolerance = (qaws_scalar)tol;
+	d.simplify = 1;   /* (the flat regions and straight creases without the slabs' extra vertices) */
 	if (qaws_mesh_3d_sweep(&o, &r, body, m, &d) != QAWS_STATUS_OK || !o)
 		return;
 	sprintf(sub, "%u slabs, %u faces, closed %d", r.slabs, qaws_mesh_3d_get_face_count(o), r.closed);
@@ -149,6 +150,7 @@ static void demo_sweep(void)
 		cm[1] = mv[1];
 		memset(&d, 0, sizeof d);
 		d.tolerance = (qaws_scalar)0.005;
+		d.simplify = 1;   /* (the flat regions and straight creases without the slabs' extra vertices) */
 		if (block && ball && mv[0] && mv[1] && qaws_mesh_sweep_boolean(&o, &br, ball, cm, block, 2, QAWS_BOOLEAN_DIFFERENCE, &d) == QAWS_STATUS_OK && o)
 		{
 			sprintf(sub, "%u moves, %u slabs, removed %.4f of %.1f, closed %d", br.moves, br.slabs, (double)br.changed_volume, (double)br.stock_volume, br.closed);

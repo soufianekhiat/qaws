@@ -5,6 +5,7 @@
 
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_mesh_sweep.h"
+#include "../qaws_mesh_decimate.h"
 #include "qaws_mesh_internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -819,6 +820,98 @@ static int swp_cmp_double(void const* a, void const* b)
 	return x < y ? -1 : x > y;
 }
 
+/* the angle at p of the triangle p a b */
+static double swp_angle(double const* p, double const* a, double const* b)
+{
+	double u[3], v[3], w[3];
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		u[k] = a[k] - p[k];
+		v[k] = b[k] - p[k];
+	}
+	w[0] = u[1] * v[2] - u[2] * v[1];
+	w[1] = u[2] * v[0] - u[0] * v[2];
+	w[2] = u[0] * v[1] - u[1] * v[0];
+	return atan2(sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]), u[0] * v[0] + u[1] * v[1] + u[2] * v[2]);
+}
+
+/* edges inside flat regions (two triangles in one plane, not a feature or seam) turned toward Delaunay: the collapses
+   leave fans of long thin triangles; the shape does not change. 0 on allocation failure. */
+static int swp_flat_delaunay(qaws_hm* m, double eps)
+{
+	unsigned int pass, c, flips = 1;
+	for (pass = 0; pass < 64 && flips; pass++)
+	{
+		flips = 0;
+		for (c = 0; c < m->nc; c++)
+		{
+			unsigned int d = m->co[c], k;
+			double const *a, *b, *pp, *q;
+			double n1[3], n2[3], l1, l2, s = 0, h = 0, e1[3], e2[3];
+			if (m->cf[c] == HM_NONE || d == HM_NONE || d < c || (m->cflag[c] & HM_FEATURE) || !hm_can_flip(m, c))
+				continue;
+			a = m->x + 3 * (size_t)m->cv[c];
+			b = m->x + 3 * (size_t)hm_to(m, c);
+			pp = m->x + 3 * (size_t)m->cv[hm_prev(m, c)];
+			q = m->x + 3 * (size_t)m->cv[hm_prev(m, d)];
+			hm_face_normal(m, m->cf[c], n1);
+			hm_face_normal(m, m->cf[d], n2);
+			l1 = sqrt(n1[0] * n1[0] + n1[1] * n1[1] + n1[2] * n1[2]);
+			l2 = sqrt(n2[0] * n2[0] + n2[1] * n2[1] + n2[2] * n2[2]);
+			if (!(l1 > 0) || !(l2 > 0))
+				continue;
+			for (k = 0; k < 3; k++)
+			{
+				s += n1[k] * n2[k];
+				h += n1[k] * (q[k] - a[k]);
+			}
+			if (s < (1 - 1e-12) * l1 * l2 || fabs(h) > eps * l1 || swp_angle(pp, a, b) + swp_angle(q, b, a) <= 3.14159265358979323846 + 1e-9)
+				continue;
+			/* the new faces (a q p) and (q b p) turned as the old */
+			for (k = 0; k < 3; k++)
+			{
+				e1[k] = q[k] - a[k];
+				e2[k] = pp[k] - a[k];
+			}
+			if ((e1[1] * e2[2] - e1[2] * e2[1]) * n1[0] + (e1[2] * e2[0] - e1[0] * e2[2]) * n1[1] + (e1[0] * e2[1] - e1[1] * e2[0]) * n1[2] <= 0)
+				continue;
+			for (k = 0; k < 3; k++)
+			{
+				e1[k] = b[k] - q[k];
+				e2[k] = pp[k] - q[k];
+			}
+			if ((e1[1] * e2[2] - e1[2] * e2[1]) * n1[0] + (e1[2] * e2[0] - e1[0] * e2[2]) * n1[1] + (e1[0] * e2[1] - e1[1] * e2[0]) * n1[2] <= 0)
+				continue;
+			if (!hm_flip(m, c))
+				return 0;
+			flips++;
+		}
+	}
+	hm_compact(m);
+	return 1;
+}
+
+/* the overlapping hulls and cuts leave many vertices in flat regions and on straight creases: those whose removal moves
+   nothing (an error within a thousandth of the tolerance) are collapsed, features and attributes kept (seams made
+   features), then the flat regions turned toward Delaunay. The Boolean's
+   "source" (the soup's faces, internal) is dropped first: every cut would be a seam */
+static qaws_status swp_tidy(qaws_mesh_3d* m, double tol)
+{
+	qaws_decimate_desc d;
+	unsigned int a;
+	qaws_status st;
+	if (m && qaws_mesh_3d_find_attribute(&a, m, "source") == QAWS_STATUS_OK && (st = qaws_mesh_3d_remove_attribute(m, a)) != QAWS_STATUS_OK)
+		return st;
+	memset(&d, 0, sizeof d);
+	d.max_error = (qaws_scalar)(1e-3 * tol);
+	if (!m)
+		return QAWS_STATUS_OK;
+	if ((st = qaws_mesh_3d_decimate(NULL, m, &d)) != QAWS_STATUS_OK)
+		return st;
+	return swp_flat_delaunay(&m->hm, 1e-3 * tol) ? QAWS_STATUS_OK : QAWS_STATUS_ALLOCATION_FAILURE;
+}
+
 qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion,
 	qaws_sweep_desc const* desc)
 {
@@ -1029,6 +1122,8 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 				st = cy_boolean(out, &report->boolean, (qaws_mesh_3d const* const*)&soup, 1, NULL, 0, QAWS_BOOLEAN_UNION, &id);
 			if (st == QAWS_STATUS_OK && *out)
 				st = swp_crease_features(*out, 0.5 * swp_feature_angle(mesh), mesh, sx, nv, report->slabs);   /* (half the input's softest crease: the slabs' chords bend far less) */
+			if (st == QAWS_STATUS_OK && *out && desc && desc->simplify)
+				st = swp_tidy(*out, tol);
 			qaws_mesh_3d_destroy(soup);
 		}
 		report->closed = report->boolean.closed;
