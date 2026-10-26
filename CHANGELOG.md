@@ -29,6 +29,12 @@ All notable changes to Qaws are documented here.
 
 ### Changed
 
+- Self-intersections and Booleans on heavily overlapping input (a spinning torus's sweep: hulls lying almost on one
+  another): a face's points and pieces are met along its longest axis (sorted spans, only overlapping ones tested), and
+  its cuts are recovered by a Sloan walk (the crossed edges found by walking the cut, each point's triangle kept) instead
+  of rescanning the face per flip. A 5,408-triangle soup: settling 15 s to 3 s, the cuts' recovery from minutes to
+  seconds.
+
 - Sweeps: `qaws_sweep_desc.simplify` removes the vertices the overlapping slabs leave in flat regions and on straight
   creases (each collapse within a thousandth of the tolerance) and turns the flat regions toward Delaunay: a turning
   cube 1572 faces to 204, a thin box 1144 to 264, the shape, features and attributes kept. Off by default.

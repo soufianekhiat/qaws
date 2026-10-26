@@ -862,13 +862,27 @@ typedef struct sx_piece
 	unsigned int k, p, q;
 } sx_piece;
 
+typedef struct sx_span
+{
+	double lo, hi;
+	unsigned int i;
+} sx_span;
+
 typedef struct sx_buf
 {
 	sx_piece* s;
 	unsigned int ns, caps;
 	unsigned int* p;
 	unsigned int npt, capp;
+	sx_span* sp;                       /* the pieces' then the points' spans along the face's longest axis */
+	unsigned int capsp;
 } sx_buf;
+
+static int sx_span_cmp(void const* p, void const* q)
+{
+	sx_span const *a = (sx_span const*)p, *b = (sx_span const*)q;
+	return a->lo < b->lo ? -1 : a->lo > b->lo ? 1 : a->i < b->i ? -1 : a->i > b->i;
+}
 
 static int sx_has(unsigned int const* a, unsigned int n, unsigned int v)
 {
@@ -968,24 +982,149 @@ static double sx_foot(double const* p, double const* a, double const* b, double*
 	return t;
 }
 
-/* one pass over face f; returns whether a carrier gained a point */
+/* pieces s and t of face f crossing (within eps, e2 its square): cut at a keyed point on both; whether a carrier gained it */
+static int sx_settle_cross(sx_ctx* c, unsigned int f, sx_piece const* s, sx_piece const* t, double e2)
+{
+	sx_carrier const *K = c->car + s->k, *L = c->car + t->k;
+	double const *a = c->X + 3 * (size_t)s->p, *a1 = c->X + 3 * (size_t)s->q, *q = c->X + 3 * (size_t)t->p, *q1 = c->X + 3 * (size_t)t->q;
+	double u[3], v[3], w[3], uu, uv, vv, uw, vw, den, su, tv, m[3], n[3], x[3];
+	unsigned int key[5], id, h;
+	if (s->k == t->k || s->p == t->p || s->p == t->q || s->q == t->p || s->q == t->q)
+		return 0;
+	for (h = 0; h < 3; h++)
+	{
+		u[h] = a1[h] - a[h];
+		v[h] = q1[h] - q[h];
+		w[h] = a[h] - q[h];
+	}
+	uu = sx_dot(u, u);
+	uv = sx_dot(u, v);
+	vv = sx_dot(v, v);
+	uw = sx_dot(u, w);
+	vw = sx_dot(v, w);
+	den = uu * vv - uv * uv;
+	if (!(den > 1e-14 * uu * vv))
+		return 0;   /* parallel: overlaps show as points on pieces */
+	su = (uv * vw - vv * uw) / den;
+	tv = (uu * vw - uv * uw) / den;
+	if (!(su > 0 && su < 1 && tv > 0 && tv < 1))
+		return 0;
+	for (h = 0; h < 3; h++)
+	{
+		m[h] = a[h] + su * u[h];
+		n[h] = q[h] + tv * v[h];
+		x[h] = 0.5 * (m[h] + n[h]);
+	}
+	if (sx_dist2(m, n) > e2 || sx_dist2(x, a) <= e2 || sx_dist2(x, a1) <= e2 || sx_dist2(x, q) <= e2 || sx_dist2(x, q1) <= e2)
+		return 0;
+	memset(key, 0, sizeof key);
+	if (K->kind == SX_EDGE && L->kind == SX_EDGE)
+	{
+		sx_ee(c, s->k, t->k, x);
+		return 1;
+	}
+	if (K->kind == SX_CUT && L->kind == SX_CUT)
+	{
+		unsigned int fs[4] = { K->a, K->b, L->a, L->b }, g3[3], ng = 0, z;
+		for (z = 0; z < 4; z++)
+			if (!sx_has(g3, ng, fs[z]))
+			{
+				if (ng == 3)
+					break;
+				g3[ng++] = fs[z];
+			}
+		if (ng != 3)
+			return 0;
+		/* sorted */
+		if (g3[0] > g3[1]) { z = g3[0]; g3[0] = g3[1]; g3[1] = z; }
+		if (g3[1] > g3[2]) { z = g3[1]; g3[1] = g3[2]; g3[2] = z; }
+		if (g3[0] > g3[1]) { z = g3[0]; g3[0] = g3[1]; g3[1] = z; }
+		key[0] = SX_TPI;
+		key[1] = g3[0];
+		key[2] = g3[1];
+		key[3] = g3[2];
+	}
+	else
+	{
+		/* an edge through the other face of a cut */
+		sx_carrier const* E = K->kind == SX_EDGE ? K : L;
+		sx_carrier const* C = K->kind == SX_EDGE ? L : K;
+		key[0] = SX_LPI;
+		key[1] = E->a;
+		key[2] = E->b;
+		key[3] = C->a == f ? C->b : C->a;
+	}
+	id = sx_keyed(c, key, x);
+	if (c->oom)
+		return 0;
+	return sx_on(c, s->k, id) | sx_on(c, t->k, id);
+}
+
+/* one pass over face f; returns whether a carrier gained a point. Points and pieces are met along the face's longest axis
+   (spans sorted, only those overlapping tested): a face under many overlapping ones holds thousands of pieces */
 static int sx_settle(sx_ctx* c, sx_buf* b, unsigned int f)
 {
-	unsigned int i, j;
-	double e2 = c->eps * c->eps;
+	unsigned int i, j, k, ax = 0;
+	double e2 = c->eps * c->eps, ext = -1;
 	int changed = 0;
+	sx_span *ps, *pt;
 	sx_face_edges(c, f);
 	sx_gather(c, b, f, c->F[f].e);
 	if (c->oom)
 		return 0;
+	for (k = 0; k < 3; k++)
+	{
+		double lo = HUGE_VAL, hi = -HUGE_VAL;
+		for (i = 0; i < 3; i++)
+		{
+			lo = fmin(lo, c->X[3 * (size_t)c->F[f].c[i] + k]);
+			hi = fmax(hi, c->X[3 * (size_t)c->F[f].c[i] + k]);
+		}
+		if (hi - lo > ext)
+		{
+			ext = hi - lo;
+			ax = k;
+		}
+	}
+	if (!sx_reserve((void**)&b->sp, &b->capsp, (size_t)b->ns + b->npt + 1, sizeof(sx_span)))
+	{
+		c->oom = 1;
+		return 0;
+	}
+	ps = b->sp;
+	pt = b->sp + b->ns;
+	for (j = 0; j < b->ns; j++)
+	{
+		double a = c->X[3 * (size_t)b->s[j].p + ax], q = c->X[3 * (size_t)b->s[j].q + ax];
+		ps[j].lo = fmin(a, q) - c->eps;
+		ps[j].hi = fmax(a, q) + c->eps;
+		ps[j].i = j;
+	}
 	for (i = 0; i < b->npt; i++)
 	{
-		unsigned int v = b->p[i];
-		double const* x = c->X + 3 * (size_t)v;
-		for (j = 0; j < b->ns; j++)
+		pt[i].lo = pt[i].hi = c->X[3 * (size_t)b->p[i] + ax];
+		pt[i].i = i;
+	}
+	qsort(ps, b->ns, sizeof *ps, sx_span_cmp);
+	qsort(pt, b->npt, sizeof *pt, sx_span_cmp);
+	/* points on pieces */
+	for (j = 0; j < b->ns; j++)
+	{
+		sx_piece const* s = b->s + ps[j].i;
+		double const *a = c->X + 3 * (size_t)s->p, *q = c->X + 3 * (size_t)s->q;
+		unsigned int lo = 0, hi = b->npt;
+		while (lo < hi)
 		{
-			sx_piece const* s = b->s + j;
-			double const *a = c->X + 3 * (size_t)s->p, *q = c->X + 3 * (size_t)s->q;
+			unsigned int mid = (lo + hi) / 2;
+			if (pt[mid].lo < ps[j].lo)
+				lo = mid + 1;
+			else
+				hi = mid;
+		}
+		for (i = lo; i < b->npt && pt[i].lo <= ps[j].hi; i++)
+		{
+			unsigned int v = b->p[pt[i].i];
+			double const* x = c->X + 3 * (size_t)v;
 			double d2, t;
 			if (v == s->p || v == s->q)
 				continue;
@@ -994,85 +1133,14 @@ static int sx_settle(sx_ctx* c, sx_buf* b, unsigned int f)
 				changed |= sx_on(c, s->k, v);
 		}
 	}
+	/* pieces crossing */
 	for (i = 0; i < b->ns; i++)
-		for (j = i + 1; j < b->ns; j++)
+		for (j = i + 1; j < b->ns && ps[j].lo <= ps[i].hi; j++)
 		{
-			sx_piece const *s = b->s + i, *t = b->s + j;
-			sx_carrier const *K = c->car + s->k, *L = c->car + t->k;
-			double const *a = c->X + 3 * (size_t)s->p, *a1 = c->X + 3 * (size_t)s->q, *q = c->X + 3 * (size_t)t->p, *q1 = c->X + 3 * (size_t)t->q;
-			double u[3], v[3], w[3], uu, uv, vv, uw, vw, den, su, tv, m[3], n[3], x[3];
-			unsigned int key[5], id, h;
-			if (s->k == t->k || s->p == t->p || s->p == t->q || s->q == t->p || s->q == t->q)
-				continue;
-			for (h = 0; h < 3; h++)
-			{
-				u[h] = a1[h] - a[h];
-				v[h] = q1[h] - q[h];
-				w[h] = a[h] - q[h];
-			}
-			uu = sx_dot(u, u);
-			uv = sx_dot(u, v);
-			vv = sx_dot(v, v);
-			uw = sx_dot(u, w);
-			vw = sx_dot(v, w);
-			den = uu * vv - uv * uv;
-			if (!(den > 1e-14 * uu * vv))
-				continue;   /* parallel: overlaps show as points on pieces */
-			su = (uv * vw - vv * uw) / den;
-			tv = (uu * vw - uv * uw) / den;
-			if (!(su > 0 && su < 1 && tv > 0 && tv < 1))
-				continue;
-			for (h = 0; h < 3; h++)
-			{
-				m[h] = a[h] + su * u[h];
-				n[h] = q[h] + tv * v[h];
-				x[h] = 0.5 * (m[h] + n[h]);
-			}
-			if (sx_dist2(m, n) > e2 || sx_dist2(x, a) <= e2 || sx_dist2(x, a1) <= e2 || sx_dist2(x, q) <= e2 || sx_dist2(x, q1) <= e2)
-				continue;
-			memset(key, 0, sizeof key);
-			if (K->kind == SX_EDGE && L->kind == SX_EDGE)
-			{
-				sx_ee(c, s->k, t->k, x);
-				changed = 1;
-				continue;
-			}
-			if (K->kind == SX_CUT && L->kind == SX_CUT)
-			{
-				unsigned int fs[4] = { K->a, K->b, L->a, L->b }, g3[3], ng = 0, z;
-				for (z = 0; z < 4; z++)
-					if (!sx_has(g3, ng, fs[z]))
-					{
-						if (ng == 3)
-							break;
-						g3[ng++] = fs[z];
-					}
-				if (ng != 3)
-					continue;
-				/* sorted */
-				if (g3[0] > g3[1]) { z = g3[0]; g3[0] = g3[1]; g3[1] = z; }
-				if (g3[1] > g3[2]) { z = g3[1]; g3[1] = g3[2]; g3[2] = z; }
-				if (g3[0] > g3[1]) { z = g3[0]; g3[0] = g3[1]; g3[1] = z; }
-				key[0] = SX_TPI;
-				key[1] = g3[0];
-				key[2] = g3[1];
-				key[3] = g3[2];
-			}
-			else
-			{
-				/* an edge through the other face of a cut */
-				sx_carrier const* E = K->kind == SX_EDGE ? K : L;
-				sx_carrier const* C = K->kind == SX_EDGE ? L : K;
-				key[0] = SX_LPI;
-				key[1] = E->a;
-				key[2] = E->b;
-				key[3] = C->a == f ? C->b : C->a;
-			}
-			id = sx_keyed(c, key, x);
+			unsigned int u = ps[i].i < ps[j].i ? ps[i].i : ps[j].i, w = ps[i].i < ps[j].i ? ps[j].i : ps[i].i;
+			changed |= sx_settle_cross(c, f, b->s + u, b->s + w, e2);
 			if (c->oom)
 				return 0;
-			changed |= sx_on(c, s->k, id);
-			changed |= sx_on(c, t->k, id);
 		}
 	return changed;
 }
@@ -1091,6 +1159,11 @@ typedef struct sx_cdt
 	double* Q;                         /* the same points in the face's own metric, for circles */
 	sx_tri* t;
 	unsigned int nt, capt, capp, capq;
+	unsigned int* vt;                  /* per local point a triangle holding it (kept through flips once vton) */
+	unsigned int* st;                  /* scratch: a point's triangles */
+	unsigned int* qe;                  /* scratch: the edges a cut crosses, 2 points each */
+	unsigned int capvt, capst, capqe;
+	int vton;
 } sx_cdt;
 
 static int sx_o2(double const* P, unsigned int a, unsigned int b, unsigned int c)
@@ -1165,6 +1238,13 @@ static void sx_flip(sx_cdt* T, unsigned int u, unsigned int i)
 	sx_set(s, d, b, cc, ndb, nbc, u, fdb, fbc, 0);
 	sx_back(T, nad, w, u);
 	sx_back(T, nbc, u, w);
+	if (T->vton)
+	{
+		T->vt[a] = u;
+		T->vt[d] = u;
+		T->vt[cc] = u;
+		T->vt[b] = w;
+	}
 }
 
 /* the opposite corner across edge i of triangle u: its local index in the neighbour, and the vertex */
@@ -1283,77 +1363,185 @@ static void sx_insert(sx_cdt* T, unsigned int p, unsigned int* stack, unsigned i
 	sx_legalize(T, stack, top, guard);   /* (every entry has p at v[edge + 2]) */
 }
 
-static int sx_has_edge(sx_cdt* T, unsigned int a, unsigned int b)
+static int sx_recover2(sx_cdt* T, unsigned int a, unsigned int x, unsigned int b, unsigned int depth);
+
+/* the triangles round local point a (T->vt kept): into T->st, their count */
+static unsigned int sx_star(sx_cdt* T, unsigned int a)
 {
-	unsigned int u, k;
-	for (u = 0; u < T->nt; u++)
-		for (k = 0; k < 3; k++)
+	unsigned int u0 = T->vt[a], u, n = 0, i, dir;
+	for (dir = 0; dir < 2; dir++)
+	{
+		u = u0;
+		while (u != SX_NONE && n < T->nt)
 		{
-			unsigned int p = T->t[u].v[k], q = T->t[u].v[(k + 1) % 3];
-			if ((p == a && q == b) || (p == b && q == a))
-			{
-				unsigned int w = T->t[u].n[k], j;
-				T->t[u].fix[k] = 1;
-				if (w != SX_NONE)
-					for (j = 0; j < 3; j++)
-						if (T->t[w].n[j] == u)
-							T->t[w].fix[j] = 1;
-				return 1;
-			}
+			for (i = 0; i < 3 && T->t[u].v[i] != a; i++)
+				;
+			if (i == 3)
+				break;
+			if (dir == 0 || u != u0)
+				T->st[n++] = u;
+			u = T->t[u].n[dir ? i : (i + 2) % 3];   /* (round a one way, then the other from where it started) */
+			if (u == u0)
+				return n;
 		}
-	return 0;
+	}
+	return n;
 }
 
-/* the cut a b recovered by flips (Sloan); 0 when it cannot be */
+/* the triangle and edge index of edge a b (SX_NONE when it is not there) */
+static unsigned int sx_find_edge(sx_cdt* T, unsigned int a, unsigned int b, unsigned int* k)
+{
+	unsigned int n = sx_star(T, a), i, j;
+	for (i = 0; i < n; i++)
+		for (j = 0; j < 3; j++)
+		{
+			unsigned int p = T->t[T->st[i]].v[j], q = T->t[T->st[i]].v[(j + 1) % 3];
+			if ((p == a && q == b) || (p == b && q == a))
+			{
+				*k = j;
+				return T->st[i];
+			}
+		}
+	return SX_NONE;
+}
+
+/* edge a b there: marked a cut (both sides) */
+static int sx_has_edge(sx_cdt* T, unsigned int a, unsigned int b)
+{
+	unsigned int k = 0, u = sx_find_edge(T, a, b, &k), w, j;
+	if (u == SX_NONE)
+		return 0;
+	T->t[u].fix[k] = 1;
+	w = T->t[u].n[k];
+	if (w != SX_NONE)
+		for (j = 0; j < 3; j++)
+			if (T->t[w].n[j] == u)
+				T->t[w].fix[j] = 1;
+	return 1;
+}
+
+/* local point x strictly between a and b (on their line) */
+static int sx_between(sx_cdt const* T, unsigned int a, unsigned int b, unsigned int x)
+{
+	double const *A = T->P + 2 * (size_t)a, *B = T->P + 2 * (size_t)b, *X = T->P + 2 * (size_t)x;
+	double dt = (X[0] - A[0]) * (B[0] - A[0]) + (X[1] - A[1]) * (B[1] - A[1]);
+	double ll = (B[0] - A[0]) * (B[0] - A[0]) + (B[1] - A[1]) * (B[1] - A[1]);
+	return dt > 0 && dt < ll;
+}
+
+static int sx_push_edge(sx_cdt* T, unsigned int* nq, unsigned int p, unsigned int q)
+{
+	if (!sx_reserve((void**)&T->qe, &T->capqe, 2 * (size_t)*nq + 2, sizeof(unsigned int)))
+		return 0;
+	T->qe[2 * (size_t)*nq] = p;
+	T->qe[2 * (size_t)*nq + 1] = q;
+	(*nq)++;
+	return 1;
+}
+
+/* the cut a b recovered by flips (Sloan): the edges it crosses found by walking from a to b, flipped in turn (a flip
+   whose new edge still crosses goes back in line, a quad not convex waits); split at a point exactly on it. 0 when it
+   cannot be (it crosses another cut), -1 out of memory */
 static int sx_recover(sx_cdt* T, unsigned int a, unsigned int b, unsigned int depth)
 {
-	unsigned int guard = 4 * T->nt + 16;
-	while (guard--)
+	unsigned int n, i, u = SX_NONE, p = SX_NONE, q = SX_NONE, nq = 0, head = 0, guard;
+	if (sx_has_edge(T, a, b))
+		return 1;
+	/* the triangle of a's star the cut leaves by */
+	n = sx_star(T, a);
+	for (i = 0; i < n && u == SX_NONE; i++)
 	{
-		unsigned int u, k, found = 0;
-		if (sx_has_edge(T, a, b))
-			return 1;
-		for (u = 0; u < T->nt && !found; u++)
-			for (k = 0; k < 3 && !found; k++)
-			{
-				sx_tri const* t = T->t + u;
-				unsigned int p = t->v[k], q = t->v[(k + 1) % 3];
-				int o1, o2;
-				if (p != a && p != b)
-				{
-					/* a point exactly on the open cut: split the cut there */
-					if (!sx_o2(T->P, a, b, p) && depth < 8)
-					{
-						double const *A = T->P + 2 * (size_t)a, *B = T->P + 2 * (size_t)b, *X = T->P + 2 * (size_t)p;
-						double dt = (X[0] - A[0]) * (B[0] - A[0]) + (X[1] - A[1]) * (B[1] - A[1]);
-						double ll = (B[0] - A[0]) * (B[0] - A[0]) + (B[1] - A[1]) * (B[1] - A[1]);
-						if (dt > 0 && dt < ll)
-							return sx_recover(T, a, p, depth + 1) & sx_recover(T, p, b, depth + 1);
-					}
-				}
-				if (t->n[k] == SX_NONE || p == a || p == b || q == a || q == b || u > t->n[k])
-					continue;
-				o1 = sx_o2(T->P, a, b, p);
-				o2 = sx_o2(T->P, a, b, q);
-				if (o1 * o2 >= 0)
-					continue;
-				if (sx_o2(T->P, p, q, a) * sx_o2(T->P, p, q, b) >= 0)
-					continue;
-				if (t->fix[k])
-					return 0;   /* crosses another cut */
-				{
-					unsigned int cc = t->v[(k + 2) % 3], d = sx_opp(T, u, k);
-					if (sx_o2(T->P, cc, d, p) * sx_o2(T->P, cc, d, q) < 0)
-					{
-						sx_flip(T, u, k);
-						found = 1;
-					}
-				}
-			}
-		if (!found)
-			return 0;
+		sx_tri const* t = T->t + T->st[i];
+		unsigned int ia, v1, v2, z;
+		int s1, s2;
+		for (ia = 0; ia < 3 && t->v[ia] != a; ia++)
+			;
+		v1 = t->v[(ia + 1) % 3];
+		v2 = t->v[(ia + 2) % 3];
+		s1 = sx_o2(T->P, a, b, v1);
+		s2 = sx_o2(T->P, a, b, v2);
+		for (z = 0; z < 2; z++)
+		{
+			unsigned int x = z ? v2 : v1;
+			if ((z ? s2 : s1) == 0 && sx_between(T, a, b, x))
+				return depth < 8 ? sx_recover2(T, a, x, b, depth) : 0;
+		}
+		if (s1 * s2 < 0 && sx_o2(T->P, v1, v2, a) * sx_o2(T->P, v1, v2, b) < 0)
+		{
+			u = T->st[i];
+			p = v1;
+			q = v2;
+		}
 	}
-	return 0;
+	if (u == SX_NONE)
+		return 0;
+	/* the walk: each crossed edge in line, to the triangle holding b */
+	for (guard = T->nt + 4; guard--;)
+	{
+		unsigned int k, w, j, d;
+		int sd;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int x = T->t[u].v[k], y = T->t[u].v[(k + 1) % 3];
+			if ((x == p && y == q) || (x == q && y == p))
+				break;
+		}
+		if (k == 3 || T->t[u].fix[k] || (w = T->t[u].n[k]) == SX_NONE)
+			return 0;   /* (another cut crossed, or the border) */
+		if (!sx_push_edge(T, &nq, p, q))
+			return -1;
+		for (j = 0; j < 3 && T->t[w].n[j] != u; j++)
+			;
+		d = T->t[w].v[(j + 2) % 3];
+		if (d == b)
+			break;
+		sd = sx_o2(T->P, a, b, d);
+		if (sd == 0)
+			return sx_between(T, a, b, d) && depth < 8 ? sx_recover2(T, a, d, b, depth) : 0;
+		if (sd == sx_o2(T->P, a, b, p))
+			p = d;
+		else
+			q = d;
+		u = w;
+	}
+	/* the flips */
+	for (guard = 8 * T->nt + 64; head < nq && guard--;)
+	{
+		unsigned int x = T->qe[2 * (size_t)head], y = T->qe[2 * (size_t)head + 1], k = 0, c, d;
+		head++;
+		u = sx_find_edge(T, x, y, &k);
+		if (u == SX_NONE)
+			continue;
+		if (T->t[u].fix[k] || T->t[u].n[k] == SX_NONE)
+			return 0;
+		c = T->t[u].v[(k + 2) % 3];
+		d = sx_opp(T, u, k);
+		if (sx_o2(T->P, c, d, x) * sx_o2(T->P, c, d, y) < 0)
+		{
+			sx_flip(T, u, k);
+			if (sx_o2(T->P, a, b, c) * sx_o2(T->P, a, b, d) < 0 && sx_o2(T->P, c, d, a) * sx_o2(T->P, c, d, b) < 0 && !sx_push_edge(T, &nq, c, d))
+				return -1;
+		}
+		else if (!sx_push_edge(T, &nq, x, y))
+			return -1;
+		if (head > 4096 && 2 * head > nq)
+		{
+			memmove(T->qe, T->qe + 2 * (size_t)head, sizeof(unsigned int) * 2 * (size_t)(nq - head));
+			nq -= head;
+			head = 0;
+		}
+	}
+	return sx_has_edge(T, a, b);
+}
+
+/* the cut a b split at x on it: both halves (-1 out of memory) */
+static int sx_recover2(sx_cdt* T, unsigned int a, unsigned int x, unsigned int b, unsigned int depth)
+{
+	int r = sx_recover(T, a, x, depth + 1), s;
+	if (r < 0)
+		return r;
+	s = sx_recover(T, x, b, depth + 1);
+	return s < 0 ? s : r && s;
 }
 
 /* Delaunay again away from the cuts */
@@ -2108,6 +2296,8 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 		if (!sx_reserve((void**)&T.P, &T.capp, 2 * (size_t)np, sizeof(double))
 			|| !sx_reserve((void**)&T.Q, &T.capq, 2 * (size_t)np, sizeof(double))
 			|| !sx_reserve((void**)&T.t, &T.capt, 2 * (size_t)np + 4, sizeof(sx_tri))
+			|| !sx_reserve((void**)&T.vt, &T.capvt, (size_t)np + 1, sizeof(unsigned int))
+			|| !sx_reserve((void**)&T.st, &T.capst, 2 * (size_t)np + 4, sizeof(unsigned int))
 			|| !sx_reserve((void**)&stack, &caps2, 64 * (size_t)np + 64, sizeof(unsigned int)))
 			goto oom;
 		/* local coordinates: the corners at (0, 0), (1, 0), (0, 1); points on an edge exactly on it */
@@ -2194,17 +2384,30 @@ static qaws_status sx_resolve(sx_out* o, qaws_intersect_report* report, qaws_sca
 			}
 		}
 		T.nt = 1;
+		T.vton = 0;
 		sx_set(T.t, 0, 1, 2, SX_NONE, SX_NONE, SX_NONE, 0, 0, 0);
 		for (i = 3; i < np; i++)
 			sx_insert(&T, i, stack, 16 * np + 64);
+		/* each point's triangle, kept through the cuts' flips */
+		for (i = 0; i < T.nt; i++)
+		{
+			T.vt[T.t[i].v[0]] = i;
+			T.vt[T.t[i].v[1]] = i;
+			T.vt[T.t[i].v[2]] = i;
+		}
+		T.vton = 1;
 		for (i = 0; i < b.ns; i++)
 		{
 			unsigned int pa = loc[b.s[i].p], pb = loc[b.s[i].q];
+			int r;
 			if (pa == pb || b.s[i].k == le[0] || b.s[i].k == le[1] || b.s[i].k == le[2])
 				continue;   /* the face's own edges are its border */
-			if (!sx_recover(&T, pa, pb, 0))
+			if ((r = sx_recover(&T, pa, pb, 0)) < 0)
+				goto oom;
+			if (!r)
 				report->unresolved++;
 		}
+		T.vton = 0;
 		sx_relax(&T);
 		for (i = 0; i < T.nt; i++)
 		{
@@ -2296,8 +2499,8 @@ oom:
 fail:
 	qaws_internal_free(c.copl);
 	qaws_internal_free(c.X); qaws_internal_free(c.chain); qaws_internal_free(c.hash); qaws_internal_free(c.cell); qaws_internal_free(c.keys); qaws_internal_free(c.nodes);
-	qaws_internal_free(c.car); qaws_internal_free(c.F); qaws_internal_free(c.vf_start); qaws_internal_free(c.vf); qaws_internal_free(c.geo); qaws_internal_free(c.work); qaws_internal_free(b.s); qaws_internal_free(b.p);
-	qaws_internal_free(T.P); qaws_internal_free(T.Q); qaws_internal_free(T.t); qaws_internal_free(alias); qaws_internal_free(loc); qaws_internal_free(used);
+	qaws_internal_free(c.car); qaws_internal_free(c.F); qaws_internal_free(c.vf_start); qaws_internal_free(c.vf); qaws_internal_free(c.geo); qaws_internal_free(c.work); qaws_internal_free(b.s); qaws_internal_free(b.sp); qaws_internal_free(b.p);
+	qaws_internal_free(T.P); qaws_internal_free(T.Q); qaws_internal_free(T.t); qaws_internal_free(T.vt); qaws_internal_free(T.st); qaws_internal_free(T.qe); qaws_internal_free(alias); qaws_internal_free(loc); qaws_internal_free(used);
 	qaws_internal_free(otri); qaws_internal_free(ocut); qaws_internal_free(stack); qaws_internal_free(opos); qaws_internal_free(osrc);
 	qaws_internal_free(oc); qaws_internal_free(ptri);
 	qaws_internal_free(box);
