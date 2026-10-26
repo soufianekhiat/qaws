@@ -11,6 +11,12 @@
  *   - a cube inside another: the union is the outer cube, the difference a
  *     hollow cube (its inner faces turned); disjoint cubes: an empty
  *     intersection; cubes touching face to face: one solid;
+ *   - cubes touching along an edge: the union closed (two shells meeting at
+ *     the edge, each face paired with its own lobe's), its volume 2;
+ *   - four thin solids crossing at shallow angles (a turning box's sweep):
+ *     their self-union closed and one piece (patches sampled on the wrong
+ *     side of a surface nearer than the sample mended from their
+ *     neighbours round the edges where they meet);
  *   - refusals: no faces, an unknown operation.
  */
 
@@ -319,6 +325,71 @@ static void test_nested(void)
 	}
 }
 
+/* four convex hulls of a turning box's faces over three slabs (the sweep of figure 60), crossing at shallow angles */
+static double const bo_sliver_x[48] = {
+	1.6873215416209051, 1.0783997473952096, 0,
+	1.6334372557452375, 1.1583966209996763, 0,
+	1.6334372557452375, 1.1583966209996763, 0.59999999999999998,
+	1.6873215416209051, 1.0783997473952096, 0.59999999999999998,
+	1.509739651377463, 1.3155554663558116, 0.59999999999999998,
+	1.5713349257130493, 1.2413325707619072, 0.59999999999999998,
+	1.5753593163095529, 1.2362212684291991, 0,
+	1.5753593163095529, 1.2362212684291991, 0.59999999999999998,
+	1.4441883203749217, 1.387198650263423, 0.59999999999999998,
+	1.4441883203749217, 1.387198650263423, 0,
+	0.68930141120380317, 0.73134367059026739, 0.59999999999999998,
+	0.65277249701745454, 0.76412568804981107, 0.59999999999999998,
+	1.3747379087228364, 1.4560548349290838, 0,
+	1.3747379087228364, 1.4560548349290838, 0.59999999999999998,
+	1.5131237380986911, 1.3116617525880077, 0,
+	1.5131237380986911, 1.3116617525880077, 0.59999999999999998 };
+static unsigned int const bo_sliver_t[96] = {
+	0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1, 3, 2, 5, 3, 5, 4, 5, 1, 4, 5, 2, 1,
+	1, 6, 7, 1, 7, 2, 1, 2, 8, 1, 8, 6, 2, 7, 4, 2, 4, 8, 4, 6, 8, 4, 7, 6,
+	9, 8, 10, 9, 10, 11, 9, 12, 13, 9, 13, 8, 9, 11, 12, 8, 13, 11, 8, 11, 10, 12, 11, 13,
+	6, 14, 15, 6, 15, 7, 6, 7, 13, 6, 13, 14, 7, 15, 8, 7, 8, 13, 8, 14, 13, 8, 15, 14
+};
+
+static void test_touching(void)
+{
+	static double const lo0[3] = { 0, 0, 0 }, hi0[3] = { 1, 1, 1 }, lo1[3] = { 1, 1, 0 }, hi1[3] = { 2, 2, 1 };
+	qaws_scalar x[48], xs[48];
+	unsigned int t[72], nv = 0, nt = 0, i;
+	qaws_mesh_3d_desc A, B, S;
+	qaws_mesh_3d* m = NULL;
+	qaws_boolean_report r;
+	qaws_mesh_topology tp;
+	qaws_status s;
+	double v;
+	char msg[300];
+	bo_box(lo0, hi0, bo_z, 0, x, &nv, t, &nt);
+	bo_box(lo1, hi1, bo_z, 0, x, &nv, t, &nt);
+	A = bo_desc(x, 8, t, 12);
+	B = bo_desc(x + 24, 8, t, 12);
+	memset(&tp, 0, sizeof tp);
+	s = qaws_mesh_boolean(&m, &r, &A, &B, QAWS_BOOLEAN_UNION, NULL);
+	v = bo_volume(m);
+	if (m)
+		qaws_mesh_3d_get_topology(&tp, m);
+	sprintf(msg, "cubes touching along an edge, union: closed %d (%u boundary loops, %u shells), volume %.15f (2)", r.closed, tp.boundary_loops, tp.components, v);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && tp.closed && tp.components == 2 && fabs(v - 2) < 1e-14, msg);
+	qaws_mesh_3d_destroy(m);
+	m = NULL;
+	for (i = 0; i < 48; i++)
+		xs[i] = (qaws_scalar)bo_sliver_x[i];
+	S = bo_desc(xs, 16, bo_sliver_t, 32);
+	memset(&tp, 0, sizeof tp);
+	s = qaws_mesh_boolean(&m, &r, &S, NULL, QAWS_BOOLEAN_UNION, NULL);
+	if (m)
+		qaws_mesh_3d_get_topology(&tp, m);
+	sprintf(msg, "four thin solids crossing at shallow angles, self-union: closed %d (%u boundary loops), %u piece(s), volume %.6f", r.closed, tp.boundary_loops,
+		tp.components, bo_volume(m));
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && m && r.closed && tp.closed && tp.components == 1, msg);
+	qaws_mesh_3d_destroy(m);
+}
+
 static void test_refusals(void)
 {
 	qaws_scalar x[9] = { 0, 0, 0, 1, 0, 0, 0, 1, 0 };
@@ -338,6 +409,7 @@ int test_163_boolean_main(void)
 	test_turned();
 	test_spheres();
 	test_nested();
+	test_touching();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

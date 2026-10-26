@@ -41,6 +41,9 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Booleans: solids touching along an edge came out open (its four faces paired at random); each face is now paired with
+  its own lobe's neighbour round the edge. A small patch sampled on the wrong side of a surface nearer than the sample
+  (pieces crossing at a shallow angle) is mended from its neighbours round the edges where they meet. Test 163.
 - Sweeps: a turning edge's wall (a twisted quad) was split along a fixed diagonal, so two slabs' walls could leave a
   sliver pocket between them (the result open at an edge of four faces); walls now fold outward. Sweep features: every
   layer's copies and the corners' paths kept where the result turns by more than half the input's softest crease

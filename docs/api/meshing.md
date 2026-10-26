@@ -1052,6 +1052,7 @@ A Boolean with few patches (most) sums its winding numbers directly, exact solid
 
 **Tests and figure.** Test 163:
 - **Exact cube volumes:** two axis-aligned cubes give union, intersection and difference volumes exact to 2e-16.
+- **Touching and shallow crossings:** where solids touch along an edge (four or more faces there), each face is paired with its neighbour round the edge on its inside, so every lobe closes on its own (two cubes sharing an edge: two shells, closed). A patch is classified by its winding numbers a hair in front of and behind it; round an edge of three or more pieces, neighbours in turn share the winding of the gap between them, so a small patch whose samples landed past a surface nearer still (pieces crossing at a shallow angle) is mended from its neighbours.
 - **Volume identities:** for a turned cube, two cubes sharing two planes, and two spheres, V(A ∪ B) + V(A ∩ B) = V(A) + V(B) and V(A − B) = V(A) − V(A ∩ B), to 4e-15.
 - **Self-union:** the two cubes given as one soup give the union's volume, and resolving the union again cuts nothing.
 - **Nesting and contact:**

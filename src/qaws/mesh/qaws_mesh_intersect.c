@@ -3114,6 +3114,236 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 	return sx_boolean(out, report, a, b, op, desc, 0, NULL);
 }
 
+/* the pieces round edge uses g (m of them, sorted as sx_uses_job keys them): per use its patch (z), its side toward the
+   turn (s: +1 when it runs the edge from its smaller vertex, its front then faces the turn), and their order round the edge
+   (ord); 0 when two lie at one angle (coincident: the order is not told) */
+static int sx_round(sx_out const* o, unsigned long long const* g, unsigned int m, unsigned int const* pid, unsigned int* ord, unsigned int* z, int* s)
+{
+	unsigned int v0 = (unsigned int)(g[0] >> 33), v1 = (unsigned int)((g[0] >> 1) & 0xFFFFFFFFu), q, r, k;
+	double d[3], e1[3], e2[3], an[16], l = 0;
+	for (k = 0; k < 3; k++)
+	{
+		d[k] = (double)o->pos[3 * (size_t)v1 + k] - (double)o->pos[3 * (size_t)v0 + k];
+		l += d[k] * d[k];
+	}
+	if (!(l > 0))
+		return 0;
+	for (k = 0; k < 3; k++)
+		d[k] /= sqrt(l);
+	for (q = 0; q < m; q++)
+	{
+		unsigned int c = (unsigned int)g[2 * (size_t)q + 1], t = c / 3, w = o->tri[3 * (size_t)t + (c % 3 + 2) % 3];
+		double rr[3], dd = 0, rl = 0;
+		for (k = 0; k < 3; k++)
+		{
+			rr[k] = (double)o->pos[3 * (size_t)w + k] - (double)o->pos[3 * (size_t)v0 + k];
+			dd += rr[k] * d[k];
+		}
+		for (k = 0; k < 3; k++)
+		{
+			rr[k] -= dd * d[k];
+			rl += rr[k] * rr[k];
+		}
+		if (!(rl > 0))
+			return 0;
+		if (q == 0)
+		{
+			for (k = 0; k < 3; k++)
+				e1[k] = rr[k] / sqrt(rl);
+			sx_cross(d, e1, e2);
+		}
+		an[q] = atan2(sx_dot(rr, e2), sx_dot(rr, e1));
+		z[q] = pid[t];
+		s[q] = (g[2 * (size_t)q] & 1) ? -1 : 1;
+		ord[q] = q;
+	}
+	for (q = 1; q < m; q++)
+		for (r = q; r > 0 && an[ord[r - 1]] > an[ord[r]]; r--)
+		{
+			unsigned int x = ord[r];
+			ord[r] = ord[r - 1];
+			ord[r - 1] = x;
+		}
+	for (q = 0; q + 1 < m; q++)
+		if (an[ord[q + 1]] - an[ord[q]] < 1e-12)
+			return 0;
+	return 1;
+}
+
+/* Windings sampled a hair off a patch can land past a surface nearer still (pieces crossing at a shallow angle). Round an
+   edge of three or more pieces, in turn by angle, two neighbours share the winding numbers of the gap between them, and
+   crossing a piece changes its own operand's by one (its back the inside). Where two disagree the smaller patch is
+   distrusted when small (its fattest piece's inradius under 1e-3 of the box; edges by coincident pieces left alone), then each distrusted one takes its windings from a trusted neighbour across such an edge, repeatedly: a
+   patch sampled right never changes. wa, wb: per patch its front and back windings (wb NULL for a self-union); nfa: A's
+   faces. Returns the patches mended; -1 on allocation failure. */
+static int sx_mend(sx_out const* o, unsigned long long const* grp, unsigned int const* pid, double const* fat, unsigned int const* rep,
+	unsigned int npatch, qaws_scalar* wa, qaws_scalar* wb, unsigned int nfa)
+{
+	unsigned int n = 3 * o->nt, i, j, q, pass, mended = 0;
+	unsigned char* bad = (unsigned char*)qaws_internal_zalloc((size_t)npatch + 1, 1);
+	if (!bad)
+		return -1;
+	for (pass = 0; pass < 32; pass++)
+	{
+		int changed = 0;
+		for (i = 0; i < n; i = j)
+		{
+			unsigned int m, ord[16], z[16];
+			int s[16];
+			for (j = i + 1; j < n && grp[2 * (size_t)j] >> 1 == grp[2 * (size_t)i] >> 1; j++)
+				;
+			m = j - i;
+			if (m < 3 || m > 16 || !sx_round(o, grp + 2 * (size_t)i, m, pid, ord, z, s))
+				continue;
+			for (q = 0; q < m; q++)
+				if (o->copl[(unsigned int)o->src[(unsigned int)grp[2 * ((size_t)i + q) + 1] / 3]])
+					break;
+			if (q < m)
+				continue;   /* (coincident pieces: a winding may jump by more than one there) */
+			for (q = 0; q < m; q++)
+			{
+				/* P's side toward the turn and Q's side back from it bound one gap */
+				unsigned int pa = ord[q], qb = ord[(q + 1) % m], P = z[pa], Q = z[qb];
+				unsigned int ip = s[pa] > 0 ? 0 : 1, iq = s[qb] > 0 ? 1 : 0;
+				int same = floor((double)wa[2 * (size_t)P + ip] + 0.5) == floor((double)wa[2 * (size_t)Q + iq] + 0.5)
+					&& (!wb || floor((double)wb[2 * (size_t)P + ip] + 0.5) == floor((double)wb[2 * (size_t)Q + iq] + 0.5));
+				unsigned int to, from, it, ifr, src;
+				double va, vb;
+				if (P == Q || same)
+					continue;
+				if (pass == 0)
+				{
+					unsigned int small = fat[rep[P]] < fat[rep[Q]] ? P : Q;
+					if (fat[rep[small]] < 2e-3 * o->diag)
+						bad[small] = 1;   /* (a patch that small: its samples a hair off it can land past a surface) */
+					continue;
+				}
+				if (bad[P] == bad[Q])
+					continue;
+				to = bad[P] ? P : Q;
+				from = bad[P] ? Q : P;
+				it = bad[P] ? ip : iq;
+				ifr = bad[P] ? iq : ip;
+				va = floor((double)wa[2 * (size_t)from + ifr] + 0.5);
+				vb = wb ? floor((double)wb[2 * (size_t)from + ifr] + 0.5) : 0;
+				/* the other side across the patch's own piece: its operand's one more behind, one less in front */
+				src = (unsigned int)o->src[rep[to]];
+				wa[2 * (size_t)to + it] = (qaws_scalar)va;
+				wa[2 * (size_t)to + 1 - it] = (qaws_scalar)(va + (src < nfa ? (it == 0 ? 1 : -1) : 0));
+				if (wb)
+				{
+					wb[2 * (size_t)to + it] = (qaws_scalar)vb;
+					wb[2 * (size_t)to + 1 - it] = (qaws_scalar)(vb + (src >= nfa ? (it == 0 ? 1 : -1) : 0));
+				}
+				bad[to] = 0;
+				mended++;
+				changed = 1;
+			}
+		}
+		if (pass > 0 && !changed)
+			break;
+	}
+	qaws_internal_free(bad);
+	return (int)mended;
+}
+
+/* the opposites of the kept faces' corners on edges of four or more of them (solids touching along an edge): round the
+   edge in turn by angle, each face's back (the inside) faces its neighbour's on that side, which bounds the same lobe of the
+   result; those two are paired, so each lobe closes on its own. t: the kept faces (outward), opp: per corner its opposite
+   (SX_NONE where not known; filled here where the order tells). 0 on allocation failure. */
+static int sx_pair_round(unsigned int const* t, qaws_scalar const* pos, unsigned int nt, unsigned int* opp)
+{
+	unsigned int n = 3 * nt, i, j, q;
+	unsigned long long* g = (unsigned long long*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned long long), 2, (size_t)n + 1));
+	if (!g)
+		return 0;
+	for (i = 0; i < n; i++)
+	{
+		unsigned long long a = t[i], b = t[3 * (i / 3) + (i % 3 + 1) % 3];
+		g[2 * (size_t)i] = (a < b ? (a << 32 | b) : (b << 32 | a)) << 1 | (a > b);
+		g[2 * (size_t)i + 1] = i;
+	}
+	qsort(g, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
+	for (i = 0; i < n; i = j)
+	{
+		unsigned int m, ord[16], v0, v1, r, k, missing = 0;
+		double d[3], e1[3], e2[3], an[16], l = 0;
+		int ok = 1;
+		for (j = i + 1; j < n && g[2 * (size_t)j] >> 1 == g[2 * (size_t)i] >> 1; j++)
+			;
+		m = j - i;
+		for (q = i; q < j; q++)
+			missing += opp[g[2 * (size_t)q + 1]] == SX_NONE;
+		if (m < 4 || m > 16 || (m & 1) || !missing)
+			continue;
+		v0 = (unsigned int)(g[2 * (size_t)i] >> 33);
+		v1 = (unsigned int)((g[2 * (size_t)i] >> 1) & 0xFFFFFFFFu);
+		for (k = 0; k < 3; k++)
+		{
+			d[k] = (double)pos[3 * (size_t)v1 + k] - (double)pos[3 * (size_t)v0 + k];
+			l += d[k] * d[k];
+		}
+		if (!(l > 0))
+			continue;
+		for (k = 0; k < 3; k++)
+			d[k] /= sqrt(l);
+		for (q = 0; q < m && ok; q++)
+		{
+			unsigned int c = (unsigned int)g[2 * ((size_t)i + q) + 1], w = t[3 * (c / 3) + (c % 3 + 2) % 3];
+			double rr[3], dd = 0, rl = 0;
+			for (k = 0; k < 3; k++)
+			{
+				rr[k] = (double)pos[3 * (size_t)w + k] - (double)pos[3 * (size_t)v0 + k];
+				dd += rr[k] * d[k];
+			}
+			for (k = 0; k < 3; k++)
+			{
+				rr[k] -= dd * d[k];
+				rl += rr[k] * rr[k];
+			}
+			if (!(rl > 0))
+			{
+				ok = 0;
+				break;
+			}
+			if (q == 0)
+			{
+				for (k = 0; k < 3; k++)
+					e1[k] = rr[k] / sqrt(rl);
+				sx_cross(d, e1, e2);
+			}
+			an[q] = atan2(sx_dot(rr, e2), sx_dot(rr, e1));
+			ord[q] = q;
+		}
+		if (!ok)
+			continue;
+		for (q = 1; q < m; q++)
+			for (r = q; r > 0 && an[ord[r - 1]] > an[ord[r]]; r--)
+			{
+				unsigned int x = ord[r];
+				ord[r] = ord[r - 1];
+				ord[r - 1] = x;
+			}
+		for (q = 0; q + 1 < m && ok; q++)
+			ok = an[ord[q + 1]] - an[ord[q]] > 1e-12;
+		/* a face running the edge from v0 has its front toward the turn, its back toward the one before it */
+		for (q = 0; q < m && ok; q++)
+		{
+			/* (by position in turn: the partner of position q, and the partner's own is q) */
+			unsigned int pq = (g[2 * ((size_t)i + ord[q])] & 1) ? (q + 1) % m : (q + m - 1) % m;
+			unsigned int pp = (g[2 * ((size_t)i + ord[pq])] & 1) ? (pq + 1) % m : (pq + m - 1) % m;
+			ok = pp == q && (g[2 * ((size_t)i + ord[q])] & 1) != (g[2 * ((size_t)i + ord[pq])] & 1);
+		}
+		for (q = 0; q < m && ok; q++)
+		{
+			unsigned int a = ord[q], b = (g[2 * ((size_t)i + a)] & 1) ? ord[(q + 1) % m] : ord[(q + m - 1) % m];
+			opp[g[2 * ((size_t)i + a) + 1]] = (unsigned int)g[2 * ((size_t)i + b) + 1];
+		}
+	}
+	qaws_internal_free(g);
+	return 1;
+}
+
 qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d_desc const* a, qaws_mesh_3d_desc const* b,
 	qaws_boolean_op op, qaws_intersect_desc const* desc, int one, unsigned char** out_turned)
 {
@@ -3324,6 +3554,8 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 	}
 	if (st != QAWS_STATUS_OK)
 		goto done;
+	if (sx_mend(&o, grp, pid, fat, rep, npatch, wa, two ? wb : NULL, a->face_count) < 0)
+		goto oom;
 	/* coincident pieces (an operand overlapping itself in a plane) kept once: identical pieces from the lowest input face, and
 	   in a self-union a patch lying on a lower input face of its plane (either way round) dropped: the lowest face's pieces stand
 	   for the overlap, their windings deciding which way it faces */
@@ -3445,7 +3677,10 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 			if (bad)
 				goto oom;
 		}
-		/* every edge of exactly two kept faces turned opposite ways: they are the mesh's pairs */
+		/* every edge of exactly two kept faces turned opposite ways: they are the mesh's pairs; edges of more (solids touching
+		   along them) paired lobe by lobe */
+		if (!sx_pair_round(keep, kpos, nk, kopp))
+			goto oom;
 		for (i = 0; i < 3 * nk && kopp[i] != SX_NONE; i++) {}
 		st = nk ? sx_mesh(out, kpos, m, keep, i == 3 * nk ? kopp : NULL, keep_src, nk) : QAWS_STATUS_OK;
 		if (st == QAWS_STATUS_OK && nk && *out)
