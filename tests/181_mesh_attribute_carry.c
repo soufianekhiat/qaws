@@ -26,6 +26,15 @@
  *     added: length 15);
  *   - tangents with handedness: unit directions, the sign +1 on A's pieces,
  *     -1 on B's turned ones;
+ *   - vectors and orientations: an edge split mixes VECTORs linearly (the
+ *     midpoint of (2, 0, 0) and (0, 2, 0) is (1, 1, 0), not unit) and
+ *     QUATERNIONs on one side (the identity and minus a quarter turn about z
+ *     give the eighth turn, not a near zero); a Boolean (A's vectors per
+ *     vertex, B's per corner: matched) leaves B's turned
+ *     pieces' vectors as they were (a NORMAL would be negated); a box swept
+ *     through a quarter turn about z: at the end pose's outer corners the vector
+ *     turned to (0, 1, 0) and the quaternion the quarter turn's, at the
+ *     start's both as given;
  *   - refused: one name of two elements, a NORMAL of 2 components.
  */
 
@@ -619,6 +628,131 @@ static void test_edge_boolean(void)
 	qaws_mesh_3d_destroy(a); qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
 }
 
+/* 1 - |q . r| for unit quaternions: 0 for one rotation */
+static double ac_quat_error(qaws_scalar const* q, double const* r)
+{
+	return 1 - fabs((double)q[0] * r[0] + (double)q[1] * r[1] + (double)q[2] * r[2] + (double)q[3] * r[3]);
+}
+
+static void test_vector_quaternion(void)
+{
+	static unsigned int const t[6] = { 0, 1, 2, 0, 2, 3 };
+	qaws_scalar x[12] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0 };
+	qaws_scalar vec[12] = { 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0 }, quat[16] = { 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 };
+	double const h = sqrt(0.5), eighth[4] = { cos(3.14159265358979323846 / 8), 0, 0, sin(3.14159265358979323846 / 8) };
+	double const quarter[4] = { h, 0, 0, h }, ident[4] = { 1, 0, 0, 0 };
+	double vmid = 1, qmid = 1, keep = 0, vend = 0, qend = 0, vstart = 0, qstart = 0;
+	unsigned int v = 0, iv, iq, nend = 0, nstart = 0, i, j;
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d *m = NULL, *a = ac_box(0, 1, 0, 1, 0, 1), *b = ac_box(0.5, 1.5, 0.5, 1.5, 0.5, 1.5), *o = NULL, *box = ac_box(1, 2, -0.1, 0.1, 0, 0.6), *s = NULL;
+	qaws_motion_pose p0, p1;
+	qaws_motion* mo = NULL;
+	qaws_mesh_element e;
+	unsigned int n;
+	char msg[500];
+	/* an edge split: vertex 1 holds (0, 2, 0) and minus a quarter turn about z */
+	quat[4] = (qaws_scalar)-h; quat[7] = (qaws_scalar)-h;
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 4; d.face_vertices = t; d.face_count = 2;
+	qaws_mesh_3d_create(&m, &d);
+	vec[0] = 2; vec[3] = 0; vec[4] = 2;
+	iv = ac_add(m, "v", QAWS_MESH_VERTEX, 3, QAWS_ATTRIBUTE_VECTOR, vec);
+	iq = ac_add(m, "q", QAWS_MESH_VERTEX, 4, QAWS_ATTRIBUTE_QUATERNION, quat);
+	if (qaws_mesh_3d_split_edge(&v, m, NULL, NULL, 0, 1) == QAWS_STATUS_OK)
+	{
+		qaws_scalar* av = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * qaws_mesh_3d_get_vertex_count(m));
+		qaws_scalar* aq = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 4 * qaws_mesh_3d_get_vertex_count(m));
+		qaws_mesh_3d_get_attribute(av, m, iv);
+		qaws_mesh_3d_get_attribute(aq, m, iq);
+		vmid = fabs((double)av[3 * v] - 1) + fabs((double)av[3 * v + 1] - 1) + fabs((double)av[3 * v + 2]);
+		qmid = ac_quat_error(aq + 4 * v, eighth);
+		free(av); free(aq);
+	}
+	/* A - B, vectors (1, 0, 0) on A, (0, 1, 0) on B */
+	{
+		qaws_scalar va[24], vb[108];
+		qaws_scalar *ov, *src;
+		for (i = 0; i < 8; i++)
+		{
+			va[3 * i] = 1; va[3 * i + 1] = 0; va[3 * i + 2] = 0;
+		}
+		for (i = 0; i < 36; i++)
+		{
+			vb[3 * i] = 0; vb[3 * i + 1] = 1; vb[3 * i + 2] = 0;
+		}
+		ac_add(a, "v", QAWS_MESH_VERTEX, 3, QAWS_ATTRIBUTE_VECTOR, va);
+		ac_add(b, "v", QAWS_MESH_CORNER, 3, QAWS_ATTRIBUTE_VECTOR, vb);   /* (per corner, A's per vertex: they match) */
+		keep = 1;
+		if (qaws_mesh_3d_boolean(&o, NULL, a, b, QAWS_BOOLEAN_DIFFERENCE, NULL) == QAWS_STATUS_OK && o && (ov = ac_get(o, "v", &e, &n)) != NULL)
+		{
+			src = ac_get(o, "source", &e, &n);
+			keep = 0;
+			for (i = 0; src && i < qaws_mesh_3d_get_face_count(o); i++)
+				for (j = 0; j < 3; j++)
+				{
+					qaws_scalar const* q = ov + 9 * i + 3 * j;
+					int in_a = (unsigned int)src[i] < 12;
+					keep = fmax(keep, fabs((double)q[0] - in_a) + fabs((double)q[1] - !in_a) + fabs((double)q[2]));
+				}
+			free(ov); free(src);
+		}
+	}
+	/* a box swept through a quarter turn about z */
+	{
+		qaws_scalar bv[24], bq[32];
+		for (i = 0; i < 8; i++)
+		{
+			bv[3 * i] = 1; bv[3 * i + 1] = 0; bv[3 * i + 2] = 0;
+			bq[4 * i] = 1; bq[4 * i + 1] = 0; bq[4 * i + 2] = 0; bq[4 * i + 3] = 0;
+		}
+		ac_add(box, "v", QAWS_MESH_VERTEX, 3, QAWS_ATTRIBUTE_VECTOR, bv);
+		ac_add(box, "q", QAWS_MESH_VERTEX, 4, QAWS_ATTRIBUTE_QUATERNION, bq);
+		memset(&p0, 0, sizeof p0);
+		memset(&p1, 0, sizeof p1);
+		p0.rotation[0] = 1;
+		p1.rotation[0] = (qaws_scalar)h; p1.rotation[3] = (qaws_scalar)h;
+		p0.angular_velocity.z = p1.angular_velocity.z = (qaws_scalar)(3.14159265358979323846 / 2);
+		qaws_motion_create_poses(&mo, &p0, &p1, 0);
+		if (mo && qaws_mesh_3d_sweep(&s, NULL, box, mo, NULL) == QAWS_STATUS_OK && s)
+		{
+			qaws_scalar *sv = ac_get(s, "v", &e, &n), *sq = ac_get(s, "q", &e, &n);
+			for (i = 0; sv && sq && i < qaws_mesh_3d_get_face_count(s); i++)
+			{
+				unsigned int tv[3];
+				qaws_mesh_3d_get_triangle(tv, s, i);
+				for (j = 0; j < 3; j++)
+				{
+					qaws_vec3 p = qaws_mesh_3d_get_vertex(s, tv[j]);
+					double px = (double)p.x, py = (double)p.y, pz = (double)p.z;
+					int at_z = fabs(pz) < 1e-12 || fabs(pz - 0.6) < 1e-12;
+					qaws_scalar const *cv = sv + 9 * i + 3 * j, *cq = sq + 12 * i + 4 * j;
+					/* the end pose's outer corners (x in {-0.1, 0.1}, y = 2) and the start's (x = 2): reached at those poses alone (the inner ones are
+					   crossed mid-motion by the other inner edge) */
+					if (at_z && (fabs(fabs(px) - 0.1) < 1e-9) && fabs(py - 2) < 1e-9)
+					{
+						vend = fmax(vend, fabs((double)cv[0]) + fabs((double)cv[1] - 1) + fabs((double)cv[2]));
+						qend = fmax(qend, ac_quat_error(cq, quarter));
+						nend++;
+					}
+					if (at_z && (fabs(fabs(py) - 0.1) < 1e-9) && fabs(px - 2) < 1e-9)
+					{
+						vstart = fmax(vstart, fabs((double)cv[0] - 1) + fabs((double)cv[1]) + fabs((double)cv[2]));
+						qstart = fmax(qstart, ac_quat_error(cq, ident));
+						nstart++;
+					}
+				}
+			}
+			free(sv); free(sq);
+		}
+	}
+	sprintf(msg, "a split's VECTOR midpoint off (1, 1, 0) by %.1e, QUATERNION off the eighth turn by %.1e; A - B: vectors off their operand's by %.1e (B's turned pieces kept); a quarter-turn sweep: %u end corners (vector %.1e, quaternion %.1e), %u start corners (%.1e, %.1e)",
+		vmid, qmid, keep, nend, vend, qend, nstart, vstart, qstart);
+	printf("  %s\n", msg);
+	TEST_ASSERT(vmid < 1e-12 && qmid < 1e-12 && keep < 1e-12 && nend > 0 && nstart > 0 && vend < 1e-9 && qend < 1e-9 && vstart < 1e-9 && qstart < 1e-9, msg);
+	qaws_mesh_3d_destroy(m); qaws_mesh_3d_destroy(a); qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(box); qaws_mesh_3d_destroy(s);
+	qaws_motion_destroy(mo);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *a = ac_box(0, 1, 0, 1, 0, 1), *b = ac_box(0.5, 1.5, 0.5, 1.5, 0.5, 1.5), *o = NULL;
@@ -651,6 +785,7 @@ int test_181_mesh_attribute_carry_main(void)
 	test_carving();
 	test_edge_edits();
 	test_edge_boolean();
+	test_vector_quaternion();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

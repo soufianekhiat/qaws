@@ -85,9 +85,17 @@ typedef enum qaws_attribute_rule
 	                                       by it (premultiplied) */
 	QAWS_ATTRIBUTE_OKLAB,               /* the same colours blended in Oklab (perceptually even, no dark or muddy
 	                                       midpoints between hues) */
-	QAWS_ATTRIBUTE_TANGENT              /* a tangent with its handedness (4 components: x y z w): the direction as
+	QAWS_ATTRIBUTE_TANGENT,             /* a tangent with its handedness (4 components: x y z w): the direction as
 	                                       NORMALIZED, w a sign (+1 or -1, the bitangent's side), negated on the faces
 	                                       an operation turns over; rotated with a swept mesh */
+	QAWS_ATTRIBUTE_VECTOR,              /* a free vector (3 components: a velocity, a displacement, a flow): interpolated
+	                                       linearly, its length kept (never normalized) and never negated on turned
+	                                       faces; rotated with a swept mesh */
+	QAWS_ATTRIBUTE_QUATERNION           /* an orientation (4 components: w x y z, unit): q and -q are one rotation, so
+	                                       each value is blended on the first one's side and the mix made unit
+	                                       (normalized lerp); composed with a swept mesh's rotation. Subdivision blends
+	                                       them on the identity's side (w >= 0): a field near a half turn from the
+	                                       identity can flip there */
 } qaws_attribute_rule;
 #endif
 

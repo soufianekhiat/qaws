@@ -372,6 +372,7 @@ static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 					}
 					cn_lerp(C->A, la, dim, s, xa);
 					cn_lerp(C->B, lb, dim, s, xb);
+					hm_align(xb, xa, dim, da.rule);
 					for (k = 0; k < dim; k++)
 						xa[k] = da.rule == QAWS_ATTRIBUTE_NEAREST ? (w < 0.5 ? xa[k] : xb[k]) : (1 - w) * xa[k] + w * xb[k];
 					if (da.rule != QAWS_ATTRIBUTE_NEAREST)

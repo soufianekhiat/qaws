@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Attribute rules `VECTOR` (mixed linearly, turned with sweeps, never negated) and `QUATERNION` (mixed on one side and
+  made unit, composed with sweeps' rotations). Booleans match a vertex attribute with a corner one of the same name.
+  Test 181, figure 63 (sweep schemes carving, the rules compared).
 - Edge attributes (`QAWS_MESH_EDGE`): kept by edits on an edge and its pieces, carried by Booleans and sweeps. The
   `TANGENT` rule (handedness negated on turned faces). `qaws_mesh_3d_boolean` keeps the operands' feature edges and marks
   the cuts as features. Test 181, figure 62.

@@ -175,6 +175,9 @@ static void hm_solve3(double const* M, double* v)
 void hm_space_in(double* v, unsigned int n, unsigned int rule)
 {
 	unsigned int k;
+	if (rule == QAWS_ATTRIBUTE_QUATERNION && v[0] < 0)
+		for (k = 0; k < 4; k++)
+			v[k] = -v[k];
 	if (rule != QAWS_ATTRIBUTE_SRGB && rule != QAWS_ATTRIBUTE_OKLAB)
 		return;
 	for (k = 0; k < 3; k++)
@@ -194,7 +197,7 @@ void hm_space_in(double* v, unsigned int n, unsigned int rule)
 void hm_space_out(double* v, unsigned int n, unsigned int rule)
 {
 	unsigned int k;
-	if (hm_rule_unit(rule))
+	if (hm_rule_unit(rule) || rule == QAWS_ATTRIBUTE_QUATERNION)
 	{
 		/* (a tangent: its direction made unit, its handedness a sign) */
 		unsigned int d = rule == QAWS_ATTRIBUTE_TANGENT ? 3 : n;
@@ -224,6 +227,15 @@ void hm_space_out(double* v, unsigned int n, unsigned int rule)
 		v[k] = hm_srgb_encode(v[k]);
 }
 
+void hm_align(double* v, double const* ref, unsigned int n, unsigned int rule)
+{
+	unsigned int k;
+	(void)n;
+	if (rule == QAWS_ATTRIBUTE_QUATERNION && v[0] * ref[0] + v[1] * ref[1] + v[2] * ref[2] + v[3] * ref[3] < 0)
+		for (k = 0; k < 4; k++)
+			v[k] = -v[k];
+}
+
 void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned int n, unsigned int rule)
 {
 	double x[16], y[16];
@@ -237,6 +249,7 @@ void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned i
 	memcpy(y, b, sizeof(double) * n);
 	hm_space_in(x, n, rule);
 	hm_space_in(y, n, rule);
+	hm_align(y, x, n, rule);
 	for (k = 0; k < n; k++)
 		x[k] = (1 - t) * x[k] + t * y[k];
 	hm_space_out(x, n, rule);
@@ -248,7 +261,7 @@ static void hm_blend(double* out, double const* vals, unsigned int stride, unsig
 	unsigned int s, unsigned int n, unsigned int rule)
 {
 	unsigned int i, j;
-	double best = -1, acc[16], v[16];
+	double best = -1, acc[16], v[16], ref[16];
 	memset(acc, 0, sizeof(double) * n);
 	for (i = 0; i < s; i++)
 	{
@@ -263,6 +276,9 @@ static void hm_blend(double* out, double const* vals, unsigned int stride, unsig
 			continue;
 		}
 		hm_space_in(v, n, rule);
+		if (i == 0)
+			memcpy(ref, v, sizeof(double) * n);
+		hm_align(v, ref, n, rule);
 		for (j = 0; j < n; j++)
 			acc[j] += w[i] * v[j];
 	}

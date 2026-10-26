@@ -937,7 +937,7 @@ qaws_status qaws_mesh_reference_evaluate_attribute(qaws_scalar* out, qaws_mesh_r
 	for (i = 0; i < count; i++)
 	{
 		unsigned int t = loc[i].patch, j;
-		double w[3], v[16] = { 0 }, best = -1;
+		double w[3], v[16] = { 0 }, best = -1, r0[16];
 		w[1] = (double)loc[i].a;
 		w[2] = (double)loc[i].b;
 		w[0] = 1 - w[1] - w[2];
@@ -950,6 +950,9 @@ qaws_status qaws_mesh_reference_evaluate_attribute(qaws_scalar* out, qaws_mesh_r
 				memcpy(s, hm_attr_at(m, attribute, at->element == QAWS_MESH_VERTEX ? r->tv[3 * t + j] : r->tc[3 * t + j]), sizeof(double) * at->n);
 				if (at->rule != QAWS_ATTRIBUTE_NEAREST)
 					hm_space_in(s, at->n, at->rule);
+				if (j == 0)
+					memcpy(r0, s, sizeof(double) * at->n);
+				hm_align(s, r0, at->n, at->rule);
 				if (at->rule == QAWS_ATTRIBUTE_NEAREST)
 				{
 					if (w[j] > best)

@@ -75,7 +75,8 @@ typedef struct qaws_motion_state
 /* INVALID_ARGUMENT for a value not finite, a zero quaternion, a relative rotation of a half turn or more */
 qaws_status qaws_motion_create_poses(qaws_motion** out_motion, qaws_motion_pose const* start, qaws_motion_pose const* end, unsigned int flags);
 
-/* rotation: a quaternion (w, x, y, z), NULL the identity. INVALID_ARGUMENT for a curve not 3D */
+/* rotation: a quaternion (w, x, y, z), NULL the identity. The curve is borrowed: keep it until the motion is destroyed.
+   INVALID_ARGUMENT for a curve not 3D */
 qaws_status qaws_motion_create_curve(qaws_motion** out_motion, qaws_curve const* curve, qaws_scalar const* rotation);
 
 /* count vertices (3 each): positions and velocities at t = 0 and 1; accelerations (may be NULL) with QAWS_MOTION_QUINTIC */

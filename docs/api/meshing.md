@@ -81,6 +81,15 @@ outside; indices stay dense through edits.
   the connector, references, Booleans, sweeps) mixes them in the rule's space.
   `TANGENT` (4 components) is a tangent with its handedness: the direction
   made unit, w a sign negated where a face is turned over.
+  `VECTOR` (3 components: a velocity, a displacement, a flow) mixes
+  linearly and keeps its length; it is never negated on turned faces (it
+  is not tied to a face's side) and turns with a swept mesh, where
+  `LINEAR` values stay as given. `QUATERNION` (4 components, w x y z) is
+  an orientation: q and −q are one rotation, so each value is mixed on the
+  first one's side and the mix made unit (normalized lerp); a sweep
+  composes it with the motion's rotation, and an operand without it reads
+  the identity. Subdivision mixes quaternions on the identity's side
+  (w ≥ 0), so a field near a half turn from the identity can flip there.
 - **Edge attributes** (`QAWS_MESH_EDGE`, in `qaws_mesh_3d_get_edges` order:
   crease weights, seam ids) are stored on both corners of each edge, as
   features are. An edit keeps an edge's value on the edge and on its pieces
@@ -1053,7 +1062,7 @@ Figure 27 (key r) shows two spheres' union, intersection and difference (seen fr
 qaws_mesh_3d_boolean(&out, &report, a, b, QAWS_BOOLEAN_DIFFERENCE, &desc);   /* meshes, their attributes carried */
 ```
 
-- **Matching:** by name across the operands; one name must have one element, component count and rule (else INVALID_ARGUMENT). Unnamed attributes never match. An attribute on one operand only reads zeros on the other's faces, except a `NORMAL` one, which takes that face's normal. An input's `"source"` gives way to the result's.
+- **Matching:** by name across the operands; one name must have one element, component count and rule (else INVALID_ARGUMENT), a vertex and a corner attribute counting as one element (both come out per corner): a swept tool's colours, per corner, match a stock's per vertex. Unnamed attributes never match. An attribute on one operand only reads zeros on the other's faces, except a `NORMAL` one, which takes that face's normal. An input's `"source"` gives way to the result's.
 - **Faces:** a face attribute is the source face's value.
 - **Vertices and corners:** each result corner is placed in its source face (the fan triangle holding it, barycentric, clamped to it, never extrapolated) and its values mixed there by the rule. Both sides of a cut keep their own values, so vertex attributes come out per corner (same name): the cut stays sharp in the normals, and two solids' colours or UV charts do not bleed into each other.
 - **Turned pieces:** `NORMAL` attributes are negated on the pieces the Boolean turns over (B's in A − B), `TANGENT` ones' handedness too.
@@ -1743,7 +1752,7 @@ Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along 
 **Attributes.** A sweep carries the mesh's attributes as the Booleans do (vertex ones come out per corner):
 - each layer of the soup repeats the mesh's values;
 - a wall takes, along its edge, the values of the front face's corners there;
-- directions (`NORMAL`, and `NORMALIZED` of 3 components) turn with a rigid motion's rotation at the layer's time, so a turning tool's normals stay on it;
+- directions (`NORMAL`, `TANGENT`, `VECTOR`, and `NORMALIZED` of 3 components) turn with a rigid motion's rotation at the layer's time, so a turning tool's normals stay on it; a `QUATERNION` is composed with that rotation (the tool's orientation where each piece was swept);
 - a `NORMAL` face attribute on a wall is the wall's own normal;
 - a soup edge repeating an edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values and feature flag, the others zeros; the self-union then marks its cuts as features;
 - `qaws_mesh_sweep_boolean` matches the tool's and the stock's attributes by name.
@@ -1752,6 +1761,13 @@ Test 181:
 - a cube swept along x carries a field constant along the motion exactly, and its face normals lie along every face;
 - a ball's radial vertex normals swept along a segment agree with the tube's faces as well as with the ball's own (mean dot 0.944 against 0.941);
 - a carved slot's faces carry the tool's material over exactly the slot's area, 4.
+
+Figure 63 (key -) shows:
+- one coloured cube tool carving one block by four motion schemes, the slot in the tool's colours: linear (two poses, removed 0.600: the slot's exact volume), cubic Hermite with a quarter turn, quintic (the same ends and velocities, accelerations added), along a Bezier curve;
+- the same radial values as a `NORMAL` and as a `VECTOR` in a bite: the normal negated, the vector kept;
+- a box swept through a quarter turn: a `VECTOR` turned with it, `LINEAR` values as given;
+- one quad subdivided with the identity and minus a third of a turn: as a `QUATERNION` the frames stay rigid and turn the short way, as `LINEAR` they shrink and turn the long way;
+- a `QUATERNION` through the cubic sweep: the tool's orientation on every piece.
 
 Figure 62 (key +) shows:
 - one quad's corner colours subdivided under `LINEAR`, `SRGB` and `OKLAB` (muddy, linear light, perceptual);

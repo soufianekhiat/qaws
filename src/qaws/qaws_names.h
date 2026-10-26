@@ -21,6 +21,7 @@
 #define cy_keys QAWS_SFX(cy_keys)
 #define ff_comb QAWS_SFX(ff_comb)
 #define ff_frames QAWS_SFX(ff_frames)
+#define hm_align QAWS_SFX(hm_align)
 #define hm_attr_add QAWS_SFX(hm_attr_add)
 #define hm_attr_at QAWS_SFX(hm_attr_at)
 #define hm_attr_remove QAWS_SFX(hm_attr_remove)

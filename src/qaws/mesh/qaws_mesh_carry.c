@@ -161,7 +161,7 @@ static void cy_locate(cy_part const* p, unsigned int f, double const* q, unsigne
 static void cy_mix(double* out, qaws_scalar const* const* v, double const* w, unsigned int n, unsigned int rule)
 {
 	unsigned int i, k;
-	double x[16];
+	double x[16], ref[16];
 	memset(out, 0, sizeof(double) * n);
 	if (rule == QAWS_ATTRIBUTE_NEAREST)
 	{
@@ -175,6 +175,9 @@ static void cy_mix(double* out, qaws_scalar const* const* v, double const* w, un
 		for (k = 0; k < n; k++)
 			x[k] = (double)v[i][k];
 		hm_space_in(x, n, rule);
+		if (i == 0)
+			memcpy(ref, x, sizeof(double) * n);
+		hm_align(x, ref, n, rule);
 		for (k = 0; k < n; k++)
 			out[k] += w[i] * x[k];
 	}
@@ -270,9 +273,14 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 		{
 			qaws_attribute_desc ad;
 			cy_attr* t = NULL;
+			int vx;
 			qaws_mesh_3d_get_attribute_desc(&ad, P[i].m, j);
 			if (ad.name && !strcmp(ad.name, "source"))
 				continue;
+			/* (a vertex attribute taken per corner: it matches a corner one, both come out per corner) */
+			vx = ad.element == QAWS_MESH_VERTEX;
+			if (vx)
+				ad.element = QAWS_MESH_CORNER;
 			for (k = 0; ad.name && k < nattr && !t; k++)
 				if (A[k].d.name && !strcmp(A[k].d.name, ad.name))
 					t = &A[k];
@@ -303,12 +311,24 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 			}
 			if (t->idx[i] == QAWS_MESH_NONE)
 			{
-				size_t count_el = ad.element == QAWS_MESH_VERTEX ? P[i].nv : ad.element == QAWS_MESH_CORNER ? P[i].nc : ad.element == QAWS_MESH_EDGE ? P[i].ne : P[i].nf;
+				size_t count_el = ad.element == QAWS_MESH_CORNER ? P[i].nc : ad.element == QAWS_MESH_EDGE ? P[i].ne : P[i].nf;
 				t->idx[i] = j;
 				t->val[i] = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), ad.components, count_el + 1));
 				if (!t->val[i])
 					goto oom;
-				qaws_mesh_3d_get_attribute(t->val[i], P[i].m, j);
+				if (vx)
+				{
+					qaws_scalar* tv = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), ad.components, (size_t)P[i].nv + 1));
+					unsigned int c;
+					if (!tv)
+						goto oom;
+					qaws_mesh_3d_get_attribute(tv, P[i].m, j);
+					for (c = 0; c < P[i].nc; c++)
+						memcpy(t->val[i] + (size_t)ad.components * c, tv + (size_t)ad.components * P[i].fv[c], sizeof(qaws_scalar) * ad.components);
+					qaws_internal_free(tv);
+				}
+				else
+					qaws_mesh_3d_get_attribute(t->val[i], P[i].m, j);
 			}
 		}
 	}
@@ -462,7 +482,7 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 				if (t->idx[pi] == QAWS_MESH_NONE)
 				{
 					for (j = 0; j < n; j++)
-						y[j] = t->d.rule == QAWS_ATTRIBUTE_NORMAL ? nrm[j] : 0;
+						y[j] = t->d.rule == QAWS_ATTRIBUTE_NORMAL ? nrm[j] : t->d.rule == QAWS_ATTRIBUTE_QUATERNION && j == 0;   /* (a quaternion: the identity) */
 				}
 				else if (t->d.element == QAWS_MESH_FACE)
 				{
@@ -480,7 +500,7 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 					for (j = 0; j < 3; j++)
 					{
 						unsigned int pc = p->fo[sf] + r[j];
-						v[j] = t->val[pi] + (size_t)n * (t->d.element == QAWS_MESH_VERTEX ? p->fv[pc] : pc);
+						v[j] = t->val[pi] + (size_t)n * pc;
 					}
 					cy_mix(y, v, w, n, t->d.rule);
 				}

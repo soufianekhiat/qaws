@@ -33,6 +33,39 @@ static qaws_status swp_at(swp_ctx* c, double t, double* X)
    a wall's NORMAL face value is its own normal (its face's is not: a wall stands across it); a soup edge repeating an
    edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values and feature flag, the others
    zeros */
+/* o = the rotation R's quaternion times q (w x y z) */
+static void swp_compose(qaws_scalar* o, qaws_scalar const* q, double const* R)
+{
+	double tr = R[0] + R[4] + R[8], r[4], s;
+	if (tr > 0)
+	{
+		s = 2 * sqrt(tr + 1);
+		r[0] = s / 4; r[1] = (R[7] - R[5]) / s; r[2] = (R[2] - R[6]) / s; r[3] = (R[3] - R[1]) / s;
+	}
+	else if (R[0] > R[4] && R[0] > R[8])
+	{
+		s = 2 * sqrt(1 + R[0] - R[4] - R[8]);
+		r[0] = (R[7] - R[5]) / s; r[1] = s / 4; r[2] = (R[1] + R[3]) / s; r[3] = (R[2] + R[6]) / s;
+	}
+	else if (R[4] > R[8])
+	{
+		s = 2 * sqrt(1 + R[4] - R[0] - R[8]);
+		r[0] = (R[2] - R[6]) / s; r[1] = (R[1] + R[3]) / s; r[2] = s / 4; r[3] = (R[5] + R[7]) / s;
+	}
+	else
+	{
+		s = 2 * sqrt(1 + R[8] - R[0] - R[4]);
+		r[0] = (R[3] - R[1]) / s; r[1] = (R[2] + R[6]) / s; r[2] = (R[5] + R[7]) / s; r[3] = s / 4;
+	}
+	{
+		double w = (double)q[0], x = (double)q[1], y = (double)q[2], z = (double)q[3];
+		o[0] = (qaws_scalar)(r[0] * w - r[1] * x - r[2] * y - r[3] * z);
+		o[1] = (qaws_scalar)(r[0] * x + r[1] * w + r[2] * z - r[3] * y);
+		o[2] = (qaws_scalar)(r[0] * y - r[1] * z + r[2] * w + r[3] * x);
+		o[3] = (qaws_scalar)(r[0] * z + r[1] * y - r[2] * x + r[3] * w);
+	}
+}
+
 static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d_desc const* md,
 	unsigned int const* sof, unsigned int const* soc, unsigned int nv, double const* layer_t, unsigned int layers)
 {
@@ -122,7 +155,7 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 		if (d.name && !strcmp(d.name, "source"))
 			continue;
 		n = d.components;
-		dir = d.rule == QAWS_ATTRIBUTE_NORMAL || d.rule == QAWS_ATTRIBUTE_TANGENT || (d.rule == QAWS_ATTRIBUTE_NORMALIZED && n == 3);
+		dir = d.rule == QAWS_ATTRIBUTE_NORMAL || d.rule == QAWS_ATTRIBUTE_TANGENT || d.rule == QAWS_ATTRIBUTE_VECTOR || (d.rule == QAWS_ATTRIBUTE_NORMALIZED && n == 3);
 		qaws_mesh_3d_get_attribute(val, mesh, a);
 		if (d.element == QAWS_MESH_EDGE)
 		{
@@ -148,6 +181,8 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 				for (k = 0; k < 3; k++)
 					o[k] = (qaws_scalar)(R[3 * k] * (double)x[0] + R[3 * k + 1] * (double)x[1] + R[3 * k + 2] * (double)x[2]);
 			}
+			if (d.rule == QAWS_ATTRIBUTE_QUATERNION && d.element != QAWS_MESH_FACE)
+				swp_compose(o, x, rot + 9 * (size_t)layer);
 			if (d.rule == QAWS_ATTRIBUTE_NORMAL && turned)
 				for (k = 0; k < 3; k++)
 					o[k] = -o[k];
