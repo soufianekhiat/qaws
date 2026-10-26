@@ -43,7 +43,10 @@
  *     Loop level (2 each);
  *   - features along a sweep's walls: a cube (its creases features) swept
  *     along (1, 0.5, 0): the result's features are exactly its creases, the
- *     long edges its corners trace included;
+ *     long edges its corners trace included; swept along a curve while
+ *     turning a quarter (16 slabs): closed, one piece (no sliver left between
+ *     two slabs' twisted walls), its features exactly its edges turning by
+ *     more than 25 degrees (the slabs' chords bend less);
  *   - edge values through the connector: two tubes joined, each tube's edges
  *     their values (a's 1 + i, b's 100 + i), the bridge's 0;
  *   - refused: one name of two elements, a NORMAL of 2 components.
@@ -865,8 +868,9 @@ static void test_subdivision_rules(void)
 	qaws_mesh_3d_destroy(quad); qaws_mesh_3d_destroy(tri); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(ot);
 }
 
-/* m's feature length, crease length (edges whose faces turn) and the edges a feature without a crease or the reverse */
-static void ac_crease_check(qaws_mesh_3d const* m, double* feat, double* crease, unsigned int* mism)
+/* m's feature length, crease length (edges whose faces' normals turn by more than turn: 1 - cos) and the edges a feature
+   without a crease or the reverse */
+static void ac_crease_check(qaws_mesh_3d const* m, double turn_min, double* feat, double* crease, unsigned int* mism)
 {
 	unsigned int ne = qaws_mesh_3d_get_edge_count(m), nf = qaws_mesh_3d_get_triangle_count(m), nfeat = qaws_mesh_3d_get_feature_edge_count(m), k, j, f;
 	unsigned int *e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfeat + 1));
@@ -894,8 +898,8 @@ static void ac_crease_check(qaws_mesh_3d const* m, double* feat, double* crease,
 		if (side == 2)
 			turn = 1 - (fn[3 * g[0]] * fn[3 * g[1]] + fn[3 * g[0] + 1] * fn[3 * g[1] + 1] + fn[3 * g[0] + 2] * fn[3 * g[1] + 2]);
 		*feat += is_feat * len;
-		*crease += (turn > 1e-9) * len;
-		*mism += (unsigned int)((turn > 1e-9) != is_feat);
+		*crease += (turn > turn_min) * len;
+		*mism += (unsigned int)((turn > turn_min) != is_feat);
 	}
 	free(e); free(fe); free(t); free(fn);
 }
@@ -911,13 +915,49 @@ static void test_sweep_features(void)
 	qaws_mesh_3d_detect_features(c, (qaws_scalar)0.5, 0, 0);
 	st = qaws_mesh_3d_sweep(&o, NULL, c, m, NULL);
 	if (st == QAWS_STATUS_OK && o)
-		ac_crease_check(o, &feat, &crease, &mism);
+		ac_crease_check(o, 1e-9, &feat, &crease, &mism);
 	sprintf(msg, "a featured cube swept along (1, 0.5, 0): features along %.12f, creases along %.12f, %u edges a feature without a crease or the reverse",
 		feat, crease, mism);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && o && mism == 0 && fabs(feat - crease) < 1e-12 && feat > 12, msg);
 	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o);
 	qaws_motion_destroy(m);
+	{
+		/* along a curve, turning a quarter */
+		qaws_mesh_3d* cube = ac_box(-0.3, 0.3, -0.3, 0.3, -0.3, 0.3);
+		qaws_motion_pose s, e;
+		qaws_motion* mt = NULL;
+		qaws_sweep_desc sd;
+		qaws_sweep_report r;
+		qaws_mesh_topology tp;
+		o = NULL;
+		memset(&s, 0, sizeof s);
+		memset(&e, 0, sizeof e);
+		memset(&tp, 0, sizeof tp);
+		s.rotation[0] = 1;
+		e.rotation[0] = (qaws_scalar)sqrt(0.5); e.rotation[3] = (qaws_scalar)sqrt(0.5);
+		s.position.x = -0.5; s.position.y = 1; s.position.z = 1.05;
+		e.position.x = 4.5; e.position.y = 1; e.position.z = 1.05;
+		s.velocity.x = e.velocity.x = 5; s.velocity.y = (qaws_scalar)2.4; e.velocity.y = (qaws_scalar)-2.4;
+		s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(3.14159265358979323846 / 2);
+		qaws_motion_create_poses(&mt, &s, &e, 0);
+		qaws_mesh_3d_detect_features(cube, (qaws_scalar)0.5, 0, 0);
+		memset(&sd, 0, sizeof sd);
+		sd.tolerance = (qaws_scalar)0.004;
+		mism = 1000;
+		st = qaws_mesh_3d_sweep(&o, &r, cube, mt, &sd);
+		if (st == QAWS_STATUS_OK && o)
+		{
+			qaws_mesh_3d_get_topology(&tp, o);
+			ac_crease_check(o, 1 - cos(25 * 3.14159265358979323846 / 180), &feat, &crease, &mism);
+		}
+		sprintf(msg, "a featured cube along a curve, turning a quarter (%u slabs): closed %d, %u piece(s); features along %.6f, edges turning past 25 degrees along %.6f, %u edges off",
+			r.slabs, tp.closed, tp.components, feat, crease, mism);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && o && tp.closed && tp.components == 1 && mism == 0, msg);
+		qaws_mesh_3d_destroy(cube); qaws_mesh_3d_destroy(o);
+		qaws_motion_destroy(mt);
+	}
 }
 
 /* an open tube of 8 sides and one row about z, from z0 to z1, its edges valued base + index */

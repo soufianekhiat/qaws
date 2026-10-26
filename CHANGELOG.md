@@ -41,6 +41,11 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Sweeps: a turning edge's wall (a twisted quad) was split along a fixed diagonal, so two slabs' walls could leave a
+  sliver pocket between them (the result open at an edge of four faces); walls now fold outward. Sweep features: every
+  layer's copies and the corners' paths kept where the result turns by more than half the input's softest crease
+  (copies on chord-bent walls or inside faces dropped, the first and last poses' always kept); every copy of a path
+  marked, so none is lost. Booleans report `closed` as the mesh made (an edge of four faces passed the edge count).
 - Booleans: a cut between two pieces of one plane (a box face's two triangles) was marked a feature; cuts must now be
   creases. Sweeps no longer mark the copies of features between slabs (on a curved wall, or inside a face).
 - `qaws_volume_mesh_hexahedralize` (GRID): the inside test cast its rays along the grid lines, so a line along two

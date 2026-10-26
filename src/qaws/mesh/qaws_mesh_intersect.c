@@ -3448,6 +3448,13 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 		/* every edge of exactly two kept faces turned opposite ways: they are the mesh's pairs */
 		for (i = 0; i < 3 * nk && kopp[i] != SX_NONE; i++) {}
 		st = nk ? sx_mesh(out, kpos, m, keep, i == 3 * nk ? kopp : NULL, keep_src, nk) : QAWS_STATUS_OK;
+		if (st == QAWS_STATUS_OK && nk && *out)
+		{
+			/* (closed as the mesh made: an edge of four faces passes the edge count, then splits open) */
+			qaws_mesh_topology tp;
+			if (qaws_mesh_3d_get_topology(&tp, *out) == QAWS_STATUS_OK && !tp.closed)
+				report->closed = 0;
+		}
 	}
 	goto done;
 oom:

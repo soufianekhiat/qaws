@@ -31,7 +31,8 @@
  *     vertices' mean displacement. The slab's sweep is the solid at its start
  *     with its front faces extruded: those faces at the start (turned) and
  *     at the end, and walls along their region's border (each border edge's
- *     quad between its two positions, split along a diagonal).
+ *     quad between its two positions, split along the diagonal that folds it
+ *     outward: two slabs' turning walls overlap, never leave a sliver).
  *   - The swept solid is the solid at 0 united with every slab's extrusion:
  *     the self-union of them all (qaws_mesh_boolean), its winding-number
  *     rule resolving their overlaps and an extrusion's folds.
@@ -47,11 +48,11 @@
  * wall along its edge the front face's corners' there; directions (NORMAL,
  * TANGENT, VECTOR, and NORMALIZED of 3 components) turn with a rigid
  * motion's rotation, a QUATERNION is composed with it, and a NORMAL face
- * attribute on a wall is the wall's own normal. Features: the mesh's at the
- * first and last layers, the paths its feature corners trace (where the
- * walls on either side meet at an angle) and the cuts, those that are
- * creases of the result kept; an edge sliding along itself (an envelope)
- * traces no feature.
+ * attribute on a wall is the wall's own normal. Features: the mesh's copies,
+ * the paths its feature corners trace and the cuts, kept where the result
+ * turns by more than half the mesh's softest feature angle (the mesh's own
+ * at the first and last poses wherever it turns); an edge sliding along
+ * itself (an envelope) traces no feature.
  */
 
 typedef struct qaws_sweep_desc

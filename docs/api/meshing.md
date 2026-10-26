@@ -1786,7 +1786,8 @@ Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along 
 - directions (`NORMAL`, `TANGENT`, `VECTOR`, and `NORMALIZED` of 3 components) turn with a rigid motion's rotation at the layer's time, so a turning tool's normals stay on it; a `QUATERNION` is composed with that rotation (the tool's orientation where each piece was swept);
 - a `NORMAL` face attribute on a wall is the wall's own normal;
 - a soup edge repeating an edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values, the others zeros;
-- features: the mesh's feature edges at the first and last layers (copies between slabs are artifacts: on a wall bent only by the chords, or inside a face), the rails a feature corner runs along where its two walls meet at an angle (a swept box's long edges), and the self-union's cuts; the result keeps those that are creases of it. A crease traced by an edge sliding along itself (an envelope, as a silhouette) is not marked;
+- features: the copies of the mesh's feature edges at every layer, the rails its feature corners run along (a swept box's long edges) and the self-union's cuts, kept where the result turns by more than half the mesh's softest feature angle (the slabs' chords bend far less: a copy left on a wall bent only by them, or inside a face, is dropped); those on the mesh's own features at the first and last poses need only turn at all. A crease traced by an edge sliding along itself (an envelope, as a silhouette) is not marked;
+- each wall (a quad between an edge's two positions, twisted when it turns) is split along the diagonal that folds it outward, so two slabs' walls overlap instead of leaving a sliver between them;
 - `qaws_mesh_sweep_boolean` matches the tool's and the stock's attributes by name.
 
 Test 181:
