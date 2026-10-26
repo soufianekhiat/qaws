@@ -3172,8 +3172,9 @@ static int sx_round(sx_out const* o, unsigned long long const* g, unsigned int m
 
 /* Windings sampled a hair off a patch can land past a surface nearer still (pieces crossing at a shallow angle). Round an
    edge of three or more pieces, in turn by angle, two neighbours share the winding numbers of the gap between them, and
-   crossing a piece changes its own operand's by one (its back the inside). Where two disagree the smaller patch is
-   distrusted when small (its fattest piece's inradius under 1e-3 of the box; edges by coincident pieces left alone), then each distrusted one takes its windings from a trusted neighbour across such an edge, repeatedly: a
+   crossing a piece changes its own operand's by one (its back the inside). A small patch (its fattest piece's inradius
+   under 1e-3 of the box) whose neighbours in turn agree with each other across it is distrusted when its own samples
+   differ by other than that one, or when it disagrees with both of them (edges by coincident pieces left alone), then each distrusted one takes its windings from a trusted neighbour across such an edge, repeatedly: a
    patch sampled right never changes. wa, wb: per patch its front and back windings (wb NULL for a self-union); nfa: A's
    faces. Returns the patches mended; -1 on allocation failure. */
 static int sx_mend(sx_out const* o, unsigned long long const* grp, unsigned int const* pid, double const* fat, unsigned int const* rep,
@@ -3200,6 +3201,44 @@ static int sx_mend(sx_out const* o, unsigned long long const* grp, unsigned int 
 					break;
 			if (q < m)
 				continue;   /* (coincident pieces: a winding may jump by more than one there) */
+			if (pass == 0)
+			{
+				/* a patch disagreeing with both its neighbours in turn, which agree with each other across it: sampled wrong */
+				for (q = 0; q < m; q++)
+				{
+					unsigned int pc = ord[q], pn = ord[(q + 1) % m], pp = ord[(q + m - 1) % m], P = z[pc], k2;
+					unsigned int iaft = s[pc] > 0 ? 0 : 1, ibef = 1 - iaft, inb = s[pn] > 0 ? 1 : 0, ipb = s[pp] > 0 ? 0 : 1;
+					unsigned int src = (unsigned int)o->src[(unsigned int)grp[2 * ((size_t)i + pc) + 1] / 3];
+					int ok2 = z[pn] != P && z[pp] != P && fat[rep[P]] < 2e-3 * o->diag, self = 0;
+					/* (its own two samples apart by other than its piece's one: sampled wrong for certain) */
+					for (k2 = 0; k2 < (wb ? 2u : 1u); k2++)
+					{
+						qaws_scalar const* w = k2 ? wb : wa;
+						double jump = floor((double)w[2 * (size_t)P + 1] + 0.5) - floor((double)w[2 * (size_t)P] + 0.5);
+						self |= jump != ((k2 ? src >= nfa : src < nfa) ? 1 : 0);
+					}
+					for (k2 = 0; k2 < (wb ? 2u : 1u) && ok2; k2++)
+					{
+						qaws_scalar const* w = k2 ? wb : wa;
+						double aft = floor((double)w[2 * (size_t)z[pn] + inb] + 0.5), bef = floor((double)w[2 * (size_t)z[pp] + ipb] + 0.5);
+						double own = (k2 ? src >= nfa : src < nfa) ? (iaft == 0 ? 1 : -1) : 0;
+						/* (the neighbours' gaps across P: its back one more than its front for its operand) */
+						ok2 = bef == aft + own;
+					}
+					if (!ok2)
+						continue;
+					if (self)
+						bad[P] = 1;
+					for (k2 = 0; k2 < (wb ? 2u : 1u); k2++)
+					{
+						qaws_scalar const* w = k2 ? wb : wa;
+						if (floor((double)w[2 * (size_t)P + iaft] + 0.5) != floor((double)w[2 * (size_t)z[pn] + inb] + 0.5)
+							&& floor((double)w[2 * (size_t)P + ibef] + 0.5) != floor((double)w[2 * (size_t)z[pp] + ipb] + 0.5))
+							bad[P] = 1;
+					}
+				}
+				continue;
+			}
 			for (q = 0; q < m; q++)
 			{
 				/* P's side toward the turn and Q's side back from it bound one gap */
@@ -3211,13 +3250,6 @@ static int sx_mend(sx_out const* o, unsigned long long const* grp, unsigned int 
 				double va, vb;
 				if (P == Q || same)
 					continue;
-				if (pass == 0)
-				{
-					unsigned int small = fat[rep[P]] < fat[rep[Q]] ? P : Q;
-					if (fat[rep[small]] < 2e-3 * o->diag)
-						bad[small] = 1;   /* (a patch that small: its samples a hair off it can land past a surface) */
-					continue;
-				}
 				if (bad[P] == bad[Q])
 					continue;
 				to = bad[P] ? P : Q;
