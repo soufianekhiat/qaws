@@ -54,7 +54,7 @@ int hm_reserve(qaws_hm* m, unsigned int dv, unsigned int dc, unsigned int df)
 			|| !hm_re((void**)&m->cf, qaws_internal_mul2(sizeof(unsigned int), c)) || !hm_re((void**)&m->cflag, c))
 			return 0;
 		for (i = 0; i < m->na; i++)
-			if (m->attr[i].element == QAWS_MESH_CORNER && !hm_re((void**)&m->attr[i].v, qaws_internal_mul3(sizeof(double), m->attr[i].n, c)))
+			if (HM_ON_CORNERS(m->attr[i].element) && !hm_re((void**)&m->attr[i].v, qaws_internal_mul3(sizeof(double), m->attr[i].n, c)))
 				return 0;
 		m->capc = c;
 	}
@@ -89,7 +89,7 @@ void hm_free(qaws_hm* m)
 	qaws_internal_free(m->attr);
 	qaws_internal_free(m->foot);
 	qaws_internal_free(m->hole[0]); qaws_internal_free(m->hole[1]);
-	qaws_internal_free(p->old); qaws_internal_free(p->off); qaws_internal_free(p->fs); qaws_internal_free(p->fa); qaws_internal_free(p->fv); qaws_internal_free(p->s0); qaws_internal_free(p->sn); qaws_internal_free(p->hint);
+	qaws_internal_free(p->old); qaws_internal_free(p->off); qaws_internal_free(p->fs); qaws_internal_free(p->fa); qaws_internal_free(p->fv); qaws_internal_free(p->s0); qaws_internal_free(p->sn); qaws_internal_free(p->hint); qaws_internal_free(p->esrc);
 	qaws_internal_free(p->sp); qaws_internal_free(p->sw);
 	memset(m, 0, sizeof *m);
 }
@@ -127,7 +127,7 @@ void hm_kill_vertex(qaws_hm* m, unsigned int v)
 
 int hm_rule_unit(unsigned int rule)
 {
-	return rule == QAWS_ATTRIBUTE_NORMALIZED || rule == QAWS_ATTRIBUTE_NORMAL;
+	return rule == QAWS_ATTRIBUTE_NORMALIZED || rule == QAWS_ATTRIBUTE_NORMAL || rule == QAWS_ATTRIBUTE_TANGENT;
 }
 
 /* the sRGB transfer function and its inverse (odd beyond [0, 1]) */
@@ -196,12 +196,16 @@ void hm_space_out(double* v, unsigned int n, unsigned int rule)
 	unsigned int k;
 	if (hm_rule_unit(rule))
 	{
+		/* (a tangent: its direction made unit, its handedness a sign) */
+		unsigned int d = rule == QAWS_ATTRIBUTE_TANGENT ? 3 : n;
 		double l = 0;
-		for (k = 0; k < n; k++)
+		for (k = 0; k < d; k++)
 			l += v[k] * v[k];
 		if (l > 0)
-			for (l = 1 / sqrt(l), k = 0; k < n; k++)
+			for (l = 1 / sqrt(l), k = 0; k < d; k++)
 				v[k] *= l;
+		if (rule == QAWS_ATTRIBUTE_TANGENT)
+			v[3] = v[3] < 0 ? -1 : 1;
 		return;
 	}
 	if (rule != QAWS_ATTRIBUTE_SRGB && rule != QAWS_ATTRIBUTE_OKLAB)
@@ -737,7 +741,7 @@ qaws_status hm_copy(qaws_hm* d, qaws_hm const* s)
 	memcpy(d->fflag, s->fflag, s->nf);
 	for (i = 0; i < s->na; i++)
 	{
-		unsigned int count = s->attr[i].element == QAWS_MESH_VERTEX ? s->nv : s->attr[i].element == QAWS_MESH_CORNER ? s->nc : s->nf;
+		unsigned int count = s->attr[i].element == QAWS_MESH_VERTEX ? s->nv : HM_ON_CORNERS(s->attr[i].element) ? s->nc : s->nf;
 		memcpy(d->attr[i].v, s->attr[i].v, sizeof(double) * s->attr[i].n * count);
 	}
 	for (i = 0; i < 2; i++)
@@ -892,9 +896,10 @@ static void pb_face(qaws_hm* m, unsigned int k)
 static void pb_corner(qaws_hm* m, unsigned int v, unsigned char hint)
 {
 	hm_patch* p = &m->pb;
-	unsigned int c1 = p->ccv, c2 = p->ccv, c3 = p->ccv;
+	unsigned int c1 = p->ccv, c2 = p->ccv, c3 = p->ccv, c4 = p->ccv;
 	if (p->failed || !p->nnew || !hm_grow((void**)&p->fv, &c1, (size_t)p->ncv + 1, sizeof(unsigned int))
 		|| !hm_grow((void**)&p->s0, &c2, (size_t)p->ncv + 1, sizeof(unsigned int)) || !hm_grow((void**)&p->sn, &c3, (size_t)p->ncv + 1, sizeof(unsigned int))
+		|| !hm_grow((void**)&p->esrc, &c4, (size_t)p->ncv + 1, sizeof(unsigned int))
 		|| !hm_grow((void**)&p->hint, &p->ccv, (size_t)p->ncv + 1, 1))
 	{
 		p->failed = 1;
@@ -904,8 +909,16 @@ static void pb_corner(qaws_hm* m, unsigned int v, unsigned char hint)
 	p->s0[p->ncv] = p->nsrc;
 	p->sn[p->ncv] = 0;
 	p->hint[p->ncv] = hint;
+	p->esrc[p->ncv] = HM_NONE;
 	p->ncv++;
 	p->fs[p->nnew - 1]++;
+}
+
+/* the last corner's edge a piece of the edge of the old corner at patch position pos */
+static void pb_edge(qaws_hm* m, unsigned int pos)
+{
+	if (!m->pb.failed && m->pb.ncv)
+		m->pb.esrc[m->pb.ncv - 1] = pos;
 }
 
 /* an attribute source of the last corner: an old corner's position, weighted */
@@ -978,7 +991,7 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 {
 	hm_patch* p = &m->pb;
 	unsigned int nt = p->total, ext = p->nnew > p->nold ? p->nnew - p->nold : 0, i, j, k, c, t;
-	unsigned int ca = 0, fa = 0, *oc, *ou, *ow, *otw, *oflag, *nc, *buf;
+	unsigned int ca = 0, fa = 0, ea = 0, *oc, *ou, *ow, *otw, *oflag, *nc, *sel, *buf;
 	double *cvals = NULL, *fvals = NULL;
 	if (p->failed)
 		return 0;
@@ -988,10 +1001,12 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 			ca += m->attr[k].n;
 		if (m->attr[k].element == QAWS_MESH_FACE)
 			fa += m->attr[k].n;
+		if (m->attr[k].element == QAWS_MESH_EDGE)
+			ea += m->attr[k].n;
 	}
 	if (!hm_reserve(m, 0, p->ncv, ext))
 		return 0;
-	buf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (5 * (size_t)nt + p->ncv + 1)));
+	buf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (5 * (size_t)nt + 2 * (size_t)p->ncv + 1)));
 	if (ca)
 		cvals = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), ca, (nt ? nt : 1)));
 	if (fa)
@@ -1001,7 +1016,7 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 		qaws_internal_free(buf); qaws_internal_free(cvals); qaws_internal_free(fvals);
 		return 0;
 	}
-	oc = buf; ou = oc + nt; ow = ou + nt; otw = ow + nt; oflag = otw + nt; nc = oflag + nt;
+	oc = buf; ou = oc + nt; ow = ou + nt; otw = ow + nt; oflag = otw + nt; nc = oflag + nt; sel = nc + p->ncv;
 	for (i = 0; i < p->nold; i++)
 		m->fflag[p->old[i]] |= HM_MARK;
 	/* the old corners: edges (read with the renaming), outside neighbours, flags, attributes */
@@ -1078,9 +1093,14 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 		c = nc[t];
 		u = m->cv[c];
 		w = hm_to(m, c);
+		sel[t] = p->esrc[t];
 		for (j = 0; j < nt; j++)
 			if ((ou[j] == u && ow[j] == w) || (ou[j] == w && ow[j] == u))
+			{
 				fl |= oflag[j];
+				if (sel[t] == HM_NONE)
+					sel[t] = j;
+			}
 		m->cflag[c] |= (unsigned char)fl;
 		if (m->co[c] != HM_NONE)
 			continue;
@@ -1115,6 +1135,28 @@ static int hm_replace(qaws_hm* m, unsigned int from, unsigned int to)
 		fl = (unsigned char)((m->cflag[nc[t]] | m->cflag[o]) & HM_FEATURE);
 		m->cflag[nc[t]] = (unsigned char)((m->cflag[nc[t]] & ~HM_FEATURE) | fl);
 		m->cflag[o] = (unsigned char)((m->cflag[o] & ~HM_FEATURE) | fl);
+	}
+	/* edge attributes: an edge kept, or a piece of one (a split's halves), keeps its value; a new edge stitched to an
+	   outside corner takes that one's, its twin among the new ones the twin's; the others zeros */
+	for (t = 0; ea && t < p->ncv; t++)
+	{
+		unsigned int o = m->co[nc[t]], s = sel[t] != HM_NONE ? oc[sel[t]] : o != HM_NONE && o < nc[0] ? o : HM_NONE;
+		for (k = 0; k < m->na; k++)
+			if (m->attr[k].element == QAWS_MESH_EDGE)
+			{
+				if (s == HM_NONE)
+					memset(hm_attr_at(m, k, nc[t]), 0, sizeof(double) * m->attr[k].n);
+				else
+					memcpy(hm_attr_at(m, k, nc[t]), hm_attr_at(m, k, s), sizeof(double) * m->attr[k].n);
+			}
+	}
+	for (t = 0; ea && t < p->ncv; t++)
+	{
+		unsigned int o = m->co[nc[t]];
+		if (sel[t] == HM_NONE && o != HM_NONE && o >= nc[0])
+			for (k = 0; k < m->na; k++)
+				if (m->attr[k].element == QAWS_MESH_EDGE)
+					memcpy(hm_attr_at(m, k, nc[t]), hm_attr_at(m, k, o), sizeof(double) * m->attr[k].n);
 	}
 	/* corner attributes from their sources */
 	for (t = 0; ca && t < p->ncv; t++)
@@ -1168,6 +1210,7 @@ unsigned int hm_split_edge(qaws_hm* m, unsigned int c, double t, double const* x
 	{
 		p = m->cv[hm_prev(m, c)];
 		pb_copy(m, a, kf, feat);
+		pb_edge(m, pb_cpos(m, kf, c));
 		pb_corner(m, v, 0); pb_src(m, pb_pos(m, kf, a), 1 - t); pb_src(m, pb_pos(m, kf, b), t);
 		pb_copy(m, p, kf, 0);
 	}
@@ -1177,7 +1220,9 @@ unsigned int hm_split_edge(qaws_hm* m, unsigned int c, double t, double const* x
 			pb_copy(m, m->cv[k], kf, k == c ? feat : 0);
 			if (k == c)
 			{
+				pb_edge(m, pb_cpos(m, kf, c));
 				pb_corner(m, v, feat); pb_src(m, pb_pos(m, kf, a), 1 - t); pb_src(m, pb_pos(m, kf, b), t);
+				pb_edge(m, pb_cpos(m, kf, c));
 			}
 			if (hm_next(m, k) == c)
 				break;
@@ -1189,6 +1234,7 @@ unsigned int hm_split_edge(qaws_hm* m, unsigned int c, double t, double const* x
 		{
 			q = m->cv[hm_prev(m, d)];
 			pb_copy(m, b, kg, feat);
+			pb_edge(m, pb_cpos(m, kg, d));
 			pb_corner(m, v, 0); pb_src(m, pb_pos(m, kg, a), 1 - t); pb_src(m, pb_pos(m, kg, b), t);
 			pb_copy(m, q, kg, 0);
 		}
@@ -1198,7 +1244,9 @@ unsigned int hm_split_edge(qaws_hm* m, unsigned int c, double t, double const* x
 				pb_copy(m, m->cv[k], kg, k == d ? feat : 0);
 				if (k == d)
 				{
+					pb_edge(m, pb_cpos(m, kg, d));
 					pb_corner(m, v, feat); pb_src(m, pb_pos(m, kg, a), 1 - t); pb_src(m, pb_pos(m, kg, b), t);
+					pb_edge(m, pb_cpos(m, kg, d));
 				}
 				if (hm_next(m, k) == d)
 					break;
@@ -1208,6 +1256,7 @@ unsigned int hm_split_edge(qaws_hm* m, unsigned int c, double t, double const* x
 	{
 		pb_face(m, kf);
 		pb_corner(m, v, feat); pb_src(m, pb_pos(m, kf, a), 1 - t); pb_src(m, pb_pos(m, kf, b), t);
+		pb_edge(m, pb_cpos(m, kf, c));
 		pb_copy(m, b, kf, 0);
 		pb_copy(m, p, kf, 0);
 	}
@@ -1215,6 +1264,7 @@ unsigned int hm_split_edge(qaws_hm* m, unsigned int c, double t, double const* x
 	{
 		pb_face(m, kg);
 		pb_corner(m, v, feat); pb_src(m, pb_pos(m, kg, a), 1 - t); pb_src(m, pb_pos(m, kg, b), t);
+		pb_edge(m, pb_cpos(m, kg, d));
 		pb_copy(m, a, kg, 0);
 		pb_copy(m, q, kg, 0);
 	}
@@ -1510,7 +1560,7 @@ static void hm_pool(qaws_hm* m)
 		m->cf[d] = m->cf[c];
 		m->cflag[d] = m->cflag[c];
 		for (k = 0; k < m->na; k++)
-			if (m->attr[k].element == QAWS_MESH_CORNER && d != c)
+			if (HM_ON_CORNERS(m->attr[k].element) && d != c)
 				memcpy(hm_attr_at(m, k, d), hm_attr_at(m, k, c), sizeof(double) * m->attr[k].n);
 	}
 	for (c = 0; c < n; c++)
@@ -1566,7 +1616,7 @@ unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, uns
 	m->attr = g;
 	a = &g[m->na];
 	memset(a, 0, sizeof *a);
-	slots = element == QAWS_MESH_VERTEX ? m->capv : element == QAWS_MESH_CORNER ? m->capc : m->capf;
+	slots = element == QAWS_MESH_VERTEX ? m->capv : HM_ON_CORNERS(element) ? m->capc : m->capf;
 	a->v = (double*)qaws_internal_zalloc(slots ? qaws_internal_mul2(slots, n) : 1, sizeof(double));
 	if (!a->v)
 		return HM_NONE;

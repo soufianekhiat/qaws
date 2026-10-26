@@ -317,11 +317,12 @@ Done: `qaws_mesh_3d_boolean` carries vertex, corner and face attributes (by name
 interpolated in its source face; NORMAL negated on turned pieces), `qaws_mesh_3d_sweep` and `qaws_mesh_sweep_boolean`
 carry them (directions turned with the motion; walls' face normals their own). Rules NORMAL, SRGB and OKLAB (alpha
 premultiplied), honoured by edits, remeshing, subdivision, decimation, the connector and references. Test 181,
-figure 61. Open:
-- edge attributes (crease weights, seam ids): a QAWS_MESH_EDGE element, stored on the corners' edges as features are,
-  copied to an edge's pieces when split and the default on new edges; every operator must keep it;
+figure 61. Then (2026-10-26): edge attributes (QAWS_MESH_EDGE, on both corners of an edge as features are; an edit keeps
+them on an edge and its pieces, new edges zeros; Booleans and sweeps carry them), the TANGENT rule, feature edges through
+Booleans (kept, and the cuts marked); figure 62. Open:
+- edge attributes through subdivision (they could feed its semi-sharp creases) and the connector;
 - cell attributes on volume meshes (tetrahedra, hexahedra), which have none yet;
-- tangents with handedness (the sign turned with a reversed face), features and footpoints through Booleans.
+- features along a sweep's walls (a feature vertex's path), footpoints through Booleans.
 
 ## 0. Scope
 

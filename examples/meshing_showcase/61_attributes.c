@@ -42,7 +42,7 @@ static double* ms_at_get(qaws_mesh_3d const* m, char const* name, unsigned int* 
 	if (qaws_mesh_3d_find_attribute(&id, m, name) != QAWS_STATUS_OK)
 		return NULL;
 	qaws_mesh_3d_get_attribute_desc(&d, m, id);
-	count = d.components * (d.element == QAWS_MESH_VERTEX ? qaws_mesh_3d_get_vertex_count(m) : d.element == QAWS_MESH_CORNER ? qaws_mesh_3d_get_corner_count(m) : qaws_mesh_3d_get_face_count(m));
+	count = d.components * (d.element == QAWS_MESH_VERTEX ? qaws_mesh_3d_get_vertex_count(m) : d.element == QAWS_MESH_CORNER ? qaws_mesh_3d_get_corner_count(m) : d.element == QAWS_MESH_EDGE ? qaws_mesh_3d_get_edge_count(m) : qaws_mesh_3d_get_face_count(m));
 	v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (count + 1));
 	o = (double*)malloc(sizeof(double) * (count + 1));
 	qaws_mesh_3d_get_attribute(v, m, id);

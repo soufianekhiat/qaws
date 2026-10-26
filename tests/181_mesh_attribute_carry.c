@@ -17,6 +17,15 @@
  *     well as on the ball itself (the walls' normals its silhouette's);
  *   - carving: the slot's faces carry the tool's material, their area the
  *     slot's (floor and walls, 4), all normals along their faces;
+ *   - edge attributes through edits: a split edge's halves keep its value,
+ *     the new edges zeros; a flipped edge's new diagonal zeros, the others
+ *     kept;
+ *   - edge attributes and features through A - B: a crease weight on A's
+ *     box edges stays on their remaining pieces (length 10.5); the result's
+ *     features are exactly its creases (A's and B's kept, the cut curves
+ *     added: length 15);
+ *   - tangents with handedness: unit directions, the sign +1 on A's pieces,
+ *     -1 on B's turned ones;
  *   - refused: one name of two elements, a NORMAL of 2 components.
  */
 
@@ -461,6 +470,155 @@ static void test_carving(void)
 	qaws_motion_destroy(slot);
 }
 
+/* an edge attribute's value on edge (a, b), or -1 */
+static double ac_edge_value(qaws_mesh_3d const* m, unsigned int id, unsigned int a, unsigned int b)
+{
+	unsigned int ne = qaws_mesh_3d_get_edge_count(m), i;
+	unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+	qaws_scalar* v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ne);
+	double r = -1;
+	qaws_mesh_3d_get_edges(e, m);
+	qaws_mesh_3d_get_attribute(v, m, id);
+	for (i = 0; i < ne; i++)
+		if ((e[2 * i] == a && e[2 * i + 1] == b) || (e[2 * i] == b && e[2 * i + 1] == a))
+			r = (double)v[i];
+	free(e);
+	free(v);
+	return r;
+}
+
+static void test_edge_edits(void)
+{
+	/* the square 0 1 2 3 as two triangles over the diagonal 0 2; each edge's value 1 + its index in this list */
+	static unsigned int const t[6] = { 0, 1, 2, 0, 2, 3 };
+	static unsigned int const pairs[10] = { 0, 1, 1, 2, 2, 3, 3, 0, 0, 2 };
+	qaws_scalar x[12] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0 };
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	qaws_attribute_desc ad;
+	unsigned int id = 0, v = 0, ne, i, j;
+	unsigned int e[16];
+	qaws_scalar vals[8];
+	double h0, h1, cross, flipped, kept;
+	char msg[300];
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 4; d.face_vertices = t; d.face_count = 2;
+	qaws_mesh_3d_create(&m, &d);
+	ne = qaws_mesh_3d_get_edge_count(m);
+	qaws_mesh_3d_get_edges(e, m);
+	for (i = 0; i < ne; i++)
+		for (j = 0; j < 5; j++)
+			if ((e[2 * i] == pairs[2 * j] && e[2 * i + 1] == pairs[2 * j + 1]) || (e[2 * i] == pairs[2 * j + 1] && e[2 * i + 1] == pairs[2 * j]))
+				vals[i] = (qaws_scalar)(1 + j);
+	ad.name = "crease"; ad.element = QAWS_MESH_EDGE; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(&id, m, vals, &ad);
+	/* the edge 0 1 split: its halves 0 v and v 1 keep 1; the new edge v 2 zero */
+	qaws_mesh_3d_split_edge(&v, m, NULL, NULL, 0, 1);
+	h0 = ac_edge_value(m, id, 0, v);
+	h1 = ac_edge_value(m, id, v, 1);
+	cross = ac_edge_value(m, id, v, 2);
+	/* the diagonal 0 2 flipped: the new one v 3 zero, the border kept */
+	qaws_mesh_3d_flip_edge(m, 0, 2);
+	flipped = ac_edge_value(m, id, v, 3);
+	kept = ac_edge_value(m, id, 2, 3) + ac_edge_value(m, id, 3, 0) + ac_edge_value(m, id, 1, 2);
+	sprintf(msg, "edge values through edits: the split edge's halves %.0f %.0f (1 1), the new edge %.0f (0); after a flip the new diagonal %.0f (0), the border kept %.0f (3 + 4 + 2 = 9)",
+		h0, h1, cross, flipped, kept);
+	printf("  %s\n", msg);
+	TEST_ASSERT(h0 == 1 && h1 == 1 && cross == 0 && flipped == 0 && kept == 9, msg);
+	qaws_mesh_3d_destroy(m);
+}
+
+static void test_edge_boolean(void)
+{
+	qaws_mesh_3d *a = ac_box(0, 1, 0, 1, 0, 1), *b = ac_box(0.5, 1.5, 0.5, 1.5, 0.5, 1.5), *o = NULL;
+	qaws_status st;
+	unsigned int ne = 0, nfe = 0, id = 0, mism = 0;
+	double crease = 0, feat = 0, tan_err = 0;
+	int signs_ok = 1;
+	char msg[400];
+	/* A: crease 1 on its box edges, 0 on the diagonals; both: features from their 90-degree edges; tangents (x, +1) on A, (y, +1) on B */
+	qaws_mesh_3d_detect_features(a, (qaws_scalar)0.5, 0, 0);
+	qaws_mesh_3d_detect_features(b, (qaws_scalar)0.5, 0, 0);
+	{
+		unsigned int n = qaws_mesh_3d_get_edge_count(a), k;
+		unsigned int* e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * n);
+		qaws_scalar* v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n);
+		qaws_scalar ta[32], tb[32];
+		qaws_mesh_3d_get_edges(e, a);
+		for (k = 0; k < n; k++)
+		{
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(a, e[2 * k]), q = qaws_mesh_3d_get_vertex(a, e[2 * k + 1]);
+			int same = (p.x == q.x) + (p.y == q.y) + (p.z == q.z);
+			v[k] = (qaws_scalar)(same == 2 ? 1 : 0);
+		}
+		ac_add(a, "crease", QAWS_MESH_EDGE, 1, QAWS_ATTRIBUTE_LINEAR, v);
+		for (k = 0; k < 8; k++)
+		{
+			ta[4 * k] = 1; ta[4 * k + 1] = 0; ta[4 * k + 2] = 0; ta[4 * k + 3] = 1;
+			tb[4 * k] = 0; tb[4 * k + 1] = 1; tb[4 * k + 2] = 0; tb[4 * k + 3] = 1;
+		}
+		ac_add(a, "tangent", QAWS_MESH_VERTEX, 4, QAWS_ATTRIBUTE_TANGENT, ta);
+		ac_add(b, "tangent", QAWS_MESH_VERTEX, 4, QAWS_ATTRIBUTE_TANGENT, tb);
+		free(e);
+		free(v);
+	}
+	st = qaws_mesh_3d_boolean(&o, NULL, a, b, QAWS_BOOLEAN_DIFFERENCE, NULL);
+	if (st == QAWS_STATUS_OK && o && qaws_mesh_3d_find_attribute(&id, o, "crease") == QAWS_STATUS_OK)
+	{
+		unsigned int nf = qaws_mesh_3d_get_face_count(o), nfeat = qaws_mesh_3d_get_feature_edge_count(o), f, j, k;
+		unsigned int *e, *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfeat + 1)), *t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * nf);
+		qaws_scalar *v, *tg = NULL, *src = NULL;
+		qaws_mesh_element el;
+		unsigned int nc;
+		double* fn = (double*)malloc(sizeof(double) * 3 * nf);
+		ne = qaws_mesh_3d_get_edge_count(o);
+		e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+		v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ne);
+		qaws_mesh_3d_get_edges(e, o);
+		qaws_mesh_3d_get_attribute(v, o, id);
+		qaws_mesh_3d_get_feature_edges(fe, o);
+		qaws_mesh_3d_get_triangles(t, o);
+		for (f = 0; f < nf; f++) ac_tri_normal(o, f, fn + 3 * f);
+		nfe = nfeat;
+		for (k = 0; k < ne; k++)
+		{
+			qaws_vec3 p = qaws_mesh_3d_get_vertex(o, e[2 * k]), q = qaws_mesh_3d_get_vertex(o, e[2 * k + 1]);
+			double len = sqrt(pow((double)p.x - q.x, 2) + pow((double)p.y - q.y, 2) + pow((double)p.z - q.z, 2)), turn = 0;
+			int is_feat = 0, side = 0;
+			unsigned int g[2] = { 0, 0 };
+			for (j = 0; j < nfeat; j++)
+				if ((fe[2 * j] == e[2 * k] && fe[2 * j + 1] == e[2 * k + 1]) || (fe[2 * j] == e[2 * k + 1] && fe[2 * j + 1] == e[2 * k]))
+					is_feat = 1;
+			for (f = 0; f < nf && side < 2; f++)
+				for (j = 0; j < 3; j++)
+					if ((t[3 * f + j] == e[2 * k] && t[3 * f + (j + 1) % 3] == e[2 * k + 1]) || (t[3 * f + j] == e[2 * k + 1] && t[3 * f + (j + 1) % 3] == e[2 * k]))
+						g[side++] = f;
+			if (side == 2)
+				turn = 1 - (fn[3 * g[0]] * fn[3 * g[1]] + fn[3 * g[0] + 1] * fn[3 * g[1] + 1] + fn[3 * g[0] + 2] * fn[3 * g[1] + 2]);
+			crease += (double)v[k] * len;
+			feat += is_feat * len;
+			mism += (unsigned int)((turn > 1e-9) != is_feat);
+		}
+		/* tangents: A's pieces (x, +1), B's turned ones (y, -1) */
+		tg = ac_get(o, "tangent", &el, &nc);
+		src = ac_get(o, "source", &el, &nc);
+		for (f = 0; tg && src && f < nf; f++)
+			for (j = 0; j < 3; j++)
+			{
+				qaws_scalar const* q = tg + 4 * (3 * f + j);
+				int in_a = (unsigned int)src[f] < 12;
+				tan_err = fmax(tan_err, fabs((double)q[0] - (in_a ? 1 : 0)) + fabs((double)q[1] - (in_a ? 0 : 1)) + fabs((double)q[2]));
+				signs_ok &= (double)q[3] == (in_a ? 1 : -1);
+			}
+		free(e); free(v); free(fe); free(t); free(fn); free(tg); free(src);
+	}
+	sprintf(msg, "A - B: the crease weight along %.12f (10.5: A's box edges left), %u features along %.12f (15: every crease, the cuts added), %u edges a feature without a crease or the reverse; tangents error %.1e, handedness %s",
+		crease, nfe, feat, mism, tan_err, signs_ok ? "+1 on A, -1 on B's turned pieces" : "wrong");
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && fabs(crease - 10.5) < 1e-9 && fabs(feat - 15) < 1e-9 && mism == 0 && tan_err < 1e-12 && signs_ok, msg);
+	qaws_mesh_3d_destroy(a); qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *a = ac_box(0, 1, 0, 1, 0, 1), *b = ac_box(0.5, 1.5, 0.5, 1.5, 0.5, 1.5), *o = NULL;
@@ -491,6 +649,8 @@ int test_181_mesh_attribute_carry_main(void)
 	test_boolean();
 	test_sweep();
 	test_carving();
+	test_edge_edits();
+	test_edge_boolean();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

@@ -929,6 +929,8 @@ qaws_status qaws_mesh_reference_evaluate_attribute(qaws_scalar* out, qaws_mesh_r
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = &r->mesh->hm;
 	at = &m->attr[attribute];
+	if (at->element == QAWS_MESH_EDGE)
+		return QAWS_STATUS_INVALID_ARGUMENT;   /* (an edge attribute has no value inside a face) */
 	for (i = 0; i < count; i++)
 		if (loc[i].patch >= r->nt)
 			return QAWS_STATUS_INVALID_ARGUMENT;

@@ -77,10 +77,16 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out_mesh, qaws_boolean_report* repo
  *     sides of a cut keep their own values, so they come out as CORNER
  *     attributes of the same name: a cut stays sharp in the normals, two
  *     solids' colours or UV charts do not bleed into each other;
- *   - NORMAL attributes are negated on the pieces turned over (B's in A - B).
+ *   - NORMAL attributes are negated on the pieces turned over (B's in A - B),
+ *     TANGENT ones' handedness (w) too;
+ *   - edge attributes: a result edge on an input edge (a piece of it) takes
+ *     its value, the others zeros;
+ *   - feature edges: those on the operands' feature edges stay features, and
+ *     the cuts (edges between pieces of two source faces, on no input edge:
+ *     where the operands meet) become features.
  * With attributes, edges inside flat regions are turned only between pieces
- * of one source face (values are never carried across faces). Feature edges
- * and footpoints are not carried.
+ * of one source face (values are never carried across faces). Footpoints
+ * are not carried.
  */
 qaws_status qaws_mesh_3d_boolean(qaws_mesh_3d** out_mesh, qaws_boolean_report* report, qaws_mesh_3d const* a, qaws_mesh_3d const* b,
 	qaws_boolean_op op, qaws_intersect_desc const* desc);

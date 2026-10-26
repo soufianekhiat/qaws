@@ -79,6 +79,16 @@ outside; indices stay dense through edits.
   (premultiplied), so transparent black does not darken a blend. Every
   operator that mixes values (edits, remeshing, subdivision, decimation,
   the connector, references, Booleans, sweeps) mixes them in the rule's space.
+  `TANGENT` (4 components) is a tangent with its handedness: the direction
+  made unit, w a sign negated where a face is turned over.
+- **Edge attributes** (`QAWS_MESH_EDGE`, in `qaws_mesh_3d_get_edges` order:
+  crease weights, seam ids) are stored on both corners of each edge, as
+  features are. An edit keeps an edge's value on the edge and on its pieces
+  (a split's halves); new edges (a split's cross edge, a flip's diagonal)
+  take zeros. Booleans and sweeps carry them the same way; subdivision and
+  the connector leave them out (subdivision's creases are the feature
+  edges' sharpness), remeshing from a reference starts them at zero, and a
+  reference cannot evaluate one (INVALID_ARGUMENT).
 - **Footpoints**: each vertex's location on the reference an operator
   worked on, kept through every operator (`qaws_mesh_3d_get_footpoints`).
 - **Measures**: `qaws_mesh_3d_measure_quality` (faces by size, angles,
@@ -1046,9 +1056,11 @@ qaws_mesh_3d_boolean(&out, &report, a, b, QAWS_BOOLEAN_DIFFERENCE, &desc);   /* 
 - **Matching:** by name across the operands; one name must have one element, component count and rule (else INVALID_ARGUMENT). Unnamed attributes never match. An attribute on one operand only reads zeros on the other's faces, except a `NORMAL` one, which takes that face's normal. An input's `"source"` gives way to the result's.
 - **Faces:** a face attribute is the source face's value.
 - **Vertices and corners:** each result corner is placed in its source face (the fan triangle holding it, barycentric, clamped to it, never extrapolated) and its values mixed there by the rule. Both sides of a cut keep their own values, so vertex attributes come out per corner (same name): the cut stays sharp in the normals, and two solids' colours or UV charts do not bleed into each other.
-- **Turned pieces:** `NORMAL` attributes are negated on the pieces the Boolean turns over (B's in A − B).
+- **Turned pieces:** `NORMAL` attributes are negated on the pieces the Boolean turns over (B's in A − B), `TANGENT` ones' handedness too.
+- **Edges:** a result edge lying on an input edge (a piece of it) takes that edge's values, the others zeros.
+- **Features:** result edges on the operands' feature edges stay features, and the cuts become features: edges between pieces of two source faces that lie on no input edge, i.e. the curves where the operands meet.
 - **Flat regions:** with attributes, edges inside flat regions are turned only between pieces of one source face.
-- **Not carried:** feature edges and footpoints.
+- **Not carried:** footpoints.
 
 The same transfer runs in `qaws_mesh_3d_sweep` and `qaws_mesh_sweep_boolean` (see Swept solids).
 
@@ -1057,6 +1069,8 @@ The same transfer runs in `qaws_mesh_3d_sweep` and `qaws_mesh_sweep_boolean` (se
 | Edge split black → white, `OKLAB` | linear light 0.125 (Oklab L = 0.5), to 8e-16 |
 | Edge split transparent black → red, `SRGB` with alpha | red at alpha 0.5 (premultiplied), to 1e-16 |
 | Unit cube − cube shifted by half (volume 0.875): A's affine field, corner UVs and sRGB colour linear in light; B's own field; face materials on both; a face `NORMAL` on A only | every corner exact (0 error, the cut corners included); materials per face; normals along their faces on both A's and B's turned pieces |
+| A square's edge values through a split and a flip | the split edge's halves keep its value, the cross edge and the new diagonal 0, the border kept |
+| A − B: crease weight 1 on A's box edges; features from both cubes' 90° edges; tangents (x, +1) on A, (y, +1) on B | weight along exactly A's box edges left (10.5); features along every crease and only there (15, the cuts added); tangents exact, w +1 on A and −1 on B's turned pieces |
 | One name per vertex on A and per face on B; a `NORMAL` of 2 components | INVALID_ARGUMENT |
 
 ## Geodesics on meshes
@@ -1731,12 +1745,19 @@ Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along 
 - a wall takes, along its edge, the values of the front face's corners there;
 - directions (`NORMAL`, and `NORMALIZED` of 3 components) turn with a rigid motion's rotation at the layer's time, so a turning tool's normals stay on it;
 - a `NORMAL` face attribute on a wall is the wall's own normal;
+- a soup edge repeating an edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values and feature flag, the others zeros; the self-union then marks its cuts as features;
 - `qaws_mesh_sweep_boolean` matches the tool's and the stock's attributes by name.
 
 Test 181:
 - a cube swept along x carries a field constant along the motion exactly, and its face normals lie along every face;
 - a ball's radial vertex normals swept along a segment agree with the tube's faces as well as with the ball's own (mean dot 0.944 against 0.941);
 - a carved slot's faces carry the tool's material over exactly the slot's area, 4.
+
+Figure 62 (key +) shows:
+- one quad's corner colours subdivided under `LINEAR`, `SRGB` and `OKLAB` (muddy, linear light, perceptual);
+- the CSG emblem in colour, each solid's colour and normals carried through five Booleans, its features drawn;
+- painting by sweeps: three coloured brush strokes united with a slab;
+- a box's edge weights through a bite, each edge's pieces keeping its weight, the cut curve a feature.
 
 Figure 61 (key Z) shows:
 - a coloured ball (sRGB, normals) less a box of its own colour;

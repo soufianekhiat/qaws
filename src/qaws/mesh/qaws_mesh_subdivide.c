@@ -92,21 +92,16 @@ static void sdv_mix(double* y, double const* const* x, double const* w, unsigned
 /* the attributes of one element in a new row by their rules: NEAREST from pick, NORMALIZED rescaled */
 static void sdv_rules(double* row, double const* pick, sdv_cols const* k, unsigned int element)
 {
-	unsigned int a, j;
+	unsigned int a;
 	for (a = 0; a < k->na; a++)
 	{
 		sdv_attr const* t = &k->at[a];
-		double l = 0;
 		if (t->element != element)
 			continue;
 		if (t->rule == QAWS_ATTRIBUTE_NEAREST)
 			memcpy(row + t->off, pick + t->off, sizeof(double) * t->n);
 		else if (hm_rule_unit(t->rule))
-		{
-			for (j = 0; j < t->n; j++) l += row[t->off + j] * row[t->off + j];
-			l = sqrt(l);
-			for (j = 0; l > 1e-300 && j < t->n; j++) row[t->off + j] /= l;
-		}
+			hm_space_out(row + t->off, t->n, t->rule);
 	}
 }
 
@@ -1492,6 +1487,8 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 	{
 		qaws_attribute_desc d;
 		qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
+		if (d.element == QAWS_MESH_EDGE)
+			continue;   /* (edge attributes are not carried: semi-sharp creases are the feature edges' sharpness) */
 		at[a].element = (unsigned int)d.element;
 		at[a].rule = (unsigned int)d.rule;
 		at[a].n = d.components;
@@ -1547,6 +1544,8 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		unsigned int count = at[a].element == QAWS_MESH_VERTEX ? nv : (at[a].element == QAWS_MESH_CORNER ? nc : nf);
 		unsigned int w = at[a].element == QAWS_MESH_VERTEX ? k.kv : (at[a].element == QAWS_MESH_CORNER ? k.kc : k.kf);
 		double* rows = at[a].element == QAWS_MESH_VERTEX ? m.X : (at[a].element == QAWS_MESH_CORNER ? m.C : m.F);
+		if (!at[a].n)
+			continue;
 		qaws_mesh_3d_get_attribute(sv, mesh, a);
 		for (i = 0; i < count; i++)
 		{
@@ -1625,6 +1624,8 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		unsigned int count = at[a].element == QAWS_MESH_VERTEX ? m.nv : (at[a].element == QAWS_MESH_CORNER ? m.nc : m.nf);
 		unsigned int w = at[a].element == QAWS_MESH_VERTEX ? k.kv : (at[a].element == QAWS_MESH_CORNER ? k.kc : k.kf), id;
 		double* rows = at[a].element == QAWS_MESH_VERTEX ? m.X : (at[a].element == QAWS_MESH_CORNER ? m.C : m.F);
+		if (!at[a].n)
+			continue;
 		qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
 		for (i = 0; i < count; i++)
 		{

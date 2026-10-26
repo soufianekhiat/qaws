@@ -106,6 +106,7 @@
  *   mesh59_frame_singular.png  FRAME_FIELD through singular edges: a can and a ball as hexahedra
  *   mesh60_sweep.png   swept solids: a cube turning along a curve, a ball's tube, a box turned a quarter
  *   mesh61_attributes.png  attributes through Booleans and sweeps: colours, normals, UVs, materials
+ *   mesh62_attributes_more.png  colour rules compared, the CSG emblem in colour, painting by sweeps, edge weights
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
@@ -298,16 +299,17 @@ static void ms_panel(er_canvas* c, int x, int y, int w, int h, qaws_mesh_3d cons
 #include "meshing_showcase/59_frame_singular.c"
 #include "meshing_showcase/60_sweep.c"
 #include "meshing_showcase/61_attributes.c"
+#include "meshing_showcase/62_attributes_more.c"
 
-/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 61 are A to Z) */
+/* the figures to draw: all, or those whose keys the first argument lists ("58"; figures 10 to 35 are a to z, 36 to 61 are A to Z, 62 is +) */
 int main(int argc, char** argv)
 {
 	static void (*const demo[])(void) = { demo_core, demo_reference, demo_remesh, demo_quads, demo_generate, demo_tets, demo_hexes, demo_frame_hexes,
 		demo_measures, demo_remesh_angles, demo_remesh_cvt, demo_cross_field, demo_quad_flow, demo_quad_improve,
 		demo_quad_global, demo_guidance, demo_feature_size, demo_repair, demo_layers, demo_curved, demo_metric, demo_bvh, demo_quality, demo_repair_more, demo_watertight,
 		demo_intersect, demo_boolean, demo_geodesic, demo_smooth, demo_deform, demo_deform_2, demo_decimate, demo_decimate_views, demo_remesh_attributes, demo_connect, demo_connect_more,
-		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2, demo_offset, demo_subdivide, demo_volume_improve, demo_volume_curve, demo_tetrahedra_border, demo_polycube, demo_quads_pairing, demo_quad_layout, demo_denoise, demo_points, demo_geodesic_exact, demo_butterfly, demo_decimate_attributes, demo_offset_round, demo_volume_cubic, demo_subdivide_adaptive, demo_bff, demo_atlas, demo_polycube_cut, demo_torus_periods, demo_frame_singular, demo_sweep, demo_attributes };
-	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+		demo_repulsive_mesh_curves, demo_repulsive_mesh_curves_2, demo_offset, demo_subdivide, demo_volume_improve, demo_volume_curve, demo_tetrahedra_border, demo_polycube, demo_quads_pairing, demo_quad_layout, demo_denoise, demo_points, demo_geodesic_exact, demo_butterfly, demo_decimate_attributes, demo_offset_round, demo_volume_cubic, demo_subdivide_adaptive, demo_bff, demo_atlas, demo_polycube_cut, demo_torus_periods, demo_frame_singular, demo_sweep, demo_attributes, demo_attributes_more };
+	static char const key[] = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+";
 	unsigned int i;
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");

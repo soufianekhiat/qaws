@@ -2054,6 +2054,8 @@ qaws_status mx_transfer(qaws_hm* m, qaws_mesh_reference const* r, qaws_mesh_loca
 		{
 			return QAWS_STATUS_ALLOCATION_FAILURE;
 		}
+		if (at->element == QAWS_MESH_EDGE)
+			continue;   /* (new edges: zeros) */
 		if (at->element == QAWS_MESH_VERTEX)
 			for (v = 0; v < m->nv; v++)
 			{

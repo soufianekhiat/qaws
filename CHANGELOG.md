@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Edge attributes (`QAWS_MESH_EDGE`): kept by edits on an edge and its pieces, carried by Booleans and sweeps. The
+  `TANGENT` rule (handedness negated on turned faces). `qaws_mesh_3d_boolean` keeps the operands' feature edges and marks
+  the cuts as features. Test 181, figure 62.
 - `qaws_mesh_3d_boolean`: Booleans of meshes carrying their attributes (matched by name; vertex and corner values
   interpolated by rule in their source faces, per corner; face values copied; NORMAL ones negated on turned pieces).
   `qaws_mesh_3d_sweep` and `qaws_mesh_sweep_boolean` carry attributes the same way, directions turned with the motion.

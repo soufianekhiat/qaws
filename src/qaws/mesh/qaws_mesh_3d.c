@@ -875,6 +875,27 @@ static void m3_attr_io(qaws_hm* m, unsigned int a, qaws_scalar* out, qaws_scalar
 				}
 		return;
 	}
+	if (at->element == QAWS_MESH_EDGE)
+	{
+		/* (an edge's value on both its corners) */
+		for (c = 0; c < m->nc; c++)
+			if (m->cf[c] != HM_NONE && (m->co[c] == HM_NONE || c < m->co[c]))
+			{
+				for (j = 0; j < n; j++)
+				{
+					if (out)
+						out[(size_t)n * k + j] = (qaws_scalar)hm_attr_at(m, a, c)[j];
+					else
+					{
+						hm_attr_at(m, a, c)[j] = in ? (double)in[(size_t)n * k + j] : 0;
+						if (m->co[c] != HM_NONE)
+							hm_attr_at(m, a, m->co[c])[j] = hm_attr_at(m, a, c)[j];
+					}
+				}
+				k++;
+			}
+		return;
+	}
 	count = at->element == QAWS_MESH_VERTEX ? m->nv : m->nf;
 	for (i = 0; i < count; i++)
 		for (j = 0; j < n; j++)
@@ -892,8 +913,9 @@ qaws_status qaws_mesh_3d_add_attribute(unsigned int* out_attribute, qaws_mesh_3d
 	unsigned int a;
 	if (out_attribute)
 		*out_attribute = QAWS_MESH_NONE;
-	if (!mesh || !desc || desc->components < 1 || desc->components > 16 || (unsigned int)desc->element > QAWS_MESH_FACE
-		|| (unsigned int)desc->rule > QAWS_ATTRIBUTE_OKLAB || (desc->rule == QAWS_ATTRIBUTE_NORMAL && desc->components != 3)
+	if (!mesh || !desc || desc->components < 1 || desc->components > 16 || (unsigned int)desc->element > QAWS_MESH_EDGE
+		|| (unsigned int)desc->rule > QAWS_ATTRIBUTE_TANGENT || (desc->rule == QAWS_ATTRIBUTE_NORMAL && desc->components != 3)
+		|| (desc->rule == QAWS_ATTRIBUTE_TANGENT && desc->components != 4)
 		|| ((desc->rule == QAWS_ATTRIBUTE_SRGB || desc->rule == QAWS_ATTRIBUTE_OKLAB) && (desc->components < 3 || desc->components > 4)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	a = hm_attr_add(&mesh->hm, desc->name, (unsigned int)desc->element, (unsigned int)desc->rule, desc->components);

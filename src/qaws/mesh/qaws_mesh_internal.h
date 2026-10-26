@@ -18,6 +18,10 @@
    NULL, freed by the caller): per result face, 1 where it was turned over (qaws_internal_free; NULL on failure) */
 qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d_desc const* a, qaws_mesh_3d_desc const* b,
 	qaws_boolean_op op, qaws_intersect_desc const* desc, int one, unsigned char** out_turned);
+/* edges (2 vertices each) keyed and sorted with their indices (2 per edge; qaws_internal_free), and edge (a, b)'s index
+   among them (QAWS_MESH_NONE: none) */
+unsigned long long* cy_keys(unsigned int const* e, unsigned int ne);
+unsigned int cy_find(unsigned long long const* k, unsigned int ne, unsigned int a, unsigned int b);
 /* qaws_mesh_3d_boolean of soups of meshes: a's (na of them) as one operand, b's (nb; 0: the self-union) as the other */
 qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d const* const* a, unsigned int na,
 	qaws_mesh_3d const* const* b, unsigned int nb, qaws_boolean_op op, qaws_intersect_desc const* desc);

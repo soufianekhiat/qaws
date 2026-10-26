@@ -604,13 +604,7 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 		if (hm_rule_unit(m->attr[ak].rule))
 			for (i = 0; i < nc; i++)
 				if (grp[i] == i)
-				{
-					double l = 0;
-					unsigned int k;
-					for (k = 0; k < n; k++) l += val[4 * i + k] * val[4 * i + k];
-					l = sqrt(l);
-					for (k = 0; l > 1e-300 && k < n; k++) val[4 * i + k] /= l;
-				}
+					hm_space_out(val + 4 * i, n, m->attr[ak].rule);
 		for (i = 0; i < nc; i++)
 		{
 			memcpy(tab + off + 2 * (size_t)n * i, hm_attr_at(m, ak, cs[i]), sizeof(double) * n);
@@ -1185,12 +1179,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 			hm_attr_at(m, w.ca[k], b)[w.ck[k]] = sopt[k] / w.alpha;
 		for (a0 = 0; na && a0 < m->na; a0++)
 			if (m->attr[a0].element == QAWS_MESH_VERTEX && hm_rule_unit(m->attr[a0].rule))
-			{
-				double* y = hm_attr_at(m, a0, b), l = 0;
-				for (k = 0; k < m->attr[a0].n; k++) l += y[k] * y[k];
-				l = sqrt(l);
-				for (k = 0; l > 1e-300 && k < m->attr[a0].n; k++) y[k] /= l;
-			}
+				hm_space_out(hm_attr_at(m, a0, b), m->attr[a0].n, m->attr[a0].rule);
 		for (k = 0; k < w.K; k++)
 			w.Q[w.K * (size_t)b + k] += w.Q[w.K * (size_t)a + k];
 		w.W[b] += w.W[a];

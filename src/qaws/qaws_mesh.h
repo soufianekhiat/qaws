@@ -65,7 +65,9 @@ typedef enum qaws_mesh_element
 {
 	QAWS_MESH_VERTEX = 0,
 	QAWS_MESH_CORNER,
-	QAWS_MESH_FACE
+	QAWS_MESH_FACE,
+	QAWS_MESH_EDGE                      /* in qaws_mesh_3d_get_edges order: crease weights, seam ids; an edit keeps an
+	                                       edge's value on the edge and its pieces, new edges take zeros */
 } qaws_mesh_element;
 #endif
 
@@ -81,8 +83,11 @@ typedef enum qaws_attribute_rule
 	QAWS_ATTRIBUTE_SRGB,                /* a colour stored sRGB-encoded (3 components, or 4 with alpha), blended in linear
 	                                       light: decoded, mixed, encoded again; alpha mixed linearly, the colours weighted
 	                                       by it (premultiplied) */
-	QAWS_ATTRIBUTE_OKLAB                /* the same colours blended in Oklab (perceptually even, no dark or muddy
+	QAWS_ATTRIBUTE_OKLAB,               /* the same colours blended in Oklab (perceptually even, no dark or muddy
 	                                       midpoints between hues) */
+	QAWS_ATTRIBUTE_TANGENT              /* a tangent with its handedness (4 components: x y z w): the direction as
+	                                       NORMALIZED, w a sign (+1 or -1, the bitangent's side), negated on the faces
+	                                       an operation turns over; rotated with a swept mesh */
 } qaws_attribute_rule;
 #endif
 
@@ -246,8 +251,9 @@ qaws_status qaws_mesh_3d_cut_isolines(unsigned int* out_edge_count, qaws_mesh_3d
 /* ---- attributes -------------------------------------------------------- */
 
 /* values: components per vertex, per corner (in qaws_mesh_3d_get_faces
-   order) or per face; NULL: zeros. INVALID_ARGUMENT for a NORMAL attribute
-   not of 3 components, an SRGB or OKLAB one not of 3 or 4. */
+   order), per face or per edge (qaws_mesh_3d_get_edges order); NULL: zeros.
+   INVALID_ARGUMENT for a NORMAL attribute not of 3 components, an SRGB or
+   OKLAB one not of 3 or 4, a TANGENT one not of 4. */
 qaws_status qaws_mesh_3d_add_attribute(unsigned int* out_attribute, qaws_mesh_3d* mesh, qaws_scalar const* values,
 	qaws_attribute_desc const* desc);
 unsigned int qaws_mesh_3d_get_attribute_count(qaws_mesh_3d const* mesh);

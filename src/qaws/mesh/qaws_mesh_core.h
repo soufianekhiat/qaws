@@ -49,6 +49,7 @@ typedef struct hm_patch
 	unsigned int nnew, cnew;
 	unsigned int *fv, *s0, *sn;     /* new corners' vertices; their sources */
 	unsigned char* hint;            /* flags or'ed into new corners */
+	unsigned int* esrc;             /* the old corner position whose edge a new corner's lies on (a piece of it), or HM_NONE */
 	unsigned int ncv, ccv;
 	unsigned int* sp;               /* sources: old corner positions */
 	double* sw;                     /* and weights */
@@ -149,7 +150,9 @@ void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned i
    back (unit rules normalized); mixing between the two is linear */
 void hm_space_in(double* v, unsigned int n, unsigned int rule);
 void hm_space_out(double* v, unsigned int n, unsigned int rule);
-int hm_rule_unit(unsigned int rule);   /* NORMALIZED or NORMAL */
+int hm_rule_unit(unsigned int rule);   /* NORMALIZED, NORMAL or TANGENT */
+/* an element stored per corner slot: CORNER, and EDGE (on both its corners) */
+#define HM_ON_CORNERS(e) ((e) == QAWS_MESH_CORNER || (e) == QAWS_MESH_EDGE)
 int hm_foot_enable(qaws_hm* m);
 unsigned int hm_new_vertex(qaws_hm* m, double const* x);   /* capacity reserved by the caller */
 void hm_kill_vertex(qaws_hm* m, unsigned int v);

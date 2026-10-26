@@ -17,6 +17,8 @@
 #define cf_smoothest QAWS_SFX(cf_smoothest)
 #define cf_steer QAWS_SFX(cf_steer)
 #define cy_boolean QAWS_SFX(cy_boolean)
+#define cy_find QAWS_SFX(cy_find)
+#define cy_keys QAWS_SFX(cy_keys)
 #define ff_comb QAWS_SFX(ff_comb)
 #define ff_frames QAWS_SFX(ff_frames)
 #define hm_attr_add QAWS_SFX(hm_attr_add)

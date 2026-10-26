@@ -30,12 +30,17 @@ static qaws_status swp_at(swp_ctx* c, double t, double* X)
 /* the soup as a mesh carrying the swept mesh's attributes: per soup face its triangle (sof; bit 31: turned, 30: a wall), per
    soup corner the triangle's corner it repeats (soc), on the layer of its vertex; vertex attributes become corner ones,
    directions (NORMAL, and NORMALIZED of 3 components) turn with a rigid motion, NORMAL ones are negated on turned faces;
-   a wall's NORMAL face value is its own normal (its face's is not: a wall stands across it) */
+   a wall's NORMAL face value is its own normal (its face's is not: a wall stands across it); a soup edge repeating an
+   edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values and feature flag, the others
+   zeros */
 static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d_desc const* md,
 	unsigned int const* sof, unsigned int const* soc, unsigned int nv, double const* layer_t, unsigned int layers)
 {
 	unsigned int na = qaws_mesh_3d_get_attribute_count(mesh), nf = qaws_mesh_3d_get_face_count(mesh), nc = qaws_mesh_3d_get_corner_count(mesh);
 	unsigned int nt = qaws_mesh_3d_get_triangle_count(mesh), a, i, j, k, *fv = NULL, *fs = NULL, *tf = NULL, *tc = NULL;
+	unsigned int ine = qaws_mesh_3d_get_edge_count(mesh), sne, *ie = NULL, *se = NULL, *smap = NULL, nfe = 0;
+	unsigned long long* ik = NULL;
+	unsigned char* ifeat = NULL;
 	qaws_scalar *val = NULL, *sv = NULL;
 	double* rot = NULL;
 	qaws_status st;
@@ -52,6 +57,41 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!fv || !fs || !tf || !tc || !val || !sv || !rot)
 		goto done;
+	/* the soup's edges on the mesh's (one layer, an edge of the mesh), their features */
+	sne = qaws_mesh_3d_get_edge_count(*out);
+	{
+		unsigned int nfeat = qaws_mesh_3d_get_feature_edge_count(mesh), m = ine > nfeat ? ine : nfeat;
+		ie = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)m + 1));
+		se = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)sne + 1));
+		smap = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)sne + 1));
+		ifeat = (unsigned char*)qaws_internal_zalloc((size_t)ine + 1, 1);
+		if (!ie || !se || !smap || !ifeat)
+			goto done;
+		qaws_mesh_3d_get_edges(ie, mesh);
+		if (!(ik = cy_keys(ie, ine)))
+			goto done;
+		qaws_mesh_3d_get_feature_edges(ie, mesh);
+		for (i = 0; i < nfeat; i++)
+		{
+			unsigned int x = cy_find(ik, ine, ie[2 * (size_t)i], ie[2 * (size_t)i + 1]);
+			if (x != QAWS_MESH_NONE)
+				ifeat[x] = 1;
+		}
+		qaws_mesh_3d_get_edges(se, *out);
+		for (i = 0; i < sne; i++)
+		{
+			unsigned int x = se[2 * (size_t)i], y = se[2 * (size_t)i + 1];
+			smap[i] = x / nv == y / nv ? cy_find(ik, ine, x % nv, y % nv) : QAWS_MESH_NONE;
+			if (smap[i] != QAWS_MESH_NONE && ifeat[smap[i]])
+			{
+				se[2 * (size_t)nfe] = x;
+				se[2 * (size_t)nfe + 1] = y;
+				nfe++;
+			}
+		}
+		if (nfe && qaws_mesh_3d_set_feature_edges(*out, se, nfe) != QAWS_STATUS_OK)
+			goto done;
+	}
 	/* the triangles (fanned from each face's first corner) back to their faces' corners */
 	qaws_mesh_3d_get_faces(fv, fs, mesh);
 	for (i = 0, j = 0, k = 0; i < nf; k += fs[i++])
@@ -82,8 +122,16 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 		if (d.name && !strcmp(d.name, "source"))
 			continue;
 		n = d.components;
-		dir = d.rule == QAWS_ATTRIBUTE_NORMAL || (d.rule == QAWS_ATTRIBUTE_NORMALIZED && n == 3);
+		dir = d.rule == QAWS_ATTRIBUTE_NORMAL || d.rule == QAWS_ATTRIBUTE_TANGENT || (d.rule == QAWS_ATTRIBUTE_NORMALIZED && n == 3);
 		qaws_mesh_3d_get_attribute(val, mesh, a);
+		if (d.element == QAWS_MESH_EDGE)
+		{
+			for (i = 0; i < sne; i++)
+				for (k = 0; k < n; k++)
+					sv[(size_t)n * i + k] = smap[i] != QAWS_MESH_NONE ? val[(size_t)n * smap[i] + k] : 0;
+			st = qaws_mesh_3d_add_attribute(&id, *out, sv, &d);
+			continue;
+		}
 		cnt = d.element == QAWS_MESH_FACE ? md->face_count : 3 * md->face_count;
 		for (i = 0; i < cnt; i++)
 		{
@@ -103,6 +151,8 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 			if (d.rule == QAWS_ATTRIBUTE_NORMAL && turned)
 				for (k = 0; k < 3; k++)
 					o[k] = -o[k];
+			if (d.rule == QAWS_ATTRIBUTE_TANGENT && turned)
+				o[3] = -o[3];
 		}
 		for (i = 0; d.rule == QAWS_ATTRIBUTE_NORMAL && d.element == QAWS_MESH_FACE && i < cnt; i++)
 			if (sof[i] >> 30 & 1)
@@ -144,7 +194,8 @@ done:
 		*out = NULL;
 	}
 	qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(tf); qaws_internal_free(tc); qaws_internal_free(val);
-	qaws_internal_free(sv); qaws_internal_free(rot);
+	qaws_internal_free(sv); qaws_internal_free(rot); qaws_internal_free(ie); qaws_internal_free(se); qaws_internal_free(smap);
+	qaws_internal_free(ik); qaws_internal_free(ifeat);
 	return st;
 }
 
@@ -403,9 +454,8 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 		md.face_count = snf;
 		memset(&id, 0, sizeof id);
 		id.executor = desc ? desc->executor : NULL;
-		if (qaws_mesh_3d_get_attribute_count(mesh))
 		{
-			/* the attributes carried: the soup as a mesh of them */
+			/* the soup as a mesh carrying the attributes and features, its self-union carrying them on (the cuts features too) */
 			qaws_mesh_3d* soup = NULL;
 			for (ns = 0; ns <= report->slabs; ns++)
 				times[ns] = ns < report->slabs ? times[2 * (size_t)ns] : times[2 * (size_t)ns - 1];   /* (each layer's time, in place) */
@@ -414,8 +464,6 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 				st = cy_boolean(out, &report->boolean, (qaws_mesh_3d const* const*)&soup, 1, NULL, 0, QAWS_BOOLEAN_UNION, &id);
 			qaws_mesh_3d_destroy(soup);
 		}
-		else
-			st = qaws_mesh_boolean(out, &report->boolean, &md, NULL, QAWS_BOOLEAN_UNION, &id);
 		report->closed = report->boolean.closed;
 	}
 	goto done;

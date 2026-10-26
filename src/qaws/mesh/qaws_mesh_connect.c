@@ -283,7 +283,7 @@ static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 		unsigned int ib = i, dim, nel, ela, elb, at;
 		qaws_scalar *va = NULL, *vb = NULL, *vo = NULL;
 		double *la = NULL, *lb = NULL;
-		if (qaws_mesh_3d_get_attribute_desc(&da, C->a, i) != QAWS_STATUS_OK)
+		if (qaws_mesh_3d_get_attribute_desc(&da, C->a, i) != QAWS_STATUS_OK || da.element == QAWS_MESH_EDGE)
 			continue;
 		if (!C->same)
 		{

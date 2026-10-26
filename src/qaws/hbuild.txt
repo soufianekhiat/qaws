@@ -1,0 +1,112 @@
+hmb.c
+c1: fatal error C1083: Cannot open source file: 'hmb.c': No such file or directory
+qaws_mesh_core_f64.c
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(398): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(399): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(400): error C2143: syntax error: missing ')' before 'for'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(398): warning C4473: 'fprintf' : not enough arguments passed for format string
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(398): note: placeholders and their parameters expect 1 variadic arguments, but 0 were provided
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(398): note: the missing variadic argument 1 is required by format string '%.1f'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(400): warning C4552: '<': result of expression not used
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(400): error C2143: syntax error: missing ';' before ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(407): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(408): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(409): error C2143: syntax error: missing ')' before 'for'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(407): warning C4473: 'fprintf' : not enough arguments passed for format string
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(407): note: placeholders and their parameters expect 1 variadic arguments, but 0 were provided
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(407): note: the missing variadic argument 1 is required by format string '%.1f'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(409): warning C4552: '<': result of expression not used
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(409): error C2143: syntax error: missing ';' before ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(414): error C2143: syntax error: missing ')' before '('
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(414): error C2091: function returns function
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(414): error C2143: syntax error: missing ')' before 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(414): error C2143: syntax error: missing '{' before 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(414): error C2059: syntax error: 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(414): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(414): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(415): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(416): error C2143: syntax error: missing '{' before '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(416): error C2059: syntax error: '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(416): error C2143: syntax error: missing '{' before '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(416): error C2059: syntax error: '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(416): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(481): error C2143: syntax error: missing ')' before '('
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(481): error C2091: function returns function
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(481): error C2143: syntax error: missing ')' before 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(481): error C2143: syntax error: missing '{' before 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(481): error C2059: syntax error: 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(481): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(481): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(482): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(485): error C2065: 'n': undeclared identifier
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(485): error C2099: initializer is not a constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(486): error C2065: 'm': undeclared identifier
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(486): error C2223: left of '->nc' must point to struct/union
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(486): error C2198: 'size_t qaws_internal_mul2(size_t,size_t)': too few arguments for call
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(486): error C2099: initializer is not a constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(487): error C2065: 'm': undeclared identifier
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(487): error C2223: left of '->nc' must point to struct/union
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(487): error C2198: 'void *qaws_internal_scratch_zalloc(size_t,size_t)': too few arguments for call
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(487): error C2099: initializer is not a constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(488): error C2059: syntax error: 'if'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(490): error C2059: syntax error: 'for'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(490): error C2143: syntax error: missing '{' before '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(490): error C2059: syntax error: '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(490): error C2143: syntax error: missing '{' before '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(490): error C2059: syntax error: '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(490): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(492): error C2059: syntax error: 'for'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(492): error C2143: syntax error: missing '{' before '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(492): error C2059: syntax error: '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(492): error C2143: syntax error: missing '{' before '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(492): error C2059: syntax error: '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(492): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(494): error C2059: syntax error: 'for'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(494): error C2143: syntax error: missing '{' before '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(494): error C2059: syntax error: '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(494): error C2143: syntax error: missing '{' before '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(494): error C2059: syntax error: '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(494): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(496): error C2059: syntax error: 'for'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(496): error C2143: syntax error: missing '{' before '>'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(496): error C2059: syntax error: '>'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(496): error C2143: syntax error: missing '{' before '--'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(496): error C2059: syntax error: '--'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(496): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(498): error C2466: cannot allocate an array of constant size 0
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(498): error C2040: 'vn': 'int [0]' differs in levels of indirection from 'int'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(499): error C2059: syntax error: 'for'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(499): error C2143: syntax error: missing '{' before '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(499): error C2059: syntax error: '<'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(499): error C2143: syntax error: missing '{' before '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(499): error C2059: syntax error: '++'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(499): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(536): error C2143: syntax error: missing ')' before '('
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(536): error C2091: function returns function
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(536): error C2143: syntax error: missing ')' before 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(536): error C2143: syntax error: missing '{' before 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(536): error C2059: syntax error: 'constant'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(536): error C2059: syntax error: ')'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(536): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(537): error C2001: newline in constant
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(539): error C2143: syntax error: missing '{' before ':'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(539): error C2059: syntax error: ':'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(541): error C2143: syntax error: missing '{' before ':'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(541): error C2059: syntax error: ':'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(542): error C2371: 'qaws_internal_free': redefinition; different basic types
+C:\git\qaws\src\qaws\mesh\../internal/qaws_internal_memory.h(23): note: see declaration of 'qaws_internal_free'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(542): error C2371: 'qaws_internal_free': redefinition; different basic types
+C:\git\qaws\src\qaws\mesh\../internal/qaws_internal_memory.h(23): note: see declaration of 'qaws_internal_free'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(542): error C2371: 'qaws_internal_free': redefinition; different basic types
+C:\git\qaws\src\qaws\mesh\../internal/qaws_internal_memory.h(23): note: see declaration of 'qaws_internal_free'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(542): error C2371: 'qaws_internal_free': redefinition; different basic types
+C:\git\qaws\src\qaws\mesh\../internal/qaws_internal_memory.h(23): note: see declaration of 'qaws_internal_free'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(543): error C2059: syntax error: 'if'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(545): error C2059: syntax error: 'return'
+C:/git/qaws/src/qaws/mesh/qaws_mesh_core.c(546): error C2059: syntax error: '}'
+Generating Code...
+hmb.c
+c1: fatal error C1083: Cannot open source file: 'hmb.c': No such file or directory
+core_old_f64.c
+c1: fatal error C1083: Cannot open source file: 'core_old_f64.c': No such file or directory
+Generating Code...
