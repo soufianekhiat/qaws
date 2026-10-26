@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Curved tetrahedra's Jacobian bound tightened by simplex subdivision where loose (bisection of the longest edge): the
+  cubic sphere keeps 2 more cells curved, test 174 in 5 s from 9.
 - Curved elements' untangling: border nodes slide on the reference when the free nodes alone do not suffice, and a move
   may not fail another element round the node (the spheres: 6 relaxed cells to 5, the cubic one's Jacobian 0.167 to 0.178).
   Test 174.

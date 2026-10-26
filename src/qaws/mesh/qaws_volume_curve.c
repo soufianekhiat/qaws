@@ -324,14 +324,22 @@ static int vcu_bern_init(vcu_bern* B, unsigned int p)
 /* A tetrahedron's determinant (degree 3 (p - 1) in the barycentrics) in the Bernstein basis of that degree: its values at
    the lattice points solved for the coefficients; their least bounds the determinant from below over the whole element
    (Johnen, Remacle, Geuzaine 2013) */
-static double vcu_tet_bound(vcu_bern const* B, vcu_el const* e, double const (*x)[3])
+static double vcu_tet_bound(vcu_bern const* B, vcu_el const* e, double const (*x)[3], double const (*V)[4])
 {
 	double v[84], lo = HUGE_VAL;
-	unsigned int r, c, k;
+	unsigned int r, c, k, j;
 	for (r = 0; r < B->nq; r++)
 	{
-		double lam[4];
-		for (k = 0; k < 4; k++) lam[k] = B->tl[r][k] / (double)B->qt;
+		/* (the lattice point of the sub-tetrahedron V, its corners' barycentrics; V NULL: the whole element) */
+		double lam[4] = { 0, 0, 0, 0 };
+		for (k = 0; k < 4; k++)
+		{
+			double w = B->tl[r][k] / (double)B->qt;
+			if (!V)
+				lam[k] += w;
+			else
+				for (j = 0; j < 4; j++) lam[j] += w * V[k][j];
+		}
 		v[r] = vcu_el_det(e, x, lam);
 	}
 	for (r = 0; r < B->nq; r++)
@@ -341,6 +349,37 @@ static double vcu_tet_bound(vcu_bern const* B, vcu_el const* e, double const (*x
 		lo = fmin(lo, s);
 	}
 	return lo;
+}
+
+/* the bound over the sub-tetrahedron V (its corners' barycentrics), bisected across its longest edge where under target
+   (depth more times at most): the determinant on a sub-tetrahedron is again of the same degree, its coefficients from the
+   same lattice solve, and they close in on its values as the pieces shrink */
+static double vcu_tet_bound_split(vcu_bern const* B, vcu_el const* e, double const (*x)[3], double const (*V)[4], unsigned int depth, double target)
+{
+	double r = vcu_tet_bound(B, e, x, V), W[4][4], best = -1;
+	unsigned int a, b, ea = 0, eb = 1, k, side;
+	if (r >= target || depth == 0)
+		return r;
+	for (a = 0; a < 4; a++)
+		for (b = a + 1; b < 4; b++)
+		{
+			double l = 0;
+			for (k = 0; k < 4; k++) l += (V[a][k] - V[b][k]) * (V[a][k] - V[b][k]);
+			if (l > best)
+			{
+				best = l;
+				ea = a;
+				eb = b;
+			}
+		}
+	r = HUGE_VAL;
+	for (side = 0; side < 2; side++)
+	{
+		memcpy(W, V, sizeof W);
+		for (k = 0; k < 4; k++) W[side ? ea : eb][k] = 0.5 * (V[ea][k] + V[eb][k]);
+		r = fmin(r, vcu_tet_bound_split(B, e, x, (double const(*)[4])W, depth - 1, target));
+	}
+	return r;
 }
 
 /* A hexahedron's determinant, of degree 3 p - 1 in each of s, t, u: in the tensor Bernstein basis of that degree its
@@ -432,8 +471,11 @@ static double vcu_ratio(vcu_bern const* B, vcu_el const* e, unsigned int const* 
 	if (!e->hex)
 	{
 		/* (the straight tetrahedron's determinant is constant: the bound over it) */
-		static double const mid[4] = { 0.25, 0.25, 0.25, 0.25 };
-		double ds = vcu_el_det(e, (double const(*)[3])xs, mid), dc = vcu_tet_bound(B, e, (double const(*)[3])xc);
+		static double const mid[4] = { 0.25, 0.25, 0.25, 0.25 }, whole[4][4] = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 }, { 0, 0, 0, 1 } };
+		double ds = vcu_el_det(e, (double const(*)[3])xs, mid), dc = vcu_tet_bound(B, e, (double const(*)[3])xc, NULL);
+		/* (bisected only when the bound is under target while the sampled determinant clears it) */
+		if (ds > 0 && dc / ds < target && vcu_sampled(B, e, en, X, D) >= target)
+			dc = vcu_tet_bound_split(B, e, (double const(*)[3])xc, whole, 6, target * ds);
 		return ds > 0 ? dc / ds : (dc > 0 ? 1 : -1);
 	}
 	{
