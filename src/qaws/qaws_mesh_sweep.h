@@ -26,19 +26,23 @@
  *     lies within tolerance of its chord over it (checked at the slab's
  *     middle and quarters; a straight motion is one slab).
  *   - Over a slab the vertices move along their chords. A point the solid
- *     covers during it and not at its start was crossed by a face moving
- *     toward it: a front face, its normal at the start against its
- *     vertices' mean displacement. The slab's sweep is the solid at its start
- *     with its front faces extruded: those faces at the start (turned) and
- *     at the end, and walls along their region's border (each border edge's
- *     quad between its two positions, split along the diagonal that folds it
- *     outward: two slabs' turning walls overlap, never leave a sliver).
- *   - The swept solid is the solid at 0 united with every slab's extrusion:
- *     the self-union of them all (qaws_mesh_boolean), its winding-number
- *     rule resolving their overlaps and an extrusion's folds.
+ *     covers during it and not at its start was crossed by a face moving out
+ *     toward it. For each face with a corner moving out of the solid by more
+ *     than the tolerance (its normal at the start against its displacement)
+ *     the slab adds the convex hull of the face's two positions: it holds
+ *     every position the face passes through (a turning face moving out at
+ *     some corners and in at others included), and never turns inside out
+ *     as an extruded face's twisted walls would.
+ *   - The swept solid is the solid at 0 united with every slab's hulls: the
+ *     self-union of them all (qaws_mesh_boolean). Caps that coincide turned
+ *     the other way (a hull's end and the next one's start) cancel and are
+ *     left out, as are any two triangles of the soup on the same vertices
+ *     turned opposite ways.
  * A translation is exact: a cube moved along a segment is its Minkowski sum
- * with it. Curved motions are within the tolerance (the chords), rotating
- * walls within their twist (a bilinear quad split in two).
+ * with it. Curved motions are within the tolerance (the chords); where an
+ * edge slides along itself while turning, the hull fills the notch of its
+ * quad, so the result may pass the true sweep by about the slabs' turn times
+ * the edge's length.
  *
  * A vertex motion must have the mesh's vertex count; the mesh's positions
  * are then ignored (the motion's at each time are used).

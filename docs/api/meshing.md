@@ -1788,7 +1788,7 @@ Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along 
 - a `NORMAL` face attribute on a wall is the wall's own normal;
 - a soup edge repeating an edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values, the others zeros;
 - features: the copies of the mesh's feature edges at every layer, the rails its feature corners run along (a swept box's long edges) and the self-union's cuts, kept where the result turns by more than half the mesh's softest feature angle (the slabs' chords bend far less: a copy left on a wall bent only by them, or inside a face, is dropped); those on the mesh's own features at the first and last poses need only turn at all. A crease traced by an edge sliding along itself (an envelope, as a silhouette) is not marked;
-- each wall (a quad between an edge's two positions, twisted when it turns) is split along the diagonal that folds it outward, so two slabs' walls overlap instead of leaving a sliver between them;
+- each slab adds, for every face with a corner moving out of the solid, the convex hull of the face's two positions: it holds every position the face passes through, even a turning face moving out at some corners and in at others, and never turns inside out. Checked against the exact swept area of a turning cube: no material missing (the cube inside the result at every sampled time); where an edge slides along itself while turning, the result passes the true sweep by up to about 2.4 times the tolerance;
 - `qaws_mesh_sweep_boolean` matches the tool's and the stock's attributes by name.
 
 Test 181:

@@ -41,6 +41,9 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Sweeps: a face turning as it moves (out at some corners, in at others) was extruded whole or not at all, so a
+  turning solid's sweep missed material (a swept cube up to 0.11 inside the true sweep at tolerance 0.004); each slab now
+  adds the convex hull of every outgoing face's two positions. Test 181 checks the cube inside the result at 101 times.
 - Booleans: solids touching along an edge came out open (its four faces paired at random); each face is now paired with
   its own lobe's neighbour round the edge. A small patch sampled on the wrong side of a surface nearer than the sample
   (pieces crossing at a shallow angle) is mended from its neighbours round the edges where they meet. Test 163.

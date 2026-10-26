@@ -46,7 +46,9 @@
  *     long edges its corners trace included; swept along a curve while
  *     turning a quarter (16 slabs): closed, one piece (no sliver left between
  *     two slabs' twisted walls), its features exactly its edges turning by
- *     more than 25 degrees (the slabs' chords bend less);
+ *     more than 25 degrees (the slabs' chords bend less), and the cube at
+ *     101 times along the motion inside it (points 0.01 within its sides, at
+ *     mid height and by the top: nothing a turning face sweeps left out);
  *   - edge values through the connector: two tubes joined, each tube's edges
  *     their values (a's 1 + i, b's 100 + i), the bridge's 0;
  *   - refused: one name of two elements, a NORMAL of 2 components.
@@ -56,6 +58,7 @@
 #include "qaws_mesh_sweep.h"
 #include "qaws_mesh_subdivide.h"
 #include "qaws_mesh_connect.h"
+#include "qaws_mesh_bvh.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -930,6 +933,7 @@ static void test_sweep_features(void)
 		qaws_sweep_desc sd;
 		qaws_sweep_report r;
 		qaws_mesh_topology tp;
+		unsigned int uncovered;
 		o = NULL;
 		memset(&s, 0, sizeof s);
 		memset(&e, 0, sizeof e);
@@ -951,10 +955,38 @@ static void test_sweep_features(void)
 			qaws_mesh_3d_get_topology(&tp, o);
 			ac_crease_check(o, 1 - cos(25 * 3.14159265358979323846 / 180), &feat, &crease, &mism);
 		}
-		sprintf(msg, "a featured cube along a curve, turning a quarter (%u slabs): closed %d, %u piece(s); features along %.6f, edges turning past 25 degrees along %.6f, %u edges off",
-			r.slabs, tp.closed, tp.components, feat, crease, mism);
+		{
+			/* the cube at 101 times: points 0.01 within its four sides, at mid height and 0.01 below its top */
+			qaws_mesh_bvh* bv = NULL;
+			qaws_scalar pts[3 * 160], wn[160];
+			unsigned int ti, pi2;
+			uncovered = 1000;
+			if (o && qaws_mesh_bvh_create_mesh_3d(&bv, o, NULL) == QAWS_STATUS_OK)
+			{
+				uncovered = 0;
+				for (ti = 0; ti <= 100; ti++)
+				{
+					qaws_motion_state ms;
+					qaws_motion_evaluate(&ms, mt, (qaws_scalar)(ti / 100.0));
+					for (pi2 = 0; pi2 < 160; pi2++)
+					{
+						unsigned int sd2 = pi2 / 40 % 4;
+						double a = -0.29 + 0.58 * (pi2 % 20) / 19.0, lx = sd2 == 0 ? 0.29 : sd2 == 1 ? -0.29 : a, ly = sd2 == 2 ? 0.29 : sd2 == 3 ? -0.29 : a, lz = pi2 % 40 < 20 ? 0 : 0.29;
+						pts[3 * pi2] = (qaws_scalar)(ms.rotation[0] * lx + ms.rotation[1] * ly + ms.rotation[2] * lz + ms.position.x);
+						pts[3 * pi2 + 1] = (qaws_scalar)(ms.rotation[3] * lx + ms.rotation[4] * ly + ms.rotation[5] * lz + ms.position.y);
+						pts[3 * pi2 + 2] = (qaws_scalar)(ms.rotation[6] * lx + ms.rotation[7] * ly + ms.rotation[8] * lz + ms.position.z);
+					}
+					qaws_mesh_bvh_winding_number(wn, bv, pts, 160, NULL);
+					for (pi2 = 0; pi2 < 160; pi2++)
+						uncovered += wn[pi2] < 0.5;
+				}
+			}
+			qaws_mesh_bvh_destroy(bv);
+		}
+		sprintf(msg, "a featured cube along a curve, turning a quarter (%u slabs): closed %d, %u piece(s); features along %.6f, edges turning past 25 degrees along %.6f, %u edges off; %u of the cube's points at 101 times outside",
+			r.slabs, tp.closed, tp.components, feat, crease, mism, uncovered);
 		printf("  %s\n", msg);
-		TEST_ASSERT(st == QAWS_STATUS_OK && o && tp.closed && tp.components == 1 && mism == 0, msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && o && tp.closed && tp.components == 1 && mism == 0 && uncovered == 0, msg);
 		qaws_mesh_3d_destroy(cube); qaws_mesh_3d_destroy(o);
 		qaws_motion_destroy(mt);
 	}
