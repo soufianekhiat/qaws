@@ -1692,7 +1692,9 @@ qaws_mesh_3d_sweep(&out, &r, mesh, m, &d);        /* the region the closed mesh 
 | A ball (80 faces, radius 0.2) along a Hermite curve of length 2.35: the tube (the polyhedral ball's cross-section along the length, plus the ball) | 0.3041 against 0.2991, 16 slabs, closed |
 | A vertex motion of another vertex count | INVALID_ARGUMENT |
 
-Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along a Hermite curve, and a box turned a quarter.
+**Continuous Booleans.** `qaws_mesh_sweep_boolean(&out, &report, tool, moves, move_count, stock, op, &desc)`: the tool swept by each move (a tool path), all the sweeps one operand (overlapping closed parts, their winding numbers add: a union) against the stock in one Boolean. DIFFERENCE carves (CNC simulation; the report's `changed_volume` is the removed volume), UNION sculpts (the stroke added), INTERSECTION gives the contact (the part of the stock the tool passes through). In test 180 a 0.5 cube carving a 4 × 2 × 1 block removes a slot of 0.5 and an L of two moves 0.375 (to 1e-15); the intersection, a separate Boolean, has the same volume, and the stock's equals the result's plus the removed.
+
+Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along a Hermite curve, a box turned a quarter, and a block carved by a ball tool along a curve and a straight slot (two moves).
 
 ## Example: a NURBS torus, its surface, tetrahedra and hexahedra
 

@@ -9,6 +9,10 @@
  *   - a small ball along a Hermite curve: a tube, its volume the ball's
  *     cross-section along the length plus the ball (within the polyhedra's
  *     own error);
+ *   - carving (qaws_mesh_sweep_boolean): a cube tool through a block's top
+ *     along x, the slot removed exactly (0.5); along an L of two moves, the
+ *     removed volume by inclusion and exclusion (0.375), and the intersection
+ *     (a separate Boolean) the same volume; stock = result + removed;
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -204,6 +208,48 @@ static void test_tube(void)
 	qaws_motion_destroy(m);
 }
 
+static qaws_motion* sw_move(double x0, double y0, double z0, double x1, double y1, double z1)
+{
+	qaws_motion_pose s, e;
+	qaws_motion* m = NULL;
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	s.position.x = (qaws_scalar)x0; s.position.y = (qaws_scalar)y0; s.position.z = (qaws_scalar)z0;
+	e.position.x = (qaws_scalar)x1; e.position.y = (qaws_scalar)y1; e.position.z = (qaws_scalar)z1;
+	s.velocity.x = e.velocity.x = (qaws_scalar)(x1 - x0);
+	s.velocity.y = e.velocity.y = (qaws_scalar)(y1 - y0);
+	s.velocity.z = e.velocity.z = (qaws_scalar)(z1 - z0);
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	return m;
+}
+
+static void test_carving(void)
+{
+	qaws_mesh_3d *block = sw_box(0, 4, 0, 2, 0, 1), *tool = sw_box(-0.25, 0.25, -0.25, 0.25, -0.25, 0.25), *o1 = NULL, *o2 = NULL, *o3 = NULL;
+	qaws_motion *slot = sw_move(-1, 1, 1, 5, 1, 1), *la = sw_move(-1, 1, 1, 2, 1, 1), *lb = sw_move(2, 1, 1, 2, 3, 1);
+	qaws_motion const* one[1];
+	qaws_motion const* two[2];
+	qaws_sweep_boolean_report r1, r2, r3;
+	qaws_status s1, s2, s3;
+	char msg[400];
+	one[0] = slot;
+	two[0] = la;
+	two[1] = lb;
+	s1 = qaws_mesh_sweep_boolean(&o1, &r1, tool, one, 1, block, QAWS_BOOLEAN_DIFFERENCE, NULL);
+	s2 = qaws_mesh_sweep_boolean(&o2, &r2, tool, two, 2, block, QAWS_BOOLEAN_DIFFERENCE, NULL);
+	s3 = qaws_mesh_sweep_boolean(&o3, &r3, tool, two, 2, block, QAWS_BOOLEAN_INTERSECTION, NULL);
+	sprintf(msg, "carving a 4 x 2 x 1 block with a 0.5 cube: a slot along its top removing %.15f (0.5); an L of two moves removing %.15f (0.375), its intersection %.15f; stock %.6f = result %.6f + removed; closed %d %d %d",
+		(double)r1.changed_volume, (double)r2.changed_volume, (double)r3.changed_volume, (double)r2.stock_volume, (double)r2.result_volume, r1.closed, r2.closed, r3.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_OK && fabs((double)r1.changed_volume - 0.5) < 1e-12 &&
+		fabs((double)r2.changed_volume - 0.375) < 1e-12 && fabs((double)r3.changed_volume - 0.375) < 1e-12 && r2.moves == 2 &&
+		fabs((double)r2.stock_volume - (double)r2.result_volume - (double)r2.changed_volume) < 1e-12 && r1.closed && r2.closed && r3.closed, msg);
+	qaws_mesh_3d_destroy(block); qaws_mesh_3d_destroy(tool);
+	qaws_mesh_3d_destroy(o1); qaws_mesh_3d_destroy(o2); qaws_mesh_3d_destroy(o3);
+	qaws_motion_destroy(slot); qaws_motion_destroy(la); qaws_motion_destroy(lb);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *c = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -228,6 +274,7 @@ int test_180_mesh_sweep_main(void)
 	test_translation();
 	test_turn();
 	test_tube();
+	test_carving();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

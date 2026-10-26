@@ -6,7 +6,9 @@
  *     its vertical axis (the rotation the Cayley map of a Hermite Gibbs
  *     vector);
  *   - a ball along a Hermite curve: a tube;
- *   - a thin box turned a quarter about an axis beside it: an annular sector.
+ *   - a thin box turned a quarter about an axis beside it: an annular sector;
+ *   - carving (qaws_mesh_sweep_boolean): a block less a ball tool's sweep along
+ *     a curved path dipping into it, then a straight slot (two moves).
  * Printed: slabs, faces, closed, the chords' deviation.
  */
 
@@ -46,7 +48,7 @@ static void ms_sw_panel(er_canvas* c, int px, qaws_mesh_3d const* body, qaws_mot
 static void demo_sweep(void)
 {
 	static double const tan[3] = { 232, 196, 120 }, blue[3] = { 140, 170, 220 }, green[3] = { 150, 200, 150 };
-	er_canvas* c = er_create(1800, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(2400, 640, 3, 252, 252, 250);
 	qaws_motion_pose s, e;
 	qaws_motion* m = NULL;
 	if (!c)
@@ -109,6 +111,56 @@ static void demo_sweep(void)
 			ms_sw_panel(c, 1200, box, m, 0.002, -0.5, 0.9, "a thin box turned a quarter", green);
 		qaws_motion_destroy(m);
 		qaws_mesh_3d_destroy(box);
+	}
+	{
+		/* carving: a block less a ball tool along a curve dipping into it, then a straight slot */
+		static double const wood[3] = { 214, 178, 130 }, wire[3] = { 60, 66, 80 };
+		qaws_mesh_3d *block = ms_sw_box(0, 4, 0, 2, 0, 1), *ball = ms_rm_sphere(24, 12), *o = NULL;
+		qaws_motion* mv[2] = { NULL, NULL };
+		qaws_motion const* cm[2];
+		qaws_sweep_desc d;
+		qaws_sweep_boolean_report br;
+		unsigned int nv = ball ? qaws_mesh_3d_get_vertex_count(ball) : 0, i;
+		char sub[200];
+		if (ball)
+		{
+			qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+			qaws_mesh_3d_get_positions(x, ball);
+			for (i = 0; i < 3 * nv; i++) x[i] = (qaws_scalar)(0.3 * (double)x[i]);
+			qaws_mesh_3d_set_positions(ball, x);
+			free(x);
+		}
+		memset(&s, 0, sizeof s);
+		memset(&e, 0, sizeof e);
+		s.rotation[0] = e.rotation[0] = 1;
+		s.position.x = -0.5; s.position.y = 0.6; s.position.z = 1.2;
+		e.position.x = 4.5; e.position.y = 0.6; e.position.z = 1.2;
+		s.velocity.x = 5; s.velocity.y = 3; s.velocity.z = -2;
+		e.velocity.x = 5; e.velocity.y = -3; e.velocity.z = 2;
+		qaws_motion_create_poses(&mv[0], &s, &e, 0);
+		memset(&s, 0, sizeof s);
+		memset(&e, 0, sizeof e);
+		s.rotation[0] = e.rotation[0] = 1;
+		s.position.x = 3; s.position.y = -0.5; s.position.z = 1;
+		e.position.x = 3; e.position.y = 2.5; e.position.z = 1;
+		s.velocity.y = e.velocity.y = 3;
+		qaws_motion_create_poses(&mv[1], &s, &e, 0);
+		cm[0] = mv[0];
+		cm[1] = mv[1];
+		memset(&d, 0, sizeof d);
+		d.tolerance = (qaws_scalar)0.005;
+		if (block && ball && mv[0] && mv[1] && qaws_mesh_sweep_boolean(&o, &br, ball, cm, 2, block, QAWS_BOOLEAN_DIFFERENCE, &d) == QAWS_STATUS_OK && o)
+		{
+			sprintf(sub, "%u moves, %u slabs, removed %.4f of %.1f, closed %d", br.moves, br.slabs, (double)br.changed_volume, (double)br.stock_volume, br.closed);
+			ms_panel(c, 1800, 0, 600, 640, o, -0.4, 0.8, "carving: two moves", sub);
+			ms_draw(c, o, wood, NULL, 0, wire, 0.3);
+			printf("  carving: %s\n", sub);
+		}
+		qaws_mesh_3d_destroy(o);
+		qaws_mesh_3d_destroy(block);
+		qaws_mesh_3d_destroy(ball);
+		qaws_motion_destroy(mv[0]);
+		qaws_motion_destroy(mv[1]);
 	}
 	er_save(c, "showcase/mesh60_sweep.png");
 	printf("mesh60_sweep.png\n");

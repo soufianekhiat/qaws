@@ -284,10 +284,17 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    exact carving; polynomial and rational motions exact up to the slabs' certified bound, the Booleans exact on them.
    Check: a ball-end or flat-end tool along G-code lines in a block: the slots' volume exact (flat end) or within the
    bound (ball end).
+   Not taken here (2026-10-26): exact Booleans are farq's (decision 9). The numerical sweep is already exact in
+   geometry for translations (a cube along a segment is its Minkowski sum, volume to 1e-15; a flat-end tool's slots to
+   1e-15 in test 180); exact arithmetic on them belongs with farq.
 4. **Continuous Booleans.** `qaws_mesh_sweep_boolean`: difference (carving: the stock less the tool's sweep, the
    removed volume reported), union (sculpting: the stroke added), intersection (contact: the overlap's volume). Several
    motions in sequence (a tool path) carved in one pass, the stock's mesh updated incrementally. Check: carving a block
    by a sequence equals carving by the union of the sweeps; volumes conserved (stock = result + removed).
+   Done (2026-10-26): `qaws_mesh_sweep_boolean` (test 180, figure 60): each move swept, all the sweeps one operand
+   (their winding numbers add) against the stock in one Boolean; a cube tool's slot removing 0.5 and an L of two moves
+   0.375 to 1e-15, the intersection (a separate Boolean) the same 0.375, stock = result + removed. Not done: the stock
+   updated incrementally (each call carves all its moves at once).
 5. **Continuous collision detection.** The first time of contact between a moving mesh and an obstacle: the slabs
    tested by the BVH (item 1), the first slab that touches bisected in time to the tolerance (exactly for translations by
    the exact kernel); the overlap's volume over the whole motion. Check: a ball falling on a plane touches at the

@@ -63,4 +63,31 @@ typedef struct qaws_sweep_report
 qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out_mesh, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion,
 	qaws_sweep_desc const* desc);
 
+/*
+ * Continuous Booleans: a tool swept by a sequence of motions (a tool path,
+ * each motion one move) against a stock: out = sweep op stock, op one of
+ *   DIFFERENCE    carving: the stock less every point the tool covers
+ *                 (CNC simulation; the report's removed volume);
+ *   UNION         sculpting: the stroke added;
+ *   INTERSECTION  contact: the part of the stock the tool passes through.
+ * Each move's sweep (qaws_mesh_3d_sweep), then all of them as one operand
+ * (overlapping closed parts: their winding numbers add, a union) against the
+ * stock by qaws_mesh_boolean. The volumes are the meshes' signed volumes.
+ */
+typedef struct qaws_sweep_boolean_report
+{
+	unsigned int moves;
+	unsigned int slabs;                  /* over all the moves */
+	qaws_scalar stock_volume;
+	qaws_scalar result_volume;
+	qaws_scalar changed_volume;          /* DIFFERENCE: removed (stock - result); UNION: added (result - stock); INTERSECTION: the result */
+	qaws_boolean_report boolean;
+	int closed;
+} qaws_sweep_boolean_report;
+
+/* op: QAWS_BOOLEAN_DIFFERENCE, _UNION or _INTERSECTION (sweep op stock, the stock taken from for DIFFERENCE); report and desc
+   may be NULL. INVALID_ARGUMENT for no move, a NULL move, an unknown op. An empty result: OK and NULL. */
+qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out_mesh, qaws_sweep_boolean_report* report, qaws_mesh_3d const* tool,
+	qaws_motion const* const* moves, unsigned int move_count, qaws_mesh_3d const* stock, qaws_boolean_op op, qaws_sweep_desc const* desc);
+
 #endif /* QAWS_MESH_SWEEP_H */

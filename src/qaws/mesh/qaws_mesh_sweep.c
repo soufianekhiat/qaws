@@ -279,3 +279,126 @@ done:
 	qaws_internal_free(sx); qaws_internal_free(sf); qaws_internal_free(fr);
 	return st;
 }
+
+/* a closed mesh's signed volume (its triangles fanned from the origin) */
+static double swp_volume(qaws_mesh_3d const* m)
+{
+	unsigned int nt = m ? qaws_mesh_3d_get_triangle_count(m) : 0, i;
+	double v = 0;
+	for (i = 0; i < nt; i++)
+	{
+		unsigned int c[3];
+		qaws_vec3 a, b, e;
+		qaws_mesh_3d_get_triangle(c, m, i);
+		a = qaws_mesh_3d_get_vertex(m, c[0]);
+		b = qaws_mesh_3d_get_vertex(m, c[1]);
+		e = qaws_mesh_3d_get_vertex(m, c[2]);
+		v += ((double)a.x * ((double)b.y * e.z - (double)b.z * e.y) + (double)a.y * ((double)b.z * e.x - (double)b.x * e.z) +
+			(double)a.z * ((double)b.x * e.y - (double)b.y * e.x)) / 6;
+	}
+	return v;
+}
+
+qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out, qaws_sweep_boolean_report* report, qaws_mesh_3d const* tool, qaws_motion const* const* moves,
+	unsigned int move_count, qaws_mesh_3d const* stock, qaws_boolean_op op, qaws_sweep_desc const* desc)
+{
+	qaws_sweep_boolean_report local;
+	qaws_scalar *bx = NULL, *ax = NULL;
+	unsigned int *bt = NULL, *at = NULL, nbv = 0, nbt = 0, i, k;
+	qaws_mesh_3d_desc a, b;
+	qaws_intersect_desc id;
+	qaws_status st = QAWS_STATUS_OK;
+	if (!report)
+		report = &local;
+	memset(report, 0, sizeof *report);
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if (!tool || !moves || !move_count || !stock ||
+		(op != QAWS_BOOLEAN_DIFFERENCE && op != QAWS_BOOLEAN_UNION && op != QAWS_BOOLEAN_INTERSECTION))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < move_count; i++)
+		if (!moves[i])
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	/* each move's sweep, into one operand */
+	for (i = 0; i < move_count && st == QAWS_STATUS_OK; i++)
+	{
+		qaws_mesh_3d* s = NULL;
+		qaws_sweep_report r;
+		unsigned int nv, nt;
+		st = qaws_mesh_3d_sweep(&s, &r, tool, moves[i], desc);
+		report->slabs += r.slabs;
+		if (st != QAWS_STATUS_OK || !s)
+		{
+			qaws_mesh_3d_destroy(s);
+			continue;
+		}
+		nv = qaws_mesh_3d_get_vertex_count(s);
+		nt = qaws_mesh_3d_get_triangle_count(s);
+		{
+			qaws_scalar* g = (qaws_scalar*)qaws_internal_realloc(bx, qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nbv + nv + 1));
+			unsigned int* h = g ? (unsigned int*)qaws_internal_realloc(bt, qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nbt + nt + 1)) : NULL;
+			if (g) bx = g;
+			if (!g || !h)
+			{
+				qaws_mesh_3d_destroy(s);
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				break;
+			}
+			bt = h;
+		}
+		qaws_mesh_3d_get_positions(bx + 3 * (size_t)nbv, s);
+		qaws_mesh_3d_get_triangles(bt + 3 * (size_t)nbt, s);
+		for (k = 0; k < 3 * nt; k++) bt[3 * (size_t)nbt + k] += nbv;
+		nbv += nv;
+		nbt += nt;
+		report->moves++;
+		qaws_mesh_3d_destroy(s);
+	}
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	report->stock_volume = (qaws_scalar)swp_volume(stock);
+	{
+		unsigned int nv = qaws_mesh_3d_get_vertex_count(stock), nt = qaws_mesh_3d_get_triangle_count(stock);
+		ax = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)nv + 1));
+		at = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));
+		if (!ax || !at)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		qaws_mesh_3d_get_positions(ax, stock);
+		qaws_mesh_3d_get_triangles(at, stock);
+		memset(&a, 0, sizeof a);
+		a.positions = ax;
+		a.vertex_count = nv;
+		a.face_vertices = at;
+		a.face_count = nt;
+	}
+	memset(&id, 0, sizeof id);
+	id.executor = desc ? desc->executor : NULL;
+	if (!nbt)
+	{
+		/* (the tool swept nothing: the stock, or nothing, as the op says) */
+		if (op == QAWS_BOOLEAN_INTERSECTION)
+			goto done;
+		st = qaws_mesh_boolean(out, &report->boolean, &a, NULL, QAWS_BOOLEAN_UNION, &id);
+	}
+	else
+	{
+		memset(&b, 0, sizeof b);
+		b.positions = bx;
+		b.vertex_count = nbv;
+		b.face_vertices = bt;
+		b.face_count = nbt;
+		/* (sweep op stock: the stock first, taken from for the difference) */
+		st = qaws_mesh_boolean(out, &report->boolean, &a, &b, op, &id);
+	}
+	report->closed = report->boolean.closed;
+	report->result_volume = (qaws_scalar)swp_volume(*out);
+	report->changed_volume = (qaws_scalar)(op == QAWS_BOOLEAN_DIFFERENCE ? (double)report->stock_volume - (double)report->result_volume :
+		op == QAWS_BOOLEAN_UNION ? (double)report->result_volume - (double)report->stock_volume : (double)report->result_volume);
+done:
+	qaws_internal_free(bx); qaws_internal_free(bt); qaws_internal_free(ax); qaws_internal_free(at);
+	return st;
+}
