@@ -1571,7 +1571,84 @@ typedef struct sx_chk
 	unsigned int const *t, *cut;
 	qaws_scalar const* src;
 	unsigned int* found;               /* per chunk */
+	double m;                          /* the margin a floating point separation must pass */
 } sx_chk;
+
+/* certainly apart (floating point, by more than m): a plane of one triangle with the other's vertices it does not share
+   strictly on one side, or a plane through an edge of one, square to it, with the other's unshared vertices strictly
+   beyond (its shared ones on that edge); 0 leaves the pair to the exact test. Coplanar stacks of pieces (overlapping
+   sweeps) pair millions of neighbours that only touch */
+static int sx_chk_apart(double const (*P)[3], unsigned int const* ip, double const (*Q)[3], unsigned int const* iq, double m)
+{
+	unsigned int r, k, e;
+	for (r = 0; r < 2; r++)
+	{
+		double const (*A)[3] = r ? Q : P, (*B)[3] = r ? P : Q;
+		unsigned int const *ia = r ? iq : ip, *ib = r ? ip : iq;
+		double u[3], v[3], n[3], l;
+		int side = 0, ok = 1, any = 0;
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = A[1][k] - A[0][k];
+			v[k] = A[2][k] - A[0][k];
+		}
+		sx_cross(u, v, n);
+		l = sqrt(sx_dot(n, n));
+		if (!(l > 0))
+			continue;
+		for (k = 0; k < 3 && ok; k++)
+		{
+			double w[3], d;
+			unsigned int z;
+			if (ib[k] == ia[0] || ib[k] == ia[1] || ib[k] == ia[2])
+				continue;
+			for (z = 0; z < 3; z++)
+				w[z] = B[k][z] - A[0][z];
+			d = sx_dot(n, w) / l;
+			if (fabs(d) <= m || (side && (d > 0 ? 1 : -1) != side))
+				ok = 0;
+			side = d > 0 ? 1 : -1;
+			any = 1;
+		}
+		if (ok && any)
+			return 1;
+		for (e = 0; e < 3; e++)
+		{
+			unsigned int a0 = ia[e], a1 = ia[(e + 1) % 3], a2 = ia[(e + 2) % 3], cnt = 0, z;
+			double w[3], c[3], s0, lw, q[3];
+			int good = 1;
+			for (z = 0; z < 3; z++)
+			{
+				w[z] = A[(e + 1) % 3][z] - A[e][z];
+				q[z] = A[(e + 2) % 3][z] - A[e][z];
+			}
+			sx_cross(n, w, c);
+			lw = sqrt(sx_dot(c, c));
+			if (!(lw > 0))
+				continue;
+			s0 = sx_dot(c, q) / lw;
+			for (k = 0; k < 3 && good; k++)
+			{
+				double d;
+				if (ib[k] == a0 || ib[k] == a1)
+					continue;
+				if (ib[k] == a2)
+				{
+					good = 0;
+					break;
+				}
+				for (z = 0; z < 3; z++)
+					q[z] = B[k][z] - A[e][z];
+				d = sx_dot(c, q) / lw;
+				good = fabs(d) > m && d * s0 < 0;
+				cnt++;
+			}
+			if (good && cnt)
+				return 1;
+		}
+	}
+	return 0;
+}
 
 static qaws_status sx_chk_visit(void* user, unsigned int chunk, unsigned int i, unsigned int j)
 {
@@ -1587,6 +1664,8 @@ static qaws_status sx_chk_visit(void* user, unsigned int chunk, unsigned int i, 
 			P[k][l] = (double)C->x[3 * (size_t)ip[k] + l];
 			Q[k][l] = (double)C->x[3 * (size_t)iq[k] + l];
 		}
+	if (sx_chk_apart((double const(*)[3])P, ip, (double const(*)[3])Q, iq, C->m))
+		return QAWS_STATUS_OK;
 	C->found[chunk] += (unsigned int)rp_tri_tri_at((double const(*)[3])P, (double const(*)[3])Q, ip, iq);
 	return QAWS_STATUS_OK;
 }
@@ -1619,6 +1698,7 @@ static qaws_status sx_check(unsigned int* out, qaws_scalar const* x, unsigned in
 		C.t = t;
 		C.cut = cut;
 		C.src = src;
+		C.m = 1e-3 * eps;
 		C.found = (unsigned int*)qaws_internal_zalloc((size_t)nch + 1, sizeof(unsigned int));
 		if (!C.found)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;

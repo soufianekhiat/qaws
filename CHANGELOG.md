@@ -34,6 +34,9 @@ All notable changes to Qaws are documented here.
   its cuts are recovered by a Sloan walk (the crossed edges found by walking the cut, each point's triangle kept) instead
   of rescanning the face per flip. A 5,408-triangle soup: settling 15 s to 3 s, the cuts' recovery from minutes to
   seconds.
+- The resolution's final check of crossing pieces passes over pairs a floating point plane separates by more than a
+  thousandth of the tolerance before any exact test (coplanar stacks of pieces paired millions of neighbours that only
+  touch): a spinning wheel's quarter-turn sweep 31.5 s to 8.6 s, test 181 12 s to 2 s.
 
 - Sweeps: `qaws_sweep_desc.simplify` removes the vertices the overlapping slabs leave in flat regions and on straight
   creases (each collapse within a thousandth of the tolerance) and turns the flat regions toward Delaunay: a turning
