@@ -180,6 +180,7 @@ add_executable(
 176_hexahedra_polycube.c
 177_quads_pairing.c
 178_quad_layout.c
+179_motion.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

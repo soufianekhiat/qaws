@@ -101,6 +101,7 @@ src/qaws/qaws_repulsive_sens.c
 src/qaws/qaws_surface_query.c
 src/qaws/qaws_shell_region.c
 src/qaws/qaws_skeleton.c
+src/qaws/qaws_motion.c
 src/qaws/mesh/qaws_mesh_core.c
 src/qaws/mesh/qaws_mesh_3d.c
 src/qaws/mesh/qaws_mesh_interpolant.c

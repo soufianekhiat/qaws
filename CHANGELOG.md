@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `qaws_motion.h`: motions for sweeps. Rigid from two poses (Hermite translations, cubic or quintic; rotations by the
+  Cayley map of a Hermite Gibbs vector, rational in t), along a 3D curve, or per vertex. Test 179, docs/api/motion.md.
 - Point clouds without normals with cavities: a part inside an odd number of others is turned inward (a hollow
   sphere's volume as with its true normals). Test 161.
 - Curved tetrahedra's Jacobian bound tightened by simplex subdivision where loose (bisection of the longest edge): the

@@ -262,6 +262,10 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    derivatives, evaluated with its derivatives at t), `qaws_mesh_3d_sweep` (the swept solid), `qaws_mesh_sweep_boolean`
    (out = sweep(A, motion) op B). Check: a pose evaluated at 0 and 1 exactly the given ones, derivatives matched, a
    Hermite path reproducing a cubic exactly.
+   Done (2026-10-26): `qaws_motion.h` (docs/api/motion.md, test 179): two poses (Hermite translations, cubic or
+   quintic; R0 Cay(c(t)) with c a Hermite polynomial in the Gibbs vector, rational and orthonormal), a 3D curve with a
+   constant rotation, or per vertex; ends to 3e-16, cubics exact, the angular velocity against R's differences 5e-10.
+   Not done: affine motions; a curve motion with a rotation along it (frames).
 2. **The swept solid, conservative and certified.** Time cut adaptively until each slab's motion is within the
    tolerance of a straight one (bounded by the trajectory's derivatives); each triangle's slab sweep enclosed (its start,
    its end, its edges' ruled surfaces, the bulge bound); the union of the slabs' sweeps by the Booleans. The envelope's
