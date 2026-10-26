@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Curved elements' untangling: border nodes slide on the reference when the free nodes alone do not suffice, and a move
+  may not fail another element round the node (the spheres: 6 relaxed cells to 5, the cubic one's Jacobian 0.167 to 0.178).
+  Test 174.
 - `executor` in `qaws_mesh_offset_desc` (the distance queries and the Booleans on the caller's threads); mesh Booleans
   sample their patches through a BVH past 2e6 solid angles (a rounded cube's offset 25% faster on one thread).
 - Contoured offsets and watertight surfaces in less memory: dual contouring stores the crossed cells only, the grid

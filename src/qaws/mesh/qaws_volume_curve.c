@@ -824,6 +824,26 @@ static unsigned int vcu_local_face(int tet, unsigned char const* loc, unsigned i
 	return HM_NONE;
 }
 
+/* node g (straight at X, displaced by D) put on the reference: its displacement to its projection, the normal there into
+   nrm (may be NULL); 0 when the projection fails */
+static int vcu_onto(qaws_mesh_reference const* reference, double const* X, double* D, unsigned int g, double* nrm)
+{
+	qaws_scalar pt[3], nr[3];
+	qaws_mesh_location loc;
+	unsigned int d;
+	for (d = 0; d < 3; d++) pt[d] = (qaws_scalar)(X[3 * (size_t)g + d] + D[3 * (size_t)g + d]);
+	if (qaws_mesh_reference_project(&loc, NULL, reference, pt, NULL, 1) != QAWS_STATUS_OK ||
+		qaws_mesh_reference_evaluate(pt, nr, NULL, reference, &loc, 1) != QAWS_STATUS_OK)
+		return 0;
+	for (d = 0; d < 3; d++)
+	{
+		D[3 * (size_t)g + d] = (double)pt[d] - X[3 * (size_t)g + d];
+		if (nrm)
+			nrm[d] = (double)nr[d];
+	}
+	return 1;
+}
+
 static qaws_status vcu_nodes(qaws_scalar* out_positions, unsigned int* out_element_nodes, qaws_volume_curve_report* report,
 	qaws_volume_mesh const* mesh, qaws_mesh_reference const* reference, qaws_volume_curve_desc const* desc, unsigned int p)
 {
@@ -1072,7 +1092,10 @@ static qaws_status vcu_nodes(qaws_scalar* out_positions, unsigned int* out_eleme
 
 		/* untangling: an element under min_jacobian has its free nodes (not on the border, not vertices) moved by pattern
 		   search, each step along an axis kept when it raises the least sampled Jacobian of the elements sharing the node,
-		   the step halved when none does, until its bound passes; the border stays where it was put */
+		   the step halved when none does, until its bound passes; one still failing then (with a reference) has its border
+		   nodes slide too: steps along two directions of the reference's tangent plane at each, the node put back on the
+		   reference (the bound's gradient instead of the steps was tried: the least sampled Jacobian is a min over samples
+		   and elements, and steps up its one-sided gradient lowered another sample, untangling none of the O-grid ball's) */
 		{
 			unsigned int *nc0 = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nn + 2, sizeof(unsigned int)), *ncl = NULL, *fill2 = NULL;
 			if (!nc0)
@@ -1099,7 +1122,8 @@ static qaws_status vcu_nodes(qaws_scalar* out_positions, unsigned int* out_eleme
 			{
 				vcu_el const* e = mesh->type[c] == QAWS_CELL_TETRAHEDRON ? &lt : &lh;
 				double step = 0, step0, cur;
-				unsigned int a, round;
+				unsigned int a, round, ph;
+				int ok = 0;
 				if (vcu_ratio(&B, e, en + eo[c], X, D, work, minj) >= minj)
 					continue;
 				/* (the first step: a tenth of the element's mean edge to its nodes' spacing) */
@@ -1110,41 +1134,91 @@ static qaws_status vcu_nodes(qaws_scalar* out_positions, unsigned int* out_eleme
 				}
 				step *= 0.1 / (3.0 * p);
 				step0 = step;
+				for (ph = 0; ph < (reference ? 2u : 1u) && !ok; ph++)
+				{
+				step = step0;
 				/* (until the step is a 32nd of its first: an element held by its border gains nothing) */
 				for (round = 0; round < 16 && step > step0 / 32; round++)
 				{
 					int moved = 0;
 					for (a = e->hex ? 8u : 4u; a < e->nn; a++)
 					{
-						unsigned int g = en[eo[c] + a], q, dir;
-						if (isb[g])
+						unsigned int g = en[eo[c] + a], q, dir, dd;
+						double tg[2][3];
+						int slide = isb[g] != 0;
+						if (slide && !ph)
 							continue;
-						/* the least sampled Jacobian round g now */
+						if (slide)
+						{
+							/* (two directions across its normal on the reference) */
+							double nrm[3], keep0[3], l;
+							unsigned int im;
+							for (dd = 0; dd < 3; dd++) keep0[dd] = D[3 * (size_t)g + dd];
+							if (!vcu_onto(reference, X, D, g, nrm))
+								continue;
+							for (dd = 0; dd < 3; dd++) D[3 * (size_t)g + dd] = keep0[dd];
+							im = fabs(nrm[0]) <= fabs(nrm[1]) && fabs(nrm[0]) <= fabs(nrm[2]) ? 0 : (fabs(nrm[1]) <= fabs(nrm[2]) ? 1 : 2);
+							tg[0][0] = im == 0 ? 0 : (im == 1 ? -nrm[2] : nrm[1]);
+							tg[0][1] = im == 0 ? nrm[2] : (im == 1 ? 0 : -nrm[0]);
+							tg[0][2] = im == 0 ? -nrm[1] : (im == 1 ? nrm[0] : 0);
+							l = sqrt(tg[0][0] * tg[0][0] + tg[0][1] * tg[0][1] + tg[0][2] * tg[0][2]);
+							if (!(l > 0))
+								continue;
+							for (dd = 0; dd < 3; dd++) tg[0][dd] /= l;
+							tg[1][0] = nrm[1] * tg[0][2] - nrm[2] * tg[0][1];
+							tg[1][1] = nrm[2] * tg[0][0] - nrm[0] * tg[0][2];
+							tg[1][2] = nrm[0] * tg[0][1] - nrm[1] * tg[0][0];
+						}
+						/* the least sampled Jacobian round g now, and how many there fail (a move may not add one) */
+						unsigned int bad0 = 0;
 						cur = HUGE_VAL;
 						for (q = nc0[g]; q < nc0[g + 1]; q++)
-							cur = fmin(cur, vcu_sampled(&B, mesh->type[ncl[q]] == QAWS_CELL_TETRAHEDRON ? &lt : &lh, en + eo[ncl[q]], X, D));
-						for (dir = 0; dir < 6; dir++)
 						{
-							double keep = D[3 * (size_t)g + dir / 2], now = HUGE_VAL;
-							D[3 * (size_t)g + dir / 2] += dir % 2 ? -step : step;
+							double jq = vcu_sampled(&B, mesh->type[ncl[q]] == QAWS_CELL_TETRAHEDRON ? &lt : &lh, en + eo[ncl[q]], X, D);
+							cur = fmin(cur, jq);
+							bad0 += jq < minj;
+						}
+						for (dir = 0; dir < (slide ? 4u : 6u); dir++)
+						{
+							double keep[3], now = HUGE_VAL;
+							unsigned int bad1 = 0;
+							for (dd = 0; dd < 3; dd++) keep[dd] = D[3 * (size_t)g + dd];
+							if (slide)
+							{
+								for (dd = 0; dd < 3; dd++) D[3 * (size_t)g + dd] += (dir % 2 ? -step : step) * tg[dir / 2][dd];
+								if (!vcu_onto(reference, X, D, g, NULL))
+								{
+									for (dd = 0; dd < 3; dd++) D[3 * (size_t)g + dd] = keep[dd];
+									continue;
+								}
+							}
+							else
+								D[3 * (size_t)g + dir / 2] += dir % 2 ? -step : step;
 							for (q = nc0[g]; q < nc0[g + 1]; q++)
-								now = fmin(now, vcu_sampled(&B, mesh->type[ncl[q]] == QAWS_CELL_TETRAHEDRON ? &lt : &lh, en + eo[ncl[q]], X, D));
-							if (now > cur)
+							{
+								double jq = vcu_sampled(&B, mesh->type[ncl[q]] == QAWS_CELL_TETRAHEDRON ? &lt : &lh, en + eo[ncl[q]], X, D);
+								now = fmin(now, jq);
+								bad1 += jq < minj;
+							}
+							if (now > cur && bad1 <= bad0)
 							{
 								cur = now;
+								bad0 = bad1;
 								moved = 1;
 							}
 							else
-								D[3 * (size_t)g + dir / 2] = keep;
+								for (dd = 0; dd < 3; dd++) D[3 * (size_t)g + dd] = keep[dd];
 						}
 					}
 					if (vcu_sampled(&B, e, en + eo[c], X, D) >= minj && vcu_ratio(&B, e, en + eo[c], X, D, work, minj) >= minj)
 					{
 						rep.untangled++;
+						ok = 1;
 						break;
 					}
 					if (!moved)
 						step *= 0.5;
+				}
 				}
 			}
 			qaws_internal_free(nc0);
