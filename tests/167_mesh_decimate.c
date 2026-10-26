@@ -563,10 +563,12 @@ static void test_options(void)
 	}
 }
 
-/* a UV seam: the grid's corners' UVs cut apart along x = 1/2 (the right half's moved by 10); decimated, no face crosses it */
+/* a UV seam: the grid's corners' UVs cut apart along x = 1/2 (the right half's moved by 10); decimated, no face crosses it,
+   and each corner's UV still its vertex's (x + 10 on the right, y): the wedges' values placed at the moved vertices */
 static void test_seams(void)
 {
 	unsigned int n = 16, nf, nc, f, i, cross = 0, ends = 0, id;
+	double uverr = 1;
 	qaws_mesh_3d* m = dm_grid(n);
 	unsigned int* fv;
 	qaws_scalar* uv;
@@ -619,10 +621,31 @@ static void test_seams(void)
 		qaws_vec3 q = qaws_mesh_3d_get_vertex(m, i);
 		ends += fabs((double)q.x - 0.5) < 1e-12 && (q.y == 0 || q.y == 1);
 	}
-	sprintf(msg, "a UV seam across a grid: %u seam edges made features, %u -> %u faces, faces across the seam %u, its two ends kept %u",
-		r.seams, r.faces_before, r.faces_after, cross, ends);
+	if (qaws_mesh_3d_find_attribute(&id, m, "uv") == QAWS_STATUS_OK)
+	{
+		unsigned int nc2 = qaws_mesh_3d_get_corner_count(m);
+		qaws_scalar* uv2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * nc2);
+		unsigned int* fv2 = (unsigned int*)malloc(sizeof(unsigned int) * nc2);
+		uverr = 0;
+		qaws_mesh_3d_get_attribute(uv2, m, id);
+		qaws_mesh_3d_get_faces(fv2, NULL, m);
+		for (f = 0; f < nf; f++)
+		{
+			double cx = 0;
+			for (i = 0; i < 3; i++) cx += (double)qaws_mesh_3d_get_vertex(m, fv2[3 * f + i]).x / 3;
+			for (i = 0; i < 3; i++)
+			{
+				qaws_vec3 q = qaws_mesh_3d_get_vertex(m, fv2[3 * f + i]);
+				uverr = fmax(uverr, fabs((double)uv2[2 * (3 * f + i)] - ((double)q.x + (cx > 0.5 ? 10 : 0))) + fabs((double)uv2[2 * (3 * f + i) + 1] - (double)q.y));
+			}
+		}
+		free(uv2);
+		free(fv2);
+	}
+	sprintf(msg, "a UV seam across a grid: %u seam edges made features, %u -> %u faces, faces across the seam %u, its two ends kept %u, UVs off their charts' linear map by %.1e",
+		r.seams, r.faces_before, r.faces_after, cross, ends, uverr);
 	printf("  %s\n", msg);
-	TEST_ASSERT(st == QAWS_STATUS_OK && r.seams == n && r.faces_after <= 40 && cross == 0 && ends == 2, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && r.seams == n && r.faces_after <= 40 && cross == 0 && ends == 2 && uverr < 1e-12, msg);
 	free(fv);
 	free(uv);
 	qaws_mesh_3d_destroy(m);

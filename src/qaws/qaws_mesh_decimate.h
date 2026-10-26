@@ -73,7 +73,11 @@
  *              a closed mesh keeps its volume to round-off. Views and
  *              attribute_weight are refused with it (they live in the
  *              stored quadrics); importance only locks.
- * Attributes follow the collapses by their rules (qaws_mesh.h). Their seams
+ * Attributes follow the collapses by their rules (qaws_mesh.h); LINEAR and
+ * NORMALIZED corner attributes by wedges (Hoppe): the corners round the edge
+ * grouped (equal values at a vertex, joined across the edge's faces), each
+ * group's value the one at the new position on the nearest of its corners'
+ * triangles before the collapse. Their seams
  * stay: an inside edge whose faces' corner attributes differ at either end
  * (UVs cut apart, split normals) or whose faces' attributes differ
  * (materials) is made a feature first, kept as the lines are.

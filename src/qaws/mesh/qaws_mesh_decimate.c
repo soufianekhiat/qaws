@@ -407,6 +407,144 @@ static int dc_candidate(dc_work const* w, unsigned int a, unsigned int b, double
 	return 1;
 }
 
+/* the point of triangle (p0, p1, p2) nearest x: its weights into w, the squared distance returned (Ericson's regions) */
+static double dc_closest(double const* x, double const* p0, double const* p1, double const* p2, double* w)
+{
+	double ab[3], ac[3], ap[3], bp[3], cp[3], d1 = 0, d2 = 0, d3 = 0, d4 = 0, d5 = 0, d6 = 0, va, vb, vc, q[3], r = 0;
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		ab[k] = p1[k] - p0[k]; ac[k] = p2[k] - p0[k]; ap[k] = x[k] - p0[k]; bp[k] = x[k] - p1[k]; cp[k] = x[k] - p2[k];
+		d1 += ab[k] * ap[k]; d2 += ac[k] * ap[k]; d3 += ab[k] * bp[k]; d4 += ac[k] * bp[k]; d5 += ab[k] * cp[k]; d6 += ac[k] * cp[k];
+	}
+	vc = d1 * d4 - d3 * d2;
+	vb = d5 * d2 - d1 * d6;
+	va = d3 * d6 - d5 * d4;
+	if (d1 <= 0 && d2 <= 0) { w[0] = 1; w[1] = w[2] = 0; }
+	else if (d3 >= 0 && d4 <= d3) { w[1] = 1; w[0] = w[2] = 0; }
+	else if (d6 >= 0 && d5 <= d6) { w[2] = 1; w[0] = w[1] = 0; }
+	else if (vc <= 0 && d1 >= 0 && d3 <= 0) { w[1] = d1 / (d1 - d3); w[0] = 1 - w[1]; w[2] = 0; }
+	else if (vb <= 0 && d2 >= 0 && d6 <= 0) { w[2] = d2 / (d2 - d6); w[0] = 1 - w[2]; w[1] = 0; }
+	else if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { w[2] = (d4 - d3) / ((d4 - d3) + (d5 - d6)); w[1] = 1 - w[2]; w[0] = 0; }
+	else
+	{
+		double den = 1 / (va + vb + vc);
+		w[1] = vb * den; w[2] = vc * den; w[0] = 1 - w[1] - w[2];
+	}
+	for (k = 0; k < 3; k++)
+	{
+		q[k] = w[0] * p0[k] + w[1] * p1[k] + w[2] * p2[k] - x[k];
+		r += q[k] * q[k];
+	}
+	return r;
+}
+
+/* Corner attributes through a collapse of a into b at x (Hoppe's wedges): per LINEAR or NORMALIZED corner attribute, the
+   corners at a and b grouped (equal values at one vertex; across the edge's faces, the corner at a with the one at b), each
+   group's value the one at x of its corners' triangles before the collapse, interpolated on the nearest. Into tab: per
+   attribute, pairs (the old value, the new one) for each corner, matched by value after the collapse; *nt their counts.
+   shortcut: 64 corners round the edge at most (more: the attribute left as the collapse copies it), upgrade by growing the
+   scratch */
+#define DC_WEDGE_MAX 64
+static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, double const* x, double* tab, unsigned int* nt, unsigned int stride)
+{
+	unsigned int ak, off = 0;
+	for (ak = 0; ak < m->na; ak++)
+	{
+		unsigned int n = m->attr[ak].n, cs[DC_WEDGE_MAX], grp[DC_WEDGE_MAX], nc = 0, i, j, v, c;
+		double best[DC_WEDGE_MAX], val[DC_WEDGE_MAX * 4];
+		nt[ak] = 0;
+		if (m->attr[ak].element != QAWS_MESH_CORNER || (m->attr[ak].rule != QAWS_ATTRIBUTE_LINEAR && m->attr[ak].rule != QAWS_ATTRIBUTE_NORMALIZED) || n > 4)
+			continue;
+		for (v = 0; v < 2; v++)
+			for (c = m->vc[v ? b : a]; c != HM_NONE && nc <= DC_WEDGE_MAX; c = hm_round(m, v ? b : a, c))
+				if (nc < DC_WEDGE_MAX)
+					cs[nc++] = c;
+				else
+					nc++;
+		if (nc > DC_WEDGE_MAX)
+			continue;
+		/* the groups: union by the least index */
+		for (i = 0; i < nc; i++) grp[i] = i;
+		for (i = 0; i < nc; i++)
+			for (j = i + 1; j < nc; j++)
+			{
+				int join = 0;
+				if (m->cv[cs[i]] == m->cv[cs[j]])
+					join = !memcmp(hm_attr_at(m, ak, cs[i]), hm_attr_at(m, ak, cs[j]), sizeof(double) * n);
+				else
+					join = m->cf[cs[i]] == m->cf[cs[j]];   /* (a face holding the edge: a and b on the same side of any seam) */
+				if (join)
+				{
+					unsigned int gi = grp[i], gj = grp[j], z;
+					while (grp[gi] != gi) gi = grp[gi];
+					while (grp[gj] != gj) gj = grp[gj];
+					if (gi != gj)
+						for (z = 0; z < nc; z++)
+							if (grp[z] == (gi > gj ? gi : gj)) grp[z] = gi < gj ? gi : gj;
+					grp[gi > gj ? gi : gj] = gi < gj ? gi : gj;
+				}
+			}
+		for (i = 0; i < nc; i++)
+		{
+			while (grp[grp[i]] != grp[i]) grp[i] = grp[grp[i]];
+			best[i] = HUGE_VAL;
+		}
+		/* each group's value at x: its corners' triangles (the corner and its face's neighbours), the nearest */
+		for (i = 0; i < nc; i++)
+		{
+			unsigned int g = grp[i], cn = hm_next(m, cs[i]), cp = hm_prev(m, cs[i]), k;
+			double wt[3], d2 = dc_closest(x, m->x + 3 * (size_t)m->cv[cs[i]], m->x + 3 * (size_t)m->cv[cn], m->x + 3 * (size_t)m->cv[cp], wt);
+			if (d2 < best[g])
+			{
+				best[g] = d2;
+				for (k = 0; k < n; k++)
+					val[4 * g + k] = wt[0] * hm_attr_at(m, ak, cs[i])[k] + wt[1] * hm_attr_at(m, ak, cn)[k] + wt[2] * hm_attr_at(m, ak, cp)[k];
+			}
+		}
+		if (m->attr[ak].rule == QAWS_ATTRIBUTE_NORMALIZED)
+			for (i = 0; i < nc; i++)
+				if (grp[i] == i)
+				{
+					double l = 0;
+					unsigned int k;
+					for (k = 0; k < n; k++) l += val[4 * i + k] * val[4 * i + k];
+					l = sqrt(l);
+					for (k = 0; l > 1e-300 && k < n; k++) val[4 * i + k] /= l;
+				}
+		for (i = 0; i < nc; i++)
+		{
+			memcpy(tab + off + 2 * (size_t)n * i, hm_attr_at(m, ak, cs[i]), sizeof(double) * n);
+			memcpy(tab + off + 2 * (size_t)n * i + n, val + 4 * grp[i], sizeof(double) * n);
+		}
+		nt[ak] = nc;
+		off += stride;
+	}
+}
+
+/* after the collapse: b's corners' values replaced by their groups' (matched by their old value) */
+static void dc_wedges_after(qaws_hm* m, unsigned int b, double const* tab, unsigned int const* nt, unsigned int stride)
+{
+	unsigned int ak, off = 0, c, i;
+	for (ak = 0; ak < m->na; ak++)
+	{
+		unsigned int n = m->attr[ak].n;
+		if (!nt[ak])
+			continue;
+		for (c = m->vc[b]; c != HM_NONE; c = hm_round(m, b, c))
+		{
+			double* y = hm_attr_at(m, ak, c);
+			for (i = 0; i < nt[ak]; i++)
+				if (!memcmp(y, tab + off + 2 * (size_t)n * i, sizeof(double) * n))
+				{
+					memcpy(y, tab + off + 2 * (size_t)n * i + n, sizeof(double) * n);
+					break;
+				}
+		}
+		off += stride;
+	}
+}
+
 /* no face round a or b (but the edge's) turned by more than the bound, or flattened, by a and b moving to x */
 static int dc_no_fold(qaws_hm const* m, unsigned int a, unsigned int b, double const* x, double cosmax)
 {
@@ -690,6 +828,8 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	dc_heap H;
 	unsigned int *ring = NULL, rcap = 64, f, v, k, c, live, target, na = 0, a0;
 	double* sopt = NULL;
+	double* wtab = NULL;   /* the corner attributes' wedges round a collapse (dc_wedges_before) */
+	unsigned int* wnt = NULL;
 	double bound2, *views = NULL, *share = NULL, *seen = NULL, sweight = desc && desc->silhouette_weight > 0 ? (double)desc->silhouette_weight : 100;
 	unsigned int nviews = 0;
 	int failed = 0;
@@ -744,7 +884,9 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	w.r = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)w.n1 + 1));
 	w.z = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)w.n1 + 1));
 	sopt = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)na + 1));
-	if (!w.ca || !w.ck || !w.q || !w.M || !w.r || !w.z || !sopt)
+	wtab = (double*)qaws_internal_malloc(sizeof(double) * (8 * DC_WEDGE_MAX * (size_t)m->na + 1));
+	wnt = (unsigned int*)qaws_internal_zalloc((size_t)m->na + 1, sizeof(unsigned int));
+	if (!w.ca || !w.ck || !w.q || !w.M || !w.r || !w.z || !sopt || !wtab || !wnt)
 		goto done;
 	for (a0 = 0, k = 0; na && a0 < m->na; a0++)
 		if (m->attr[a0].element == QAWS_MESH_VERTEX && (m->attr[a0].rule == QAWS_ATTRIBUTE_LINEAR || m->attr[a0].rule == QAWS_ATTRIBUTE_NORMALIZED))
@@ -933,11 +1075,13 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		}
 		t = l2 > 0 ? t / l2 : 1;
 		t = t < 0 ? 0 : t > 1 ? 1 : t;
+		dc_wedges_before(m, a, b, x, wtab, wnt, 8 * DC_WEDGE_MAX);
 		if (!hm_collapse(m, hm_find_edge(m, a, b), a, t, x))
 		{
 			failed = 1;   /* (out of memory: what was done stays, compacted) */
 			break;
 		}
+		dc_wedges_after(m, b, wtab, wnt, 8 * DC_WEDGE_MAX);
 		for (k = 0; k < na; k++)
 			hm_attr_at(m, w.ca[k], b)[w.ck[k]] = sopt[k] / w.alpha;
 		for (a0 = 0; na && a0 < m->na; a0++)
@@ -997,5 +1141,7 @@ done:
 	qaws_internal_free(ring); qaws_internal_free(H.e);
 	qaws_internal_free(w.ca); qaws_internal_free(w.ck); qaws_internal_free(w.q); qaws_internal_free(w.M); qaws_internal_free(w.r); qaws_internal_free(w.z);
 	qaws_internal_free(sopt);
+	qaws_internal_free(wtab);
+	qaws_internal_free(wnt);
 	return st;
 }
