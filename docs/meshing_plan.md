@@ -229,6 +229,12 @@ wedges); Lindstrom and Turk's boundary and shape terms; an octree for fine offse
 curved-element optimizer by the bound's gradient with border nodes sliding; simplex subdivision for the tetrahedra's
 bound; point clouds with cavities.
 
+All done or settled (2026-10-26): butterfly border (e761aae), sqrt(3) ternary (210d10e), Catmull-Clark adaptive (03018a1),
+geodesic borders (08ed5c6), saddle windows tried and dropped (6af4afc), decimation wedges (4410d75), Lindstrom and Turk's
+border (3da3f8d, shape dropped), sparse contouring memory (e28dd20), rounded offsets cheaper (d39dda9), untangling with
+border sliding (18a0b56, gradient dropped), the tetrahedra's bound bisected (17a1f9a), point clouds with cavities
+(a80a4e0). Next: the sweeps and continuous Booleans roadmap below.
+
 ### Roadmap (2026-10-22): sweeps and continuous Booleans
 
 After the follow-ups and building on the Booleans (items 5 and 6): animation as a first-class input, so a mesh moving
