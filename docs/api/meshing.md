@@ -1087,6 +1087,26 @@ The same transfer runs in `qaws_mesh_3d_sweep` and `qaws_mesh_sweep_boolean` (se
 | A − B: crease weight 1 on A's box edges; features from both cubes' 90° edges; tangents (x, +1) on A, (y, +1) on B | weight along exactly A's box edges left (10.5); features along every crease and only there (15, the cuts added); tangents exact, w +1 on A and −1 on B's turned pieces |
 | One name per vertex on A and per face on B; a `NORMAL` of 2 components | INVALID_ARGUMENT |
 
+### Attributes on volume meshes
+
+```c
+qaws_volume_mesh_add_attribute(&id, volume, values, &desc);   /* desc.element: VERTEX, CORNER, CELL or FACET */
+```
+
+- **Elements:** per vertex, per corner (`qaws_volume_mesh_get_cells` order), per cell (`QAWS_MESH_CELL`: materials, densities, region ids) or per facet (`QAWS_MESH_FACET`, `qaws_volume_mesh_get_facet_count` order, each side of an inner facet its own: interface tags, fluxes, boundary conditions). Edge and face elements are refused, as are rules and component counts that do not go together.
+- **API:** add, count, find, desc, get, set, remove, as on surfaces.
+- **Clone and border:** `qaws_volume_mesh_clone` keeps them; `qaws_volume_mesh_get_boundary` hands them to the surface by name: vertex ones per vertex, corner ones per corner (the facet's corners in its cell), cell and facet ones per face.
+- **Improvement:** `qaws_volume_mesh_improve` keeps them. A facet across which they jump (different cell values, corner values differing at its vertices, a nonzero facet value) is a wall, as the border is: its vertices stay, no flip crosses it. So every flip stays inside one region, its new cells take the replaced cells' values, and each material's volume is exact.
+- **Tetrahedralization:** `qaws_volume_mesh_tetrahedralize` takes the border surface's attributes: vertex and corner ones per vertex (each vertex's value at its nearest point of the surface, so the border's vertices are exact and the inside takes the nearest border value), face ones on the border facets (inner facets zero); edge ones are not taken.
+- **Not yet:** hexahedra, boundary layers and the volume connector make meshes without attributes.
+
+Test 182:
+- two tetrahedra: every element's values read back, set, removed, cloned, and found on the border exactly;
+- a cube's tetrahedra in two materials improved with flips and smoothing (12 edge removals, 77 moves): each material's volume the same to the last digit, every corner its cell's material;
+- a cube carrying x + 2 y + 3 z and side labels tetrahedralized: the field exact at the border vertices, every border facet its side's label.
+
+Figure 65 (key ~) shows a ball's colours carried into its tetrahedra, a box's side labels on its border facets, and an inclusion of a second material improved (worst dihedral 25.5° to 33.8°, the materials' volumes unchanged).
+
 ## Geodesics on meshes
 
 `qaws_mesh_geodesic` (`qaws_mesh_geodesic.h`) gives geodesic distances and shortest paths on a mesh by the heat method (Crane, Weischedel, Wardetzky 2013). The object is made once per mesh; every query after that is a few solves.

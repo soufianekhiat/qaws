@@ -324,7 +324,8 @@ matched in Booleans; figure 63 (four motion schemes carving, the rules compared)
 through subdivision (tracked edges, each piece its input edge's value), quaternions and angles mixed sign-free there;
 figure 64. Open:
 - edge attributes through the connector, and as semi-sharp crease weights for subdivision;
-- cell attributes on volume meshes (tetrahedra, hexahedra), which have none yet;
+- volume attributes (done: vertex, corner, cell and facet ones, through cloning, the border, improvement and
+  tetrahedralization; test 182, figure 65) through hexahedralization, boundary layers and the volume connector;
 - features along a sweep's walls (a feature vertex's path), footpoints through Booleans.
 
 ## 0. Scope

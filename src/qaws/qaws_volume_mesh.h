@@ -78,13 +78,43 @@ qaws_status qaws_volume_mesh_get_cells(unsigned int* out_cell_vertices, qaws_cel
 qaws_status qaws_volume_mesh_get_cell_adjacency(unsigned int* out_cells, qaws_volume_mesh const* mesh);
 
 /* The border: its facets as a surface mesh turned outward, with a vertex
-   attribute "vertex" (the volume's vertex) and a face attribute "cell". */
+   attribute "vertex" (the volume's vertex) and a face attribute "cell".
+   The volume's attributes come along by name: vertex ones per vertex, corner
+   ones per corner (the facet's corners in its cell), cell and facet ones per
+   face (the facet's cell's, the facet's own). */
 qaws_status qaws_volume_mesh_get_boundary(qaws_mesh_3d** out_surface, qaws_volume_mesh const* mesh);
 
 /* The structure's invariants: every cell positively oriented, facets
    matched pairwise with the same vertices turned the other way. OK, or
    INVALID_TOPOLOGY. */
 qaws_status qaws_volume_mesh_validate(qaws_volume_mesh const* mesh);
+
+/* ---- attributes -------------------------------------------------------- */
+
+/*
+ * Values per vertex, per corner (qaws_volume_mesh_get_cells order), per cell
+ * (QAWS_MESH_CELL) or per facet (QAWS_MESH_FACET, each side of an inner
+ * facet its own), mixed by their rules as on surfaces. Cloning and the border
+ * carry them; qaws_volume_mesh_improve keeps them, flipping only inside
+ * regions where they are continuous (a facet between cells of different
+ * values, with corner values differing at its vertices, or a nonzero facet
+ * value stays as a wall, its vertices fixed); qaws_volume_mesh_tetrahedralize
+ * takes the border surface's (vertex and corner ones per vertex, at each
+ * vertex's nearest point of the surface; face ones on the border facets).
+ */
+
+/* values: components per element; NULL: zeros. INVALID_ARGUMENT for an edge or face element, a rule and component count
+   that do not go together (as qaws_mesh_3d_add_attribute) */
+qaws_status qaws_volume_mesh_add_attribute(unsigned int* out_attribute, qaws_volume_mesh* mesh, qaws_scalar const* values,
+	qaws_attribute_desc const* desc);
+unsigned int qaws_volume_mesh_get_attribute_count(qaws_volume_mesh const* mesh);
+/* OUT_OF_RANGE when there is none of that name */
+qaws_status qaws_volume_mesh_find_attribute(unsigned int* out_attribute, qaws_volume_mesh const* mesh, char const* name);
+/* the desc's name points into the mesh, valid while the attribute lives */
+qaws_status qaws_volume_mesh_get_attribute_desc(qaws_attribute_desc* out_desc, qaws_volume_mesh const* mesh, unsigned int attribute);
+qaws_status qaws_volume_mesh_get_attribute(qaws_scalar* out_values, qaws_volume_mesh const* mesh, unsigned int attribute);
+qaws_status qaws_volume_mesh_set_attribute(qaws_volume_mesh* mesh, unsigned int attribute, qaws_scalar const* values);
+qaws_status qaws_volume_mesh_remove_attribute(qaws_volume_mesh* mesh, unsigned int attribute);   /* later ones shift down */
 
 typedef struct qaws_volume_quality
 {

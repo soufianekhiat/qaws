@@ -66,9 +66,12 @@ typedef enum qaws_mesh_element
 	QAWS_MESH_VERTEX = 0,
 	QAWS_MESH_CORNER,
 	QAWS_MESH_FACE,
-	QAWS_MESH_EDGE                      /* in qaws_mesh_3d_get_edges order: crease weights, seam ids; an edit, a Boolean, a
+	QAWS_MESH_EDGE,                     /* in qaws_mesh_3d_get_edges order: crease weights, seam ids; an edit, a Boolean, a
 	                                       sweep and subdivision keep an edge's value on the edge and its pieces, new
 	                                       edges take zeros */
+	QAWS_MESH_CELL,                     /* volume meshes: per cell (materials, densities, region ids) */
+	QAWS_MESH_FACET                     /* volume meshes: per cell facet, qaws_volume_mesh_get_facet_count's order (each side
+	                                       of an inner facet its own: interface tags, fluxes, boundary conditions) */
 } qaws_mesh_element;
 #endif
 

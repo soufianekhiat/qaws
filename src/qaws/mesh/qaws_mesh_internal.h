@@ -209,7 +209,29 @@ struct qaws_volume_mesh
 	unsigned int *c0, *cv;          /* per cell its first corner (nc + 1 of them); per corner its vertex */
 	unsigned int *f0, *fo;          /* per cell its first facet (nc + 1); per facet the facet across, HM_NONE on the border */
 	unsigned int nc;
+	struct vm_attr* attr;
+	unsigned int na;
 };
+
+/* a volume mesh's attribute: its values per element (vm_attr_size of them) */
+typedef struct vm_attr
+{
+	char name[32];
+	unsigned int element, rule, n;
+	double* v;
+} vm_attr;
+
+/* the element count of an attribute's element (vertices, corners, cells, facets) */
+unsigned int vm_attr_size(qaws_volume_mesh const* m, unsigned int element);
+/* dst takes src's attributes, each element's values from src's element its map gives (NULL: the same index; QAWS_MESH_NONE:
+   zeros); maps per dst vertex, corner, cell, facet */
+qaws_status vm_attr_carry(qaws_volume_mesh* dst, qaws_volume_mesh const* src, unsigned int const* vmap, unsigned int const* cmap,
+	unsigned int const* cellmap, unsigned int const* fmap);
+/* the values continuous across inner facet f: the cells' values the same, the corners' at its vertices the same, its facet
+   values zero on both sides */
+int vm_attr_continuous(qaws_volume_mesh const* m, unsigned int f);
+/* per dst facet the src facet on the same vertices turned the same way (the same side), QAWS_MESH_NONE if none; 0 out of memory */
+int vm_facet_map(unsigned int* out, qaws_volume_mesh const* dst, qaws_volume_mesh const* src);
 
 /* corners and facets per cell type; facet f's corners, outward (*n of them) */
 extern unsigned char const vm_corners[4], vm_facets[4];

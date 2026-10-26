@@ -28,6 +28,7 @@ typedef struct vim_mesh
 	unsigned char* dead;
 	unsigned int *freel, nfree;
 	unsigned int nt, cap;
+	unsigned int *tsrc, *tcs;  /* per tetrahedron: the input cell its values come from; 4 per tetrahedron: each vertex's input corner */
 } vim_mesh;
 
 typedef struct vim_fkey
@@ -109,6 +110,8 @@ static void vim_free(vim_mesh* m)
 	qaws_internal_free(m->tn);
 	qaws_internal_free(m->dead);
 	qaws_internal_free(m->freel);
+	qaws_internal_free(m->tsrc);
+	qaws_internal_free(m->tcs);
 	memset(m, 0, sizeof *m);
 }
 
@@ -116,7 +119,7 @@ static void vim_free(vim_mesh* m)
 static int vim_reserve(vim_mesh* m, unsigned int k)
 {
 	unsigned int c;
-	void *a, *b, *d, *f;
+	void *a, *b, *d, *f, *s, *cs;
 	if (m->nfree + (m->cap - m->nt) >= k)
 		return 1;
 	c = m->cap * 2 + k + 16;
@@ -128,7 +131,11 @@ static int vim_reserve(vim_mesh* m, unsigned int k)
 	if (d) m->dead = (unsigned char*)d;
 	f = qaws_internal_realloc(m->freel, sizeof(unsigned int) * (size_t)c);
 	if (f) m->freel = (unsigned int*)f;
-	if (!a || !b || !d || !f)
+	s = qaws_internal_realloc(m->tsrc, sizeof(unsigned int) * (size_t)c);
+	if (s) m->tsrc = (unsigned int*)s;
+	cs = qaws_internal_realloc(m->tcs, sizeof(unsigned int) * 4 * (size_t)c);
+	if (cs) m->tcs = (unsigned int*)cs;
+	if (!a || !b || !d || !f || !s || !cs)
 		return 0;
 	m->cap = c;
 	return 1;
@@ -136,6 +143,22 @@ static int vim_reserve(vim_mesh* m, unsigned int k)
 
 /* The tetrahedra old (a group) replaced by nw (positive, filling the same region): the group's outer facets matched to
    the new tetrahedra's. 1 done; 0 when the facets do not match (nothing changed); -1 on allocation failure. */
+/* new tetrahedron t (vertices v) takes its values from the replaced ones old (one region: they agree): the cell's, and each
+   vertex's corner from one holding it (none: zeros) */
+static void vim_inherit(vim_mesh* m, unsigned int t, unsigned int const* v, unsigned int const* old, unsigned int nold)
+{
+	unsigned int k, i, j;
+	m->tsrc[t] = nold ? m->tsrc[old[0]] : HM_NONE;
+	for (k = 0; k < 4; k++)
+	{
+		m->tcs[4 * (size_t)t + k] = HM_NONE;
+		for (i = 0; i < nold && m->tcs[4 * (size_t)t + k] == HM_NONE; i++)
+			for (j = 0; j < 4; j++)
+				if (m->tv[4 * (size_t)old[i] + j] == v[k])
+					m->tcs[4 * (size_t)t + k] = m->tcs[4 * (size_t)old[i] + j];
+	}
+}
+
 static int vim_replace(vim_mesh* m, unsigned int const* old, unsigned int nold, unsigned int const (*nw)[4], unsigned int nnew)
 {
 	unsigned int ext[4 * VIM_RING][5], link[2 * VIM_RING][4], made[2 * VIM_RING], next = 0, i, f, k, j, g;
@@ -181,6 +204,7 @@ static int vim_replace(vim_mesh* m, unsigned int const* old, unsigned int nold, 
 	{
 		made[i] = m->nfree ? m->freel[--m->nfree] : m->nt++;
 		memcpy(m->tv + 4 * (size_t)made[i], nw[i], sizeof(unsigned int) * 4);
+		vim_inherit(m, made[i], nw[i], old, nold);
 		m->dead[made[i]] = 0;
 		for (k = 0; k < 4; k++) m->v2t[nw[i][k]] = made[i];
 	}
@@ -572,8 +596,10 @@ static qaws_status vim_load(vim_mesh* m, qaws_volume_mesh const* mesh)
 	m->tn = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 4 * (size_t)m->cap);
 	m->dead = (unsigned char*)qaws_internal_zalloc(m->cap, 1);
 	m->freel = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (size_t)m->cap);
+	m->tsrc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (size_t)m->cap);
+	m->tcs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 4 * (size_t)m->cap);
 	keys = (vim_fkey*)qaws_internal_scratch_malloc(sizeof(vim_fkey) * 4 * (size_t)nt);
-	if (!m->x || !m->fixed || !m->v2t || !m->tv || !m->tn || !m->dead || !m->freel || !keys)
+	if (!m->x || !m->fixed || !m->v2t || !m->tv || !m->tn || !m->dead || !m->freel || !m->tsrc || !m->tcs || !keys)
 	{
 		qaws_internal_free(keys);
 		vim_free(m);
@@ -590,8 +616,10 @@ static qaws_status vim_load(vim_mesh* m, qaws_volume_mesh const* mesh)
 			continue;
 		}
 		memcpy(m->tv + 4 * (size_t)m->nt, v, sizeof(unsigned int) * 4);
+		m->tsrc[m->nt] = c;
 		for (k = 0; k < 4; k++)
 		{
+			m->tcs[4 * (size_t)m->nt + k] = mesh->c0[c] + k;
 			vim_key(v, k, keys[nk].s);
 			keys[nk].t = m->nt;
 			keys[nk++].f = k;
@@ -600,11 +628,12 @@ static qaws_status vim_load(vim_mesh* m, qaws_volume_mesh const* mesh)
 		}
 		m->nt++;
 	}
-	/* facets with the same vertices paired; the unpaired ones the border, their vertices fixed */
+	/* facets with the same vertices paired; the unpaired ones the border, their vertices fixed; a facet the attributes jump
+	   across (vm_attr_continuous) left unpaired too: a wall between regions */
 	qsort(keys, nk, sizeof(vim_fkey), vim_fkey_cmp);
 	for (i = 0; i < nk; i++)
 	{
-		if (i + 1 < nk && !vim_fkey_cmp(&keys[i], &keys[i + 1]))
+		if (i + 1 < nk && !vim_fkey_cmp(&keys[i], &keys[i + 1]) && vm_attr_continuous(mesh, mesh->f0[m->tsrc[keys[i].t]] + keys[i].f))
 		{
 			m->tn[4 * (size_t)keys[i].t + keys[i].f] = keys[i + 1].t;
 			m->tn[4 * (size_t)keys[i + 1].t + keys[i + 1].f] = keys[i].t;
@@ -612,6 +641,8 @@ static qaws_status vim_load(vim_mesh* m, qaws_volume_mesh const* mesh)
 			continue;
 		}
 		for (k = 0; k < 3; k++) m->fixed[keys[i].s[k]] = 1;
+		if (i + 1 < nk && !vim_fkey_cmp(&keys[i], &keys[i + 1]))
+			i++;   /* (the wall's other side: fixed the same) */
 	}
 	qaws_internal_free(keys);
 	return QAWS_STATUS_OK;
@@ -622,30 +653,51 @@ static qaws_status vim_store(qaws_volume_mesh** out_mesh, vim_mesh const* m, qaw
 {
 	unsigned int* cv = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)mesh->c0[mesh->nc] + 4 * (size_t)m->nt + 1));
 	unsigned char* type = (unsigned char*)qaws_internal_scratch_malloc((size_t)mesh->nc + m->nt + 1);
+	unsigned int* cmap = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)mesh->c0[mesh->nc] + 4 * (size_t)m->nt + 1));
+	unsigned int* cellmap = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)mesh->nc + m->nt + 1));
+	unsigned int* fmap = NULL;
 	unsigned int c, k, ncv = 0, nc = 0;
-	qaws_status st;
-	if (!cv || !type)
-	{
-		qaws_internal_free(cv);
-		qaws_internal_free(type);
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!cv || !type || !cmap || !cellmap)
+		goto out;
 	for (c = 0; c < mesh->nc; c++)
 		if (mesh->type[c] != QAWS_CELL_TETRAHEDRON)
 		{
-			for (k = mesh->c0[c]; k < mesh->c0[c + 1]; k++) cv[ncv++] = mesh->cv[k];
+			for (k = mesh->c0[c]; k < mesh->c0[c + 1]; k++)
+			{
+				cmap[ncv] = k;
+				cv[ncv++] = mesh->cv[k];
+			}
+			cellmap[nc] = c;
 			type[nc++] = mesh->type[c];
 		}
 	for (c = 0; c < m->nt; c++)
 		if (!m->dead[c])
 		{
 			memcpy(cv + ncv, m->tv + 4 * (size_t)c, sizeof(unsigned int) * 4);
+			memcpy(cmap + ncv, m->tcs + 4 * (size_t)c, sizeof(unsigned int) * 4);
 			ncv += 4;
+			cellmap[nc] = m->tsrc[c];
 			type[nc++] = QAWS_CELL_TETRAHEDRON;
 		}
 	st = vm_create(m->x, m->nv, cv, type, nc, out_mesh);
+	if (st == QAWS_STATUS_OK && mesh->na)
+	{
+		/* the attributes: vertices as they were, cells and corners from their sources, facets from the same facet of the input */
+		fmap = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)(*out_mesh)->f0[nc] + 1));
+		st = fmap && vm_facet_map(fmap, *out_mesh, mesh) ? vm_attr_carry(*out_mesh, mesh, NULL, cmap, cellmap, fmap) : QAWS_STATUS_ALLOCATION_FAILURE;
+		if (st != QAWS_STATUS_OK)
+		{
+			qaws_volume_mesh_destroy(*out_mesh);
+			*out_mesh = NULL;
+		}
+	}
+out:
 	qaws_internal_free(cv);
 	qaws_internal_free(type);
+	qaws_internal_free(cmap);
+	qaws_internal_free(cellmap);
+	qaws_internal_free(fmap);
 	return st;
 }
 
@@ -804,6 +856,7 @@ static int vim_replace_open(vim_mesh* m, unsigned int const* old, unsigned int n
 	{
 		made[i] = m->nfree ? m->freel[--m->nfree] : m->nt++;
 		memcpy(m->tv + 4 * (size_t)made[i], nw[i], sizeof(unsigned int) * 4);
+		vim_inherit(m, made[i], nw[i], old, nold);
 		m->dead[made[i]] = 0;
 		for (k = 0; k < 4; k++) m->v2t[nw[i][k]] = made[i];
 	}

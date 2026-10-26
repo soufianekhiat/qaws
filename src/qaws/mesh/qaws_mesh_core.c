@@ -130,6 +130,14 @@ int hm_rule_unit(unsigned int rule)
 	return rule == QAWS_ATTRIBUTE_NORMALIZED || rule == QAWS_ATTRIBUTE_NORMAL || rule == QAWS_ATTRIBUTE_TANGENT;
 }
 
+int hm_rule_valid(unsigned int rule, unsigned int n)
+{
+	return n >= 1 && n <= 16 && rule <= QAWS_ATTRIBUTE_ANGLE
+		&& !((rule == QAWS_ATTRIBUTE_NORMAL || rule == QAWS_ATTRIBUTE_VECTOR) && n != 3)
+		&& !((rule == QAWS_ATTRIBUTE_TANGENT || rule == QAWS_ATTRIBUTE_QUATERNION) && n != 4)
+		&& !((rule == QAWS_ATTRIBUTE_SRGB || rule == QAWS_ATTRIBUTE_OKLAB) && (n < 3 || n > 4));
+}
+
 /* the sRGB transfer function and its inverse (odd beyond [0, 1]) */
 static double hm_srgb_decode(double c)
 {

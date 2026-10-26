@@ -183,6 +183,7 @@ add_executable(
 179_motion.c
 180_mesh_sweep.c
 181_mesh_attribute_carry.c
+182_volume_attributes.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

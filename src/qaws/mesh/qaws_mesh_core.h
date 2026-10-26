@@ -159,6 +159,8 @@ unsigned int hm_embed_cols(unsigned int rule, unsigned int n);
 void hm_embed(double* e, double const* v, unsigned int n, unsigned int rule);
 void hm_unembed(double* v, double const* e, unsigned int n, unsigned int rule);
 int hm_rule_unit(unsigned int rule);   /* NORMALIZED, NORMAL or TANGENT */
+/* a rule and component count that go together (1 to 16; NORMAL and VECTOR 3, TANGENT and QUATERNION 4, colours 3 or 4) */
+int hm_rule_valid(unsigned int rule, unsigned int n);
 /* an element stored per corner slot: CORNER, and EDGE (on both its corners) */
 #define HM_ON_CORNERS(e) ((e) == QAWS_MESH_CORNER || (e) == QAWS_MESH_EDGE)
 int hm_foot_enable(qaws_hm* m);

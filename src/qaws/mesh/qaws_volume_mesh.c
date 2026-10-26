@@ -113,8 +113,12 @@ static int vm_opposite(unsigned int const* a, unsigned int const* b, unsigned in
 
 void qaws_volume_mesh_destroy(qaws_volume_mesh* m)
 {
+	unsigned int a;
 	if (!m)
 		return;
+	for (a = 0; a < m->na; a++)
+		qaws_internal_free(m->attr[a].v);
+	qaws_internal_free(m->attr);
 	qaws_internal_free(m->x); qaws_internal_free(m->type); qaws_internal_free(m->c0); qaws_internal_free(m->cv); qaws_internal_free(m->f0); qaws_internal_free(m->fo);
 	qaws_internal_free(m);
 }
@@ -243,7 +247,232 @@ qaws_status qaws_volume_mesh_clone(qaws_volume_mesh** out_mesh, qaws_volume_mesh
 	*out_mesh = NULL;
 	if (!m)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	return vm_create(m->x, m->nv, m->cv, m->type, m->nc, out_mesh);
+	{
+		qaws_status st = vm_create(m->x, m->nv, m->cv, m->type, m->nc, out_mesh);
+		if (st == QAWS_STATUS_OK && (st = vm_attr_carry(*out_mesh, m, NULL, NULL, NULL, NULL)) != QAWS_STATUS_OK)
+		{
+			qaws_volume_mesh_destroy(*out_mesh);
+			*out_mesh = NULL;
+		}
+		return st;
+	}
+}
+
+/* ======================================================================== */
+/*  Attributes                                                              */
+/* ======================================================================== */
+
+unsigned int vm_attr_size(qaws_volume_mesh const* m, unsigned int element)
+{
+	return element == QAWS_MESH_VERTEX ? m->nv : element == QAWS_MESH_CORNER ? m->c0[m->nc] : element == QAWS_MESH_CELL ? m->nc : m->f0[m->nc];
+}
+
+/* a new attribute of zeros: its index, HM_NONE out of memory */
+static unsigned int vm_attr_add(qaws_volume_mesh* m, char const* name, unsigned int element, unsigned int rule, unsigned int n)
+{
+	vm_attr* g = (vm_attr*)qaws_internal_realloc(m->attr, sizeof(vm_attr) * ((size_t)m->na + 1));
+	vm_attr* a;
+	if (!g)
+		return HM_NONE;
+	m->attr = g;
+	a = &m->attr[m->na];
+	memset(a, 0, sizeof *a);
+	a->v = (double*)qaws_internal_zalloc((size_t)n * vm_attr_size(m, element) + 1, sizeof(double));
+	if (!a->v)
+		return HM_NONE;
+	if (name)
+		strncpy(a->name, name, sizeof a->name - 1);
+	a->element = element;
+	a->rule = rule;
+	a->n = n;
+	return m->na++;
+}
+
+qaws_status vm_attr_carry(qaws_volume_mesh* dst, qaws_volume_mesh const* src, unsigned int const* vmap, unsigned int const* cmap,
+	unsigned int const* cellmap, unsigned int const* fmap)
+{
+	unsigned int a, i;
+	for (a = 0; a < src->na; a++)
+	{
+		vm_attr const* s = &src->attr[a];
+		unsigned int const* map = s->element == QAWS_MESH_VERTEX ? vmap : s->element == QAWS_MESH_CORNER ? cmap : s->element == QAWS_MESH_CELL ? cellmap : fmap;
+		unsigned int k = vm_attr_add(dst, s->name, s->element, s->rule, s->n), count;
+		if (k == HM_NONE)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		count = vm_attr_size(dst, s->element);
+		for (i = 0; i < count; i++)
+		{
+			unsigned int j = map ? map[i] : i;
+			if (j != HM_NONE)
+				memcpy(dst->attr[k].v + (size_t)s->n * i, s->v + (size_t)s->n * j, sizeof(double) * s->n);
+		}
+	}
+	return QAWS_STATUS_OK;
+}
+
+int vm_attr_continuous(qaws_volume_mesh const* m, unsigned int f)
+{
+	unsigned int g = m->fo[f], c, d, a, k, i, j, v[4], nf;
+	if (g == HM_NONE)
+		return 1;
+	c = vm_facet_cell(m, f);
+	d = vm_facet_cell(m, g);
+	nf = vm_facet_vertices(m, f, v);
+	for (a = 0; a < m->na; a++)
+	{
+		vm_attr const* t = &m->attr[a];
+		if (t->element == QAWS_MESH_CELL && memcmp(t->v + (size_t)t->n * c, t->v + (size_t)t->n * d, sizeof(double) * t->n))
+			return 0;
+		if (t->element == QAWS_MESH_FACET)
+			for (k = 0; k < t->n; k++)
+				if (t->v[(size_t)t->n * f + k] != 0 || t->v[(size_t)t->n * g + k] != 0)
+					return 0;
+		if (t->element == QAWS_MESH_CORNER)
+			for (k = 0; k < nf; k++)
+			{
+				unsigned int ci = HM_NONE, di = HM_NONE;
+				for (i = m->c0[c]; i < m->c0[c + 1]; i++)
+					if (m->cv[i] == v[k])
+						ci = i;
+				for (j = m->c0[d]; j < m->c0[d + 1]; j++)
+					if (m->cv[j] == v[k])
+						di = j;
+				if (memcmp(t->v + (size_t)t->n * ci, t->v + (size_t)t->n * di, sizeof(double) * t->n))
+					return 0;
+			}
+	}
+	return 1;
+}
+
+/* a facet's key: its vertices from the smallest, in their turn (the side kept) */
+static void vm_facet_key(qaws_volume_mesh const* m, unsigned int f, unsigned int* key)
+{
+	unsigned int v[4], n = vm_facet_vertices(m, f, v), s = 0, k;
+	for (k = 1; k < n; k++)
+		if (v[k] < v[s])
+			s = k;
+	for (k = 0; k < 4; k++)
+		key[k] = k < n ? v[(s + k) % n] : HM_NONE;
+}
+
+int vm_facet_map(unsigned int* out, qaws_volume_mesh const* dst, qaws_volume_mesh const* src)
+{
+	unsigned int nd = dst->f0[dst->nc], ns = src->f0[src->nc], f;
+	vm_key* keys = (vm_key*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(vm_key), (size_t)ns + 1));
+	if (!keys)
+		return 0;
+	for (f = 0; f < ns; f++)
+	{
+		vm_facet_key(src, f, keys[f].v);
+		keys[f].facet = f;
+	}
+	qsort(keys, ns, sizeof(vm_key), vm_key_cmp);
+	for (f = 0; f < nd; f++)
+	{
+		unsigned int key[4], lo = 0, hi = ns;
+		vm_key probe;
+		vm_facet_key(dst, f, key);
+		memcpy(probe.v, key, sizeof key);
+		probe.facet = 0;   /* (before every facet on these vertices) */
+		out[f] = HM_NONE;
+		while (lo < hi)
+		{
+			unsigned int mid = lo + (hi - lo) / 2;
+			if (vm_key_cmp(&keys[mid], &probe) < 0)
+				lo = mid + 1;
+			else
+				hi = mid;
+		}
+		if (lo < ns && !memcmp(keys[lo].v, key, sizeof key))
+			out[f] = keys[lo].facet;
+	}
+	qaws_internal_free(keys);
+	return 1;
+}
+
+qaws_status qaws_volume_mesh_add_attribute(unsigned int* out_attribute, qaws_volume_mesh* mesh, qaws_scalar const* values,
+	qaws_attribute_desc const* desc)
+{
+	unsigned int a, i, count;
+	if (out_attribute)
+		*out_attribute = QAWS_MESH_NONE;
+	if (!mesh || !desc || (desc->element != QAWS_MESH_VERTEX && desc->element != QAWS_MESH_CORNER && desc->element != QAWS_MESH_CELL
+		&& desc->element != QAWS_MESH_FACET) || !hm_rule_valid((unsigned int)desc->rule, desc->components))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	a = vm_attr_add(mesh, desc->name, (unsigned int)desc->element, (unsigned int)desc->rule, desc->components);
+	if (a == HM_NONE)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	count = desc->components * vm_attr_size(mesh, (unsigned int)desc->element);
+	for (i = 0; values && i < count; i++)
+		mesh->attr[a].v[i] = (double)values[i];
+	if (out_attribute)
+		*out_attribute = a;
+	return QAWS_STATUS_OK;
+}
+
+unsigned int qaws_volume_mesh_get_attribute_count(qaws_volume_mesh const* mesh)
+{
+	return mesh ? mesh->na : 0;
+}
+
+qaws_status qaws_volume_mesh_find_attribute(unsigned int* out_attribute, qaws_volume_mesh const* mesh, char const* name)
+{
+	unsigned int a;
+	if (!mesh || !name || !out_attribute)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_attribute = QAWS_MESH_NONE;
+	for (a = 0; a < mesh->na; a++)
+		if (!strncmp(mesh->attr[a].name, name, sizeof mesh->attr[a].name - 1))
+		{
+			*out_attribute = a;
+			return QAWS_STATUS_OK;
+		}
+	return QAWS_STATUS_OUT_OF_RANGE;
+}
+
+qaws_status qaws_volume_mesh_get_attribute_desc(qaws_attribute_desc* out_desc, qaws_volume_mesh const* mesh, unsigned int attribute)
+{
+	vm_attr const* at;
+	if (!mesh || attribute >= mesh->na || !out_desc)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	at = &mesh->attr[attribute];
+	out_desc->name = at->name;
+	out_desc->element = (qaws_mesh_element)at->element;
+	out_desc->components = at->n;
+	out_desc->rule = (qaws_attribute_rule)at->rule;
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_volume_mesh_get_attribute(qaws_scalar* out_values, qaws_volume_mesh const* mesh, unsigned int attribute)
+{
+	unsigned int i, count;
+	if (!mesh || attribute >= mesh->na || !out_values)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	count = mesh->attr[attribute].n * vm_attr_size(mesh, mesh->attr[attribute].element);
+	for (i = 0; i < count; i++)
+		out_values[i] = (qaws_scalar)mesh->attr[attribute].v[i];
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_volume_mesh_set_attribute(qaws_volume_mesh* mesh, unsigned int attribute, qaws_scalar const* values)
+{
+	unsigned int i, count;
+	if (!mesh || attribute >= mesh->na || !values)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	count = mesh->attr[attribute].n * vm_attr_size(mesh, mesh->attr[attribute].element);
+	for (i = 0; i < count; i++)
+		mesh->attr[attribute].v[i] = (double)values[i];
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_volume_mesh_remove_attribute(qaws_volume_mesh* mesh, unsigned int attribute)
+{
+	if (!mesh || attribute >= mesh->na)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	qaws_internal_free(mesh->attr[attribute].v);
+	memmove(mesh->attr + attribute, mesh->attr + attribute + 1, sizeof(vm_attr) * (mesh->na - attribute - 1));
+	mesh->na--;
+	return QAWS_STATUS_OK;
 }
 
 /* ======================================================================== */
@@ -303,7 +532,7 @@ qaws_status qaws_volume_mesh_get_cell_adjacency(unsigned int* out_cells, qaws_vo
 
 qaws_status qaws_volume_mesh_get_boundary(qaws_mesh_3d** out_surface, qaws_volume_mesh const* m)
 {
-	unsigned int *map = NULL, *fv = NULL, *fs = NULL, *src = NULL, *fcell = NULL, nb = 0, nfv = 0, nvb = 0, f, k;
+	unsigned int *map = NULL, *fv = NULL, *fs = NULL, *src = NULL, *fcell = NULL, *ffac = NULL, *fcor = NULL, nb = 0, nfv = 0, nvb = 0, f, k;
 	double* xb = NULL;
 	qaws_scalar* vals = NULL;
 	qaws_mesh_3d* s = NULL;
@@ -319,7 +548,9 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_mesh_3d** out_surface, qaws_volum
 	fs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->f0[m->nc] + 1)));
 	fcell = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->f0[m->nc] + 1)));
 	xb = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (3 * (size_t)m->nv + 1)));
-	if (!map || !src || !fv || !fs || !fcell || !xb)
+	ffac = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ((size_t)m->f0[m->nc] + 1)));
+	fcor = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (4 * (size_t)m->f0[m->nc] + 1)));
+	if (!map || !src || !fv || !fs || !fcell || !xb || !ffac || !fcor)
 		goto done;
 	for (k = 0; k < m->nv; k++)
 		map[k] = HM_NONE;
@@ -337,8 +568,10 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_mesh_3d** out_surface, qaws_volum
 				src[nvb] = v[k];
 				map[v[k]] = nvb++;
 			}
+			fcor[nfv] = m->c0[vm_facet_cell(m, f)] + vm_facet(m->type[vm_facet_cell(m, f)], f - m->f0[vm_facet_cell(m, f)], &n)[k];
 			fv[nfv++] = map[v[k]];
 		}
+		ffac[nb] = f;
 		fcell[nb] = vm_facet_cell(m, f);
 		fs[nb++] = n;
 	}
@@ -371,8 +604,35 @@ qaws_status qaws_volume_mesh_get_boundary(qaws_mesh_3d** out_surface, qaws_volum
 			st = qaws_mesh_3d_add_attribute(NULL, s, vals, &ad);
 		}
 	}
+	/* the volume's attributes (corners in face order: each face's run of nfv) */
+	for (f = 0; f < m->na && st == QAWS_STATUS_OK; f++)
+	{
+		vm_attr const* t = &m->attr[f];
+		qaws_attribute_desc ad;
+		unsigned int cnt = t->element == QAWS_MESH_VERTEX ? s->hm.nv : t->element == QAWS_MESH_CORNER ? nfv : nb, i, j;
+		qaws_scalar* av = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), t->n, (size_t)cnt + 1));
+		if (!av)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			break;
+		}
+		for (i = 0; i < cnt; i++)
+		{
+			unsigned int e = t->element == QAWS_MESH_VERTEX ? src[s->hm.vsrc[i] < nvb ? s->hm.vsrc[i] : 0] : t->element == QAWS_MESH_CORNER ? fcor[i]
+				: t->element == QAWS_MESH_CELL ? fcell[i] : ffac[i];
+			for (j = 0; j < t->n; j++)
+				av[(size_t)t->n * i + j] = (qaws_scalar)t->v[(size_t)t->n * e + j];
+		}
+		ad.name = t->name;
+		ad.element = t->element == QAWS_MESH_VERTEX ? QAWS_MESH_VERTEX : t->element == QAWS_MESH_CORNER ? QAWS_MESH_CORNER : QAWS_MESH_FACE;
+		ad.components = t->n;
+		ad.rule = (qaws_attribute_rule)t->rule;
+		st = qaws_mesh_3d_add_attribute(NULL, s, av, &ad);
+		qaws_internal_free(av);
+	}
 done:
 	qaws_internal_free(map); qaws_internal_free(src); qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(fcell); qaws_internal_free(xb); qaws_internal_free(vals);
+	qaws_internal_free(ffac); qaws_internal_free(fcor);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d_destroy(s);

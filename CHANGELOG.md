@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Attributes on volume meshes: per vertex, corner, cell (`QAWS_MESH_CELL`) and facet (`QAWS_MESH_FACET`), with the surface
+  API; kept by cloning and the border, by improvement (flips only inside regions where they are continuous), taken from
+  the border surface by tetrahedralization. Test 182, figure 65.
 - The `ANGLE` attribute rule (periodic, mixed the short way round). Subdivision carries edge attributes (an edge's pieces
   keep its value) and mixes quaternions and angles sign-free (q q^T, cosines and sines). Test 181, figure 64.
 - Attribute rules `VECTOR` (mixed linearly, turned with sweeps, never negated) and `QUATERNION` (mixed on one side and
