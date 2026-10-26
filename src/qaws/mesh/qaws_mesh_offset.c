@@ -84,6 +84,14 @@ static qaws_status ofs_field_eval(void* ctx, double const* x, size_t n, double* 
 	return ofs_eval((ofs_field const*)ctx, x, n, phi, grad);
 }
 
+/* grid point q's position (lowest corner glo, cell h, n points per axis) */
+static void ofs_grid_point(double* x, double const* glo, double h, unsigned int const* n, size_t q)
+{
+	x[0] = glo[0] + h * (double)(q % n[0]);
+	x[1] = glo[1] + h * (double)(q / n[0] % n[1]);
+	x[2] = glo[2] + h * (double)(q / ((size_t)n[0] * n[1]));
+}
+
 /* The level set phi = 0 of a field (f: phi, negative inside, and its gradient at points) contoured on a grid over the box
    lo..hi grown by margin, res cells along its longest side: grid points evaluated, each grid edge whose ends lie on two
    sides a crossing found by regula falsi on phi, its normal phi's gradient there, then dual contouring (wt_dual_contour).
@@ -91,7 +99,7 @@ static qaws_status ofs_field_eval(void* ctx, double const* x, size_t n, double* 
 qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_field_fn fe, void* ctx, double const* lo, double const* hi,
 	double margin, unsigned int res, double lip)
 {
-	double glo[3], h, ext = 0, *gx = NULL, *phi = NULL, *A = NULL, *B = NULL, *pa = NULL, *pb = NULL, *xm = NULL, *fm = NULL, *gm = NULL;
+	double glo[3], h, ext = 0, *phi = NULL, *A = NULL, *B = NULL, *pa = NULL, *pb = NULL, *xm = NULL, *fm = NULL, *gm = NULL;
 	unsigned int n[3], a, i, it;
 	size_t N, q, nc = 0, cc = 0, e;
 	unsigned char* in = NULL;
@@ -108,17 +116,11 @@ qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_fie
 	}
 	report->cell = h;
 	N = (size_t)n[0] * n[1] * n[2];
-	gx = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, N));
+	/* (per grid point its value and side only: the positions made when needed) */
 	phi = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), N));
 	in = (unsigned char*)qaws_internal_scratch_malloc(N);
-	if (!gx || !phi || !in)
+	if (!phi || !in)
 		goto oom;
-	for (q = 0; q < N; q++)
-	{
-		gx[3 * q] = glo[0] + h * (double)(q % n[0]);
-		gx[3 * q + 1] = glo[1] + h * (double)(q / n[0] % n[1]);
-		gx[3 * q + 2] = glo[2] + h * (double)(q / ((size_t)n[0] * n[1]));
-	}
 	if (lip > 0)
 	{
 		/* blocks halved from a coarse stride down to one cell, the field evaluated at their corners level by level: a block
@@ -181,7 +183,7 @@ qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_fie
 						sv = g4;
 						capq = cap;
 					}
-					memcpy(sx + 3 * m, gx + 3 * cq, sizeof(double) * 3);
+					ofs_grid_point(sx + 3 * m, glo, h, n, cq);
 					sq[m++] = cq;
 				}
 			}
@@ -262,7 +264,21 @@ qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_fie
 	}
 	else
 	{
-		if ((st = fe(ctx, gx, N, phi, NULL)) != QAWS_STATUS_OK)
+		/* every point, in chunks */
+		double* cx = (double*)qaws_internal_scratch_malloc(sizeof(double) * 3 * 65536);
+		size_t q0;
+		st = QAWS_STATUS_OK;
+		if (!cx)
+			goto oom;
+		for (q0 = 0; q0 < N; q0 += 65536)
+		{
+			size_t cn = N - q0 < 65536 ? N - q0 : 65536;
+			for (q = 0; q < cn; q++) ofs_grid_point(cx + 3 * q, glo, h, n, q0 + q);
+			if ((st = fe(ctx, cx, cn, phi + q0, NULL)) != QAWS_STATUS_OK)
+				break;
+		}
+		qaws_internal_free(cx);
+		if (st != QAWS_STATUS_OK)
 			goto done;
 		report->evaluated = N;
 	}
@@ -310,8 +326,8 @@ qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_fie
 	for (e = 0; e < nc; e++)
 	{
 		size_t q1 = X[e].p + (X[e].axis == 0 ? 1 : X[e].axis == 1 ? n[0] : (size_t)n[0] * n[1]), qi = in[X[e].p] == 1 ? X[e].p : q1, qo = qi == q1 ? X[e].p : q1;
-		memcpy(A + 3 * e, gx + 3 * qi, sizeof(double) * 3);
-		memcpy(B + 3 * e, gx + 3 * qo, sizeof(double) * 3);
+		ofs_grid_point(A + 3 * e, glo, h, n, qi);
+		ofs_grid_point(B + 3 * e, glo, h, n, qo);
 		pa[e] = phi[qi];
 		pb[e] = phi[qo];
 	}
@@ -357,7 +373,7 @@ qaws_status wt_contour_field(qaws_mesh_3d** out, wt_contour_info* report, wt_fie
 oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
-	qaws_internal_free(gx); qaws_internal_free(phi); qaws_internal_free(in); qaws_internal_free(X);
+	qaws_internal_free(phi); qaws_internal_free(in); qaws_internal_free(X);
 	qaws_internal_free(A); qaws_internal_free(B); qaws_internal_free(pa); qaws_internal_free(pb); qaws_internal_free(xm); qaws_internal_free(fm); qaws_internal_free(gm);
 	return st;
 }

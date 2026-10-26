@@ -96,75 +96,91 @@ void wt_sym_eigen3(double* A, double* V)
    the least squares point of its crossings' planes (Ju et al.), kept within the cell; a quad per crossing round its edge's four
    cells, turned toward the outside, split along its shorter diagonal; then qaws_mesh_repair (identical points only, non-manifold
    places split, slivers dropped). *out_sharp += the vertices on an edge or a corner. */
+/* the cell (i, j, k) of a grid of n points per axis, as an index; NONE outside */
+static size_t wt_cell_at(unsigned int const* n, int const* c3)
+{
+	if (c3[0] < 0 || c3[1] < 0 || c3[2] < 0 || c3[0] >= (int)n[0] - 1 || c3[1] >= (int)n[1] - 1 || c3[2] >= (int)n[2] - 1)
+		return (size_t)-1;
+	return (size_t)c3[0] + (size_t)(n[0] - 1) * ((size_t)c3[1] + (size_t)(n[1] - 1) * (size_t)c3[2]);
+}
+
+static int wt_cmp_pair(void const* a, void const* b)
+{
+	size_t const *x = (size_t const*)a, *y = (size_t const*)b;
+	if (x[0] != y[0])
+		return x[0] < y[0] ? -1 : 1;
+	return x[1] < y[1] ? -1 : x[1] > y[1];
+}
+
 qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* out_closed, double const* lo, double h, unsigned int const* n,
 	unsigned char const* in, wt_cross const* X, size_t nc)
 {
-	unsigned int *cellv = NULL, *ftri = NULL, nfv = 0, nft = 0, i, k;
+	unsigned int *ftri = NULL, nfv = 0, nft = 0, i, k;
 	qaws_scalar* fx = NULL;
-	size_t q, e, ncell;
+	size_t q, e, *pr = NULL, np = 0, *uc = NULL, nu = 0;
 	qaws_status st = QAWS_STATUS_OK;
-	/* a vertex per crossed cell: the least squares point of its crossings' planes (Ju et al.), kept within the cell */
-	ncell = (size_t)(n[0] - 1) * (n[1] - 1) * (n[2] - 1);
-	cellv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), ncell));
+	/* the crossed cells only (memory by the crossings, not the grid): each crossing's (cell, crossing) pairs sorted, so the
+	   cells come in order and each one's crossings in theirs */
+	pr = (size_t*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(size_t), 8, nc + 1));
+	if (!pr)
+		goto oom;
+	for (e = 0; e < nc; e++)
 	{
-		double* acc = (double*)qaws_internal_scratch_zalloc(qaws_internal_mul2(ncell, 13), sizeof(double));   /* A (6), b (3), mass (3), count */
-		if (!cellv || !acc)
-		{
-			qaws_internal_free(acc);
-			goto oom;
-		}
-		for (q = 0; q < ncell; q++)
-			cellv[q] = QAWS_MESH_NONE;
-		for (e = 0; e < nc; e++)
-		{
-			wt_cross const* x = X + e;
-			unsigned int ci = (unsigned int)(x->p % n[0]), cj = (unsigned int)(x->p / n[0] % n[1]), ck = (unsigned int)(x->p / ((size_t)n[0] * n[1]));
-			int s, t;
-			for (s = -1; s <= 0; s++)
-				for (t = -1; t <= 0; t++)
-				{
-					int c3[3];
-					size_t cell;
-					double const* nr = x->nrm;
-					double dn;
-					c3[0] = (int)ci;
-					c3[1] = (int)cj;
-					c3[2] = (int)ck;
-					c3[(x->axis + 1) % 3] += s;
-					c3[(x->axis + 2) % 3] += t;
-					if (c3[0] < 0 || c3[1] < 0 || c3[2] < 0 || c3[0] >= (int)n[0] - 1 || c3[1] >= (int)n[1] - 1 || c3[2] >= (int)n[2] - 1)
-						continue;
-					cell = (size_t)c3[0] + (size_t)(n[0] - 1) * ((size_t)c3[1] + (size_t)(n[1] - 1) * (size_t)c3[2]);
-					dn = nr[0] * x->x[0] + nr[1] * x->x[1] + nr[2] * x->x[2];
-					acc[13 * cell] += nr[0] * nr[0];
-					acc[13 * cell + 1] += nr[0] * nr[1];
-					acc[13 * cell + 2] += nr[0] * nr[2];
-					acc[13 * cell + 3] += nr[1] * nr[1];
-					acc[13 * cell + 4] += nr[1] * nr[2];
-					acc[13 * cell + 5] += nr[2] * nr[2];
-					for (i = 0; i < 3; i++)
-					{
-						acc[13 * cell + 6 + i] += nr[i] * dn;
-						acc[13 * cell + 9 + i] += x->x[i];
-					}
-					acc[13 * cell + 12] += 1;
-				}
-		}
-		for (q = 0, e = 0; q < ncell; q++)
-			e += acc[13 * q + 12] > 0;
-		fx = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, e + 1));
+		wt_cross const* x = X + e;
+		int s, t;
+		for (s = -1; s <= 0; s++)
+			for (t = -1; t <= 0; t++)
+			{
+				int c3[3];
+				size_t cell;
+				c3[0] = (int)(x->p % n[0]);
+				c3[1] = (int)(x->p / n[0] % n[1]);
+				c3[2] = (int)(x->p / ((size_t)n[0] * n[1]));
+				c3[(x->axis + 1) % 3] += s;
+				c3[(x->axis + 2) % 3] += t;
+				if ((cell = wt_cell_at(n, c3)) == (size_t)-1)
+					continue;
+				pr[2 * np] = cell;
+				pr[2 * np + 1] = e;
+				np++;
+			}
+	}
+	qsort(pr, np, 2 * sizeof(size_t), wt_cmp_pair);
+	uc = (size_t*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(size_t), np + 1));   /* the crossed cells, ascending */
+	if (!uc)
+		goto oom;
+	for (q = 0; q < np; q++)
+		if (q == 0 || pr[2 * q] != pr[2 * q - 2])
+			uc[nu++] = pr[2 * q];
+	/* a vertex per crossed cell: the least squares point of its crossings' planes (Ju et al.), kept within the cell */
+	{
+		size_t r = 0;
+		fx = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, nu + 1));
 		if (!fx)
-		{
-			qaws_internal_free(acc);
 			goto oom;
-		}
-		for (q = 0; q < ncell; q++)
+		for (q = 0; q < nu; q++)
 		{
-			double const* c = acc + 13 * q;
-			double A[9], V[9], m[3], r[3], y[3] = { 0, 0, 0 }, lmax = 0, cl[3];
+			double c[13] = { 0 }, A[9], V[9], m[3], rr[3], y[3] = { 0, 0, 0 }, lmax = 0, cl[3];
 			unsigned int rank = 0;
-			if (c[12] == 0)
-				continue;
+			/* (its crossings: A (6), b (3), mass (3), count) */
+			for (; r < np && pr[2 * r] == uc[q]; r++)
+			{
+				wt_cross const* x = X + pr[2 * r + 1];
+				double const* nr = x->nrm;
+				double dn = nr[0] * x->x[0] + nr[1] * x->x[1] + nr[2] * x->x[2];
+				c[0] += nr[0] * nr[0];
+				c[1] += nr[0] * nr[1];
+				c[2] += nr[0] * nr[2];
+				c[3] += nr[1] * nr[1];
+				c[4] += nr[1] * nr[2];
+				c[5] += nr[2] * nr[2];
+				for (i = 0; i < 3; i++)
+				{
+					c[6 + i] += nr[i] * dn;
+					c[9 + i] += x->x[i];
+				}
+				c[12] += 1;
+			}
 			for (i = 0; i < 3; i++)
 				m[i] = c[9 + i] / c[12];
 			A[0] = c[0]; A[1] = c[1]; A[2] = c[2];
@@ -172,7 +188,7 @@ qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* ou
 			A[6] = c[2]; A[7] = c[4]; A[8] = c[5];
 			/* the right-hand side about the mass point: b - A m */
 			for (i = 0; i < 3; i++)
-				r[i] = c[6 + i] - (A[3 * i] * m[0] + A[3 * i + 1] * m[1] + A[3 * i + 2] * m[2]);
+				rr[i] = c[6 + i] - (A[3 * i] * m[0] + A[3 * i + 1] * m[1] + A[3 * i + 2] * m[2]);
 			wt_sym_eigen3(A, V);
 			for (i = 0; i < 3; i++)
 				lmax = fmax(lmax, fabs(A[4 * i]));
@@ -182,14 +198,15 @@ qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* ou
 				if (!(fabs(l) > 0.1 * lmax))
 					continue;
 				rank++;
-				proj = (V[k] * r[0] + V[3 + k] * r[1] + V[6 + k] * r[2]) / l;
+				proj = (V[k] * rr[0] + V[3 + k] * rr[1] + V[6 + k] * rr[2]) / l;
 				for (i = 0; i < 3; i++)
 					y[i] += proj * V[3 * i + k];
 			}
 			*out_sharp += rank >= 2;
 			{
-				unsigned int ci = (unsigned int)(q % (n[0] - 1)), cj = (unsigned int)(q / (n[0] - 1) % (n[1] - 1)),
-					ck = (unsigned int)(q / ((size_t)(n[0] - 1) * (n[1] - 1)));
+				size_t cq = uc[q];
+				unsigned int ci = (unsigned int)(cq % (n[0] - 1)), cj = (unsigned int)(cq / (n[0] - 1) % (n[1] - 1)),
+					ck = (unsigned int)(cq / ((size_t)(n[0] - 1) * (n[1] - 1)));
 				cl[0] = lo[0] + h * ci;
 				cl[1] = lo[1] + h * cj;
 				cl[2] = lo[2] + h * ck;
@@ -203,14 +220,14 @@ qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* ou
 					break;
 				}
 			}
-			cellv[q] = nfv;
 			fx[3 * (size_t)nfv] = (qaws_scalar)y[0];
 			fx[3 * (size_t)nfv + 1] = (qaws_scalar)y[1];
 			fx[3 * (size_t)nfv + 2] = (qaws_scalar)y[2];
-			nfv++;
+			nfv++;   /* (cell uc[q]'s vertex is q) */
 		}
-		qaws_internal_free(acc);
 	}
+	qaws_internal_free(pr);
+	pr = NULL;
 	/* a quad per crossing round its edge's four cells, turned toward the outside, split along its shorter diagonal */
 	ftri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 6, nc + 1));
 	if (!ftri)
@@ -229,12 +246,20 @@ qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* ou
 			c3[2] = (int)ck;
 			c3[(x->axis + 1) % 3] += ds[k][0];
 			c3[(x->axis + 2) % 3] += ds[k][1];
-			if (c3[0] < 0 || c3[1] < 0 || c3[2] < 0 || c3[0] >= (int)n[0] - 1 || c3[1] >= (int)n[1] - 1 || c3[2] >= (int)n[2] - 1)
 			{
-				ok = 0;
-				break;
+				size_t cell = wt_cell_at(n, c3), lo2 = 0, hi2 = nu;
+				if (cell == (size_t)-1)
+				{
+					ok = 0;
+					break;
+				}
+				while (lo2 < hi2)
+				{
+					size_t mid = lo2 + (hi2 - lo2) / 2;
+					if (uc[mid] < cell) lo2 = mid + 1; else hi2 = mid;
+				}
+				v[k] = (unsigned int)lo2;   /* (a crossing's four cells are all crossed) */
 			}
-			v[k] = cellv[(size_t)c3[0] + (size_t)(n[0] - 1) * ((size_t)c3[1] + (size_t)(n[1] - 1) * (size_t)c3[2])];
 		}
 		if (!ok)
 			continue;
@@ -281,7 +306,7 @@ qaws_status wt_dual_contour(qaws_mesh_3d** out, unsigned int* out_sharp, int* ou
 oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
-	qaws_internal_free(cellv); qaws_internal_free(fx); qaws_internal_free(ftri);
+	qaws_internal_free(pr); qaws_internal_free(uc); qaws_internal_free(fx); qaws_internal_free(ftri);
 	return st;
 }
 

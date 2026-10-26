@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Contoured offsets and watertight surfaces in less memory: dual contouring stores the crossed cells only, the grid
+  only its values and sides (about 10 bytes a point from 142; a 64-cell offset 51.5 MB to 25 MB, the same surfaces).
 - Memoryless decimation: Lindstrom and Turk's border constraint (the border chain's area vector kept): a planar region's
   area exact. Test 167.
 - Decimation keeps corner attributes (UVs, split normals) right through the collapses: wedges valued at the new
