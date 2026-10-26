@@ -66,8 +66,9 @@ typedef enum qaws_mesh_element
 	QAWS_MESH_VERTEX = 0,
 	QAWS_MESH_CORNER,
 	QAWS_MESH_FACE,
-	QAWS_MESH_EDGE                      /* in qaws_mesh_3d_get_edges order: crease weights, seam ids; an edit keeps an
-	                                       edge's value on the edge and its pieces, new edges take zeros */
+	QAWS_MESH_EDGE                      /* in qaws_mesh_3d_get_edges order: crease weights, seam ids; an edit, a Boolean, a
+	                                       sweep and subdivision keep an edge's value on the edge and its pieces, new
+	                                       edges take zeros */
 } qaws_mesh_element;
 #endif
 
@@ -91,11 +92,14 @@ typedef enum qaws_attribute_rule
 	QAWS_ATTRIBUTE_VECTOR,              /* a free vector (3 components: a velocity, a displacement, a flow): interpolated
 	                                       linearly, its length kept (never normalized) and never negated on turned
 	                                       faces; rotated with a swept mesh */
-	QAWS_ATTRIBUTE_QUATERNION           /* an orientation (4 components: w x y z, unit): q and -q are one rotation, so
+	QAWS_ATTRIBUTE_QUATERNION,          /* an orientation (4 components: w x y z, unit): q and -q are one rotation, so
 	                                       each value is blended on the first one's side and the mix made unit
-	                                       (normalized lerp); composed with a swept mesh's rotation. Subdivision blends
-	                                       them on the identity's side (w >= 0): a field near a half turn from the
-	                                       identity can flip there */
+	                                       (normalized lerp; subdivision: the principal axis of the weighted sum of
+	                                       q q^T, sign-free); composed with a swept mesh's rotation */
+	QAWS_ATTRIBUTE_ANGLE                /* angles in radians (1 to 16 components: a hue, a phase, a direction in a
+	                                       plane), periodic: blended the short way round (each value unwrapped to
+	                                       within a half turn of the first one; subdivision: the mean of cosines and
+	                                       sines), returned in (-pi, pi] */
 } qaws_attribute_rule;
 #endif
 

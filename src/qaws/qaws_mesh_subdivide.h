@@ -112,7 +112,13 @@
  *               its two corners in the face, the centroid's the mean of all):
  *               UVs keep their seams, follow the faces, not the smoothing;
  *               NEAREST from the corner new ones come from first;
- *   per face    the parent face's value.
+ *   per face    the parent face's value;
+ *   per edge    an edge's pieces keep its value, new edges take zeros
+ *               (sqrt(3): an edge between two faces flips away, its value
+ *               with it; borders and features stay, cut in three).
+ * Values that only mean something up to a symmetry are mixed sign-free:
+ * QUATERNIONs as q q^T (the principal axis of the weighted sum, q and -q
+ * alike), ANGLEs as their cosines and sines.
  * The result has no footpoints. New vertices follow the old ones: the
  * input's vertices keep their indices, then one per edge (the edges ordered
  * by their smaller vertex index, then the larger), then (Catmull-Clark) one

@@ -216,6 +216,17 @@ static void cn_lerp(cn_loop const* L, double const* val, unsigned int dim, doubl
 		out[k] = val[(size_t)dim * lo + k] + t * (val[(size_t)dim * hi + k] - val[(size_t)dim * lo + k]);
 }
 
+/* an attribute's values (in the rule's space) along L: the two samples aligned before they mix */
+static void cn_lerp_rule(cn_loop const* L, double const* val, unsigned int dim, double s, double* out, unsigned int rule)
+{
+	double t, b[16];
+	unsigned int lo = cn_seg(L, s, &t), hi = (lo + 1) % L->n, k;
+	memcpy(b, val + (size_t)dim * hi, sizeof(double) * dim);
+	hm_align(b, val + (size_t)dim * lo, dim, rule);
+	for (k = 0; k < dim; k++)
+		out[k] = val[(size_t)dim * lo + k] + t * (b[k] - val[(size_t)dim * lo + k]);
+}
+
 static void cn_at(cn_loop const* L, double s, double* x, double* o)
 {
 	cn_lerp(L, L->x, 3, s, x);
@@ -370,8 +381,8 @@ static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 							if ((onb ? (C->same ? C->B->v[q] : C->nva + C->B->v[q]) : C->A->v[q]) == v)
 								s = onb ? C->B->s[q] : C->A->s[q];
 					}
-					cn_lerp(C->A, la, dim, s, xa);
-					cn_lerp(C->B, lb, dim, s, xb);
+					cn_lerp_rule(C->A, la, dim, s, xa, da.rule);
+					cn_lerp_rule(C->B, lb, dim, s, xb, da.rule);
 					hm_align(xb, xa, dim, da.rule);
 					for (k = 0; k < dim; k++)
 						xa[k] = da.rule == QAWS_ATTRIBUTE_NEAREST ? (w < 0.5 ? xa[k] : xb[k]) : (1 - w) * xa[k] + w * xb[k];

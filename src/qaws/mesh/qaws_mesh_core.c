@@ -172,12 +172,23 @@ static void hm_solve3(double const* M, double* v)
 	hm_mul3(c, v);
 }
 
+/* an angle in (-pi, pi] */
+static double hm_wrap(double a)
+{
+	double const tau = 6.283185307179586476925;
+	a -= tau * floor(a / tau + 0.5);
+	return a <= -0.5 * tau ? a + tau : a;
+}
+
 void hm_space_in(double* v, unsigned int n, unsigned int rule)
 {
 	unsigned int k;
 	if (rule == QAWS_ATTRIBUTE_QUATERNION && v[0] < 0)
 		for (k = 0; k < 4; k++)
 			v[k] = -v[k];
+	if (rule == QAWS_ATTRIBUTE_ANGLE)
+		for (k = 0; k < n; k++)
+			v[k] = hm_wrap(v[k]);
 	if (rule != QAWS_ATTRIBUTE_SRGB && rule != QAWS_ATTRIBUTE_OKLAB)
 		return;
 	for (k = 0; k < 3; k++)
@@ -211,6 +222,9 @@ void hm_space_out(double* v, unsigned int n, unsigned int rule)
 			v[3] = v[3] < 0 ? -1 : 1;
 		return;
 	}
+	if (rule == QAWS_ATTRIBUTE_ANGLE)
+		for (k = 0; k < n; k++)
+			v[k] = hm_wrap(v[k]);
 	if (rule != QAWS_ATTRIBUTE_SRGB && rule != QAWS_ATTRIBUTE_OKLAB)
 		return;
 	if (n > 3 && v[3] != 0)
@@ -230,10 +244,113 @@ void hm_space_out(double* v, unsigned int n, unsigned int rule)
 void hm_align(double* v, double const* ref, unsigned int n, unsigned int rule)
 {
 	unsigned int k;
-	(void)n;
 	if (rule == QAWS_ATTRIBUTE_QUATERNION && v[0] * ref[0] + v[1] * ref[1] + v[2] * ref[2] + v[3] * ref[3] < 0)
 		for (k = 0; k < 4; k++)
 			v[k] = -v[k];
+	if (rule == QAWS_ATTRIBUTE_ANGLE)
+		for (k = 0; k < n; k++)
+			v[k] = ref[k] + hm_wrap(v[k] - ref[k]);
+}
+
+unsigned int hm_embed_cols(unsigned int rule, unsigned int n)
+{
+	return rule == QAWS_ATTRIBUTE_QUATERNION ? 10 : rule == QAWS_ATTRIBUTE_ANGLE ? 2 * n : n;
+}
+
+void hm_embed(double* e, double const* v, unsigned int n, unsigned int rule)
+{
+	unsigned int i, j, k = 0;
+	if (rule == QAWS_ATTRIBUTE_QUATERNION)
+	{
+		for (i = 0; i < 4; i++)
+			for (j = i; j < 4; j++)
+				e[k++] = v[i] * v[j];
+		return;
+	}
+	if (rule == QAWS_ATTRIBUTE_ANGLE)
+	{
+		for (i = 0; i < n; i++)
+		{
+			e[2 * i] = cos(v[i]);
+			e[2 * i + 1] = sin(v[i]);
+		}
+		return;
+	}
+	memmove(e, v, sizeof(double) * n);
+	if (rule != QAWS_ATTRIBUTE_NEAREST)
+		hm_space_in(e, n, rule);
+}
+
+void hm_unembed(double* v, double const* e, unsigned int n, unsigned int rule)
+{
+	unsigned int i, j, k = 0, p, q, it;
+	if (rule == QAWS_ATTRIBUTE_ANGLE)
+	{
+		for (i = 0; i < n; i++)
+			v[i] = atan2(e[2 * i + 1], e[2 * i]);
+		return;
+	}
+	if (rule == QAWS_ATTRIBUTE_QUATERNION)
+	{
+		/* the principal axis of the symmetric M (Markley's average): Jacobi rotations, then the largest eigenvalue's vector */
+		double M[16], V[16], best;
+		for (i = 0; i < 4; i++)
+			for (j = i; j < 4; j++, k++)
+				M[4 * i + j] = M[4 * j + i] = e[k];
+		for (i = 0; i < 16; i++)
+			V[i] = i % 5 == 0;
+		for (it = 0; it < 32; it++)
+		{
+			double off = 0;
+			for (p = 0; p < 4; p++)
+				for (q = p + 1; q < 4; q++)
+					off += M[4 * p + q] * M[4 * p + q];
+			if (!(off > 1e-30 * (M[0] * M[0] + M[5] * M[5] + M[10] * M[10] + M[15] * M[15])))
+				break;
+			for (p = 0; p < 4; p++)
+				for (q = p + 1; q < 4; q++)
+				{
+					double apq = M[4 * p + q], th, t, c, s;
+					if (apq == 0)
+						continue;
+					th = (M[4 * q + q] - M[4 * p + p]) / (2 * apq);
+					t = (th >= 0 ? 1 : -1) / (fabs(th) + sqrt(th * th + 1));
+					c = 1 / sqrt(t * t + 1);
+					s = t * c;
+					for (k = 0; k < 4; k++)
+					{
+						double mkp = M[4 * k + p], mkq = M[4 * k + q];
+						M[4 * k + p] = c * mkp - s * mkq;
+						M[4 * k + q] = s * mkp + c * mkq;
+					}
+					for (k = 0; k < 4; k++)
+					{
+						double mpk = M[4 * p + k], mqk = M[4 * q + k];
+						M[4 * p + k] = c * mpk - s * mqk;
+						M[4 * q + k] = s * mpk + c * mqk;
+					}
+					for (k = 0; k < 4; k++)
+					{
+						double vkp = V[4 * k + p], vkq = V[4 * k + q];
+						V[4 * k + p] = c * vkp - s * vkq;
+						V[4 * k + q] = s * vkp + c * vkq;
+					}
+				}
+		}
+		for (best = M[0], p = 0, i = 1; i < 4; i++)
+			if (M[5 * i] > best)
+			{
+				best = M[5 * i];
+				p = i;
+			}
+		for (i = 0; i < 4; i++)
+			v[i] = V[4 * i + p] * (V[p] < 0 ? -1 : 1);
+		hm_space_out(v, 4, rule);
+		return;
+	}
+	memmove(v, e, sizeof(double) * n);
+	if (rule != QAWS_ATTRIBUTE_NEAREST)
+		hm_space_out(v, n, rule);
 }
 
 void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned int n, unsigned int rule)

@@ -88,16 +88,21 @@ outside; indices stay dense through edits.
   an orientation: q and −q are one rotation, so each value is mixed on the
   first one's side and the mix made unit (normalized lerp); a sweep
   composes it with the motion's rotation, and an operand without it reads
-  the identity. Subdivision mixes quaternions on the identity's side
-  (w ≥ 0), so a field near a half turn from the identity can flip there.
+  the identity. Subdivision mixes quaternions sign-free: the principal
+  axis of the weighted sum of q qᵀ (q and −q alike). `ANGLE` (1 to 16
+  components, radians: a hue, a phase, a direction in a plane) is
+  periodic: mixed the short way round (each value unwrapped to within a
+  half turn of the first; subdivision: the mean of cosines and sines),
+  returned in (−π, π].
 - **Edge attributes** (`QAWS_MESH_EDGE`, in `qaws_mesh_3d_get_edges` order:
   crease weights, seam ids) are stored on both corners of each edge, as
   features are. An edit keeps an edge's value on the edge and on its pieces
   (a split's halves); new edges (a split's cross edge, a flip's diagonal)
-  take zeros. Booleans and sweeps carry them the same way; subdivision and
-  the connector leave them out (subdivision's creases are the feature
-  edges' sharpness), remeshing from a reference starts them at zero, and a
-  reference cannot evaluate one (INVALID_ARGUMENT).
+  take zeros. Booleans, sweeps and subdivision carry them the same way (√3
+  subdivision flips an edge between two faces away, its value with it;
+  borders and features stay); the connector leaves them out, remeshing
+  from a reference starts them at zero, and a reference cannot evaluate
+  one (INVALID_ARGUMENT).
 - **Footpoints**: each vertex's location on the reference an operator
   worked on, kept through every operator (`qaws_mesh_3d_get_footpoints`).
 - **Measures**: `qaws_mesh_3d_measure_quality` (faces by size, angles,
@@ -1761,6 +1766,8 @@ Test 181:
 - a cube swept along x carries a field constant along the motion exactly, and its face normals lie along every face;
 - a ball's radial vertex normals swept along a segment agree with the tube's faces as well as with the ball's own (mean dot 0.944 against 0.941);
 - a carved slot's faces carry the tool's material over exactly the slot's area, 4.
+
+Figure 64 (key =) shows a ring's phase subdivided as `LINEAR` values (every hue where the phase wraps) and as an `ANGLE` (the short way round), and a cube's edge values through Catmull-Clark and Loop (each edge's pieces in its colour, the new edges 0).
 
 Figure 63 (key -) shows:
 - one coloured cube tool carving one block by four motion schemes, the slot in the tool's colours: linear (two poses, removed 0.600: the slot's exact volume), cubic Hermite with a quarter turn, quintic (the same ends and velocities, accelerations added), along a Bezier curve;

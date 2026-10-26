@@ -17,7 +17,7 @@
 
 typedef struct sdv_attr
 {
-	unsigned int element, rule, off, n;   /* off: the first column in its element's row */
+	unsigned int element, rule, off, n, w;   /* off: the first column in its element's row, w its columns (hm_embed_cols) */
 } sdv_attr;
 
 typedef struct sdv_cols
@@ -34,6 +34,8 @@ typedef struct sdv_mesh
 	unsigned char* vk;                    /* per vertex: a corner, it stays */
 	unsigned int* fe;                     /* the feature edges, 2 vertices each */
 	double* fs;                           /* their sharpness */
+	unsigned int nte;                     /* the tracked edges (edge attributes): pieces of input edges, never moving anything */
+	unsigned int *te, *tp;                /* their 2 vertices, their input edge (qaws_mesh_3d_get_edges order) */
 } sdv_mesh;
 
 typedef struct sdv_key
@@ -61,6 +63,8 @@ static void sdv_free(sdv_mesh* m)
 	qaws_internal_free(m->vk);
 	qaws_internal_free(m->fe);
 	qaws_internal_free(m->fs);
+	qaws_internal_free(m->te);
+	qaws_internal_free(m->tp);
 	memset(m, 0, sizeof *m);
 }
 
@@ -99,7 +103,7 @@ static void sdv_rules(double* row, double const* pick, sdv_cols const* k, unsign
 		if (t->element != element)
 			continue;
 		if (t->rule == QAWS_ATTRIBUTE_NEAREST)
-			memcpy(row + t->off, pick + t->off, sizeof(double) * t->n);
+			memcpy(row + t->off, pick + t->off, sizeof(double) * t->w);
 		else if (hm_rule_unit(t->rule))
 			hm_space_out(row + t->off, t->n, t->rule);
 	}
@@ -122,6 +126,36 @@ static unsigned int sdv_find_edge(unsigned int const* ev, unsigned int ne, unsig
 		else hi = mid;
 	}
 	return lo < ne && ev[2 * lo] == a && ev[2 * lo + 1] == b ? lo : HM_NONE;
+}
+
+/* the tracked edges after a level (ev, ne: m's edges sorted): a split one's two halves (its new vertex mid[x] for edge
+   x, base + x when mid is NULL; split 0: none split), one no longer an edge (flipped) dropped; 0 out of memory */
+static int sdv_track(sdv_mesh* o, sdv_mesh const* m, unsigned int const* ev, unsigned int ne, unsigned int const* mid, unsigned int base,
+	int split)
+{
+	unsigned int t, n = 0;
+	o->te = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (4 * (size_t)m->nte + 1));
+	o->tp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)m->nte + 1));
+	if (!o->te || !o->tp)
+		return 0;
+	for (t = 0; t < m->nte; t++)
+	{
+		unsigned int a = m->te[2 * t], b = m->te[2 * t + 1], x = sdv_find_edge(ev, ne, a, b), v;
+		if (x == HM_NONE)
+			continue;
+		v = !split ? HM_NONE : mid ? mid[x] : base + x;
+		o->te[2 * n] = a;
+		o->te[2 * n + 1] = v == HM_NONE ? b : v;
+		o->tp[n++] = m->tp[t];
+		if (v != HM_NONE)
+		{
+			o->te[2 * n] = v;
+			o->te[2 * n + 1] = b;
+			o->tp[n++] = m->tp[t];
+		}
+	}
+	o->nte = n;
+	return 1;
 }
 
 /* the triangles' corner c's next vertex (d 1) or previous one (d 2) in its face */
@@ -301,7 +335,7 @@ static qaws_status sdv_step(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_cols c
 	o->nf = (unsigned int)nf2;
 	o->nc = (unsigned int)nc2;
 	o->nfe = limit ? m->nfe : 2 * m->nfe;
-	if (!sdv_alloc(o, k))
+	if (!sdv_alloc(o, k) || !sdv_track(o, m, ev, ne, NULL, nv, !limit))
 	{
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		goto done;
@@ -832,6 +866,39 @@ static qaws_status sdv_sqrt3(sdv_mesh* o, sdv_mesh const* m, sdv_cols const* k, 
 			o->fs[g++] = m->fs[t];
 		}
 	}
+	/* the tracked edges: a cut one in its three pieces, one between two faces flipped away, the others kept */
+	o->te = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (6 * (size_t)m->nte + 1));
+	o->tp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)m->nte + 1));
+	if (!o->te || !o->tp)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (t = 0, g = 0; t < m->nte; t++)
+	{
+		unsigned int a = m->te[2 * t], b = m->te[2 * t + 1], x = sdv_find_edge(ev, ne, a, b);
+		if (x == HM_NONE || (!cut[x] && en[x] == 2))
+			continue;
+		if (cut[x])
+		{
+			unsigned int ta = a == ev[2 * x] ? tri[x] : tri[x] + 1, tb = a == ev[2 * x] ? tri[x] + 1 : tri[x];
+			unsigned int pt[4];
+			pt[0] = a; pt[1] = ta; pt[2] = tb; pt[3] = b;
+			for (i = 0; i < 3; i++, g++)
+			{
+				o->te[2 * g] = pt[i];
+				o->te[2 * g + 1] = pt[i + 1];
+				o->tp[g] = m->tp[t];
+			}
+		}
+		else
+		{
+			o->te[2 * g] = a;
+			o->te[2 * g + 1] = b;
+			o->tp[g++] = m->tp[t];
+		}
+	}
+	o->nte = g;
 	/* the old vertices relaxed (on two cut edges, not a corner: the ternary rule), the centroids */
 	for (i = 0; i < nv; i++)
 	{
@@ -1145,6 +1212,11 @@ static qaws_status sdv_adaptive(sdv_mesh* o, sdv_mesh const* m, int loop, sdv_co
 		}
 		o->fo[g] = q;
 	}
+	if (!sdv_track(o, m, ev, ne, eid, 0, 1))
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
 	/* the creases: a split one's halves (sharp one level less), the others as they were */
 	o->nfe = 0;
 	for (t = 0; t < m->nfe; t++)
@@ -1410,6 +1482,11 @@ static qaws_status sdv_adaptive_cc(sdv_mesh* o, sdv_mesh const* m, sdv_cols cons
 		}
 		o->fo[g] = q;
 	}
+	if (!sdv_track(o, m, ev, ne, eid, 0, 1))
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
 	/* the creases: a split one's halves (sharp one level less), the others as they were */
 	o->nfe = 0;
 	for (t = 0; t < m->nfe; t++)
@@ -1442,6 +1519,48 @@ done:
 	qaws_internal_free(ui);
 	qaws_internal_free(mark);
 	qaws_internal_free(nrm);
+	return st;
+}
+
+/* edge attribute a on the result: an edge on a tracked one (a piece of an input edge) takes that edge's values, the
+   others zeros */
+static qaws_status sdv_edge_values(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int a, sdv_mesh const* m, qaws_attribute_desc const* d)
+{
+	unsigned int ne = qaws_mesh_3d_get_edge_count(out), nin = qaws_mesh_3d_get_edge_count(mesh), n = d->components, i, t, id;
+	unsigned int* e = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
+	sdv_key* key = (sdv_key*)qaws_internal_scratch_malloc(sizeof(sdv_key) * ((size_t)ne + 1));
+	qaws_scalar* in = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * ((size_t)n * nin + 1));
+	qaws_scalar* ov = (qaws_scalar*)qaws_internal_scratch_zalloc((size_t)n * ne + 1, sizeof(qaws_scalar));
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!e || !key || !in || !ov)
+		goto done;
+	qaws_mesh_3d_get_edges(e, out);
+	qaws_mesh_3d_get_attribute(in, mesh, a);
+	for (i = 0; i < ne; i++)
+	{
+		key[i].a = e[2 * i] < e[2 * i + 1] ? e[2 * i] : e[2 * i + 1];
+		key[i].b = e[2 * i] < e[2 * i + 1] ? e[2 * i + 1] : e[2 * i];
+		key[i].c = i;
+	}
+	qsort(key, ne, sizeof(sdv_key), sdv_key_cmp);
+	for (t = 0; t < m->nte; t++)
+	{
+		unsigned int u = m->te[2 * t] < m->te[2 * t + 1] ? m->te[2 * t] : m->te[2 * t + 1], v = m->te[2 * t] ^ m->te[2 * t + 1] ^ u, lo = 0, hi = ne;
+		while (lo < hi)
+		{
+			unsigned int mid = lo + (hi - lo) / 2;
+			if (key[mid].a < u || (key[mid].a == u && key[mid].b < v)) lo = mid + 1;
+			else hi = mid;
+		}
+		if (lo < ne && key[lo].a == u && key[lo].b == v)
+			memcpy(ov + (size_t)n * key[lo].c, in + (size_t)n * m->tp[t], sizeof(qaws_scalar) * n);
+	}
+	st = qaws_mesh_3d_add_attribute(&id, out, ov, d);
+done:
+	qaws_internal_free(e);
+	qaws_internal_free(key);
+	qaws_internal_free(in);
+	qaws_internal_free(ov);
 	return st;
 }
 
@@ -1488,12 +1607,13 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		qaws_attribute_desc d;
 		qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
 		if (d.element == QAWS_MESH_EDGE)
-			continue;   /* (edge attributes are not carried: semi-sharp creases are the feature edges' sharpness) */
+			continue;   /* (edge attributes: tracked edges, sdv_track) */
 		at[a].element = (unsigned int)d.element;
 		at[a].rule = (unsigned int)d.rule;
 		at[a].n = d.components;
+		at[a].w = hm_embed_cols(at[a].rule, at[a].n);
 		at[a].off = d.element == QAWS_MESH_VERTEX ? k.kv : (d.element == QAWS_MESH_CORNER ? k.kc : k.kf);
-		*(d.element == QAWS_MESH_VERTEX ? &k.kv : (d.element == QAWS_MESH_CORNER ? &k.kc : &k.kf)) += d.components;
+		*(d.element == QAWS_MESH_VERTEX ? &k.kv : (d.element == QAWS_MESH_CORNER ? &k.kc : &k.kf)) += at[a].w;
 	}
 	k.na = na;
 	k.at = at;
@@ -1533,6 +1653,24 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		}
 		m.fs[i] = s;
 	}
+	for (a = 0; a < na && !m.te; a++)
+	{
+		qaws_attribute_desc d;
+		qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
+		if (d.element != QAWS_MESH_EDGE)
+			continue;
+		/* (edge attributes: every input edge tracked through the levels) */
+		m.nte = qaws_mesh_3d_get_edge_count(mesh);
+		m.te = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)m.nte + 1));
+		m.tp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m.nte + 1));
+		if (!m.te || !m.tp)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		qaws_mesh_3d_get_edges(m.te, mesh);
+		for (i = 0; i < m.nte; i++) m.tp[i] = i;
+	}
 	qaws_mesh_3d_get_positions(sv, mesh);
 	for (i = 0; i < nv; i++)
 	{
@@ -1549,9 +1687,9 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		qaws_mesh_3d_get_attribute(sv, mesh, a);
 		for (i = 0; i < count; i++)
 		{
-			for (j = 0; j < at[a].n; j++) rows[(size_t)i * w + at[a].off + j] = (double)sv[(size_t)i * at[a].n + j];
-			if (at[a].rule != QAWS_ATTRIBUTE_NEAREST)
-				hm_space_in(rows + (size_t)i * w + at[a].off, at[a].n, at[a].rule);   /* (mixed in the rule's space, back at the end) */
+			double x[16];
+			for (j = 0; j < at[a].n; j++) x[j] = (double)sv[(size_t)i * at[a].n + j];
+			hm_embed(rows + (size_t)i * w + at[a].off, x, at[a].n, at[a].rule);   /* (mixed in the rule's space, back at the end) */
 		}
 	}
 	qaws_internal_free(sv);
@@ -1624,14 +1762,18 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		unsigned int count = at[a].element == QAWS_MESH_VERTEX ? m.nv : (at[a].element == QAWS_MESH_CORNER ? m.nc : m.nf);
 		unsigned int w = at[a].element == QAWS_MESH_VERTEX ? k.kv : (at[a].element == QAWS_MESH_CORNER ? k.kc : k.kf), id;
 		double* rows = at[a].element == QAWS_MESH_VERTEX ? m.X : (at[a].element == QAWS_MESH_CORNER ? m.C : m.F);
-		if (!at[a].n)
-			continue;
 		qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
+		if (!at[a].n)
+		{
+			if (d.element == QAWS_MESH_EDGE)
+				st = sdv_edge_values(out, mesh, a, &m, &d);
+			continue;
+		}
 		for (i = 0; i < count; i++)
 		{
-			if (at[a].rule != QAWS_ATTRIBUTE_NEAREST)
-				hm_space_out(rows + (size_t)i * w + at[a].off, at[a].n, at[a].rule);
-			for (j = 0; j < at[a].n; j++) sv[(size_t)i * at[a].n + j] = (qaws_scalar)rows[(size_t)i * w + at[a].off + j];
+			double x[32];
+			hm_unembed(x, rows + (size_t)i * w + at[a].off, at[a].n, at[a].rule);
+			for (j = 0; j < at[a].n; j++) sv[(size_t)i * at[a].n + j] = (qaws_scalar)x[j];
 		}
 		st = qaws_mesh_3d_add_attribute(&id, out, sv, &d);
 	}

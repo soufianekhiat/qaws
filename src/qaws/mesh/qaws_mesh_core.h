@@ -152,6 +152,12 @@ void hm_space_in(double* v, unsigned int n, unsigned int rule);
 void hm_space_out(double* v, unsigned int n, unsigned int rule);
 /* v (in the space) put on ref's side before they mix: a QUATERNION negated when against ref */
 void hm_align(double* v, double const* ref, unsigned int n, unsigned int rule);
+/* where values are mixed by fixed weights with no first one to align to (subdivision's stencils): the columns a value
+   takes (a QUATERNION its q q^T's 10 entries, the same for -q; an ANGLE its cosine and sine per component; others n),
+   into them (the rule's space included) and back */
+unsigned int hm_embed_cols(unsigned int rule, unsigned int n);
+void hm_embed(double* e, double const* v, unsigned int n, unsigned int rule);
+void hm_unembed(double* v, double const* e, unsigned int n, unsigned int rule);
 int hm_rule_unit(unsigned int rule);   /* NORMALIZED, NORMAL or TANGENT */
 /* an element stored per corner slot: CORNER, and EDGE (on both its corners) */
 #define HM_ON_CORNERS(e) ((e) == QAWS_MESH_CORNER || (e) == QAWS_MESH_EDGE)

@@ -320,10 +320,10 @@ premultiplied), honoured by edits, remeshing, subdivision, decimation, the conne
 figure 61. Then (2026-10-26): edge attributes (QAWS_MESH_EDGE, on both corners of an edge as features are; an edit keeps
 them on an edge and its pieces, new edges zeros; Booleans and sweeps carry them), the TANGENT rule, feature edges through
 Booleans (kept, and the cuts marked); figure 62. Then the VECTOR and QUATERNION rules, vertex and corner attributes
-matched in Booleans; figure 63 (four motion schemes carving, the rules compared). Open:
-- quaternions in subdivision mixed per stencil on one side (now on the identity's), an ANGLE rule (periodic; for now
-  NORMALIZED of 2 components, cos and sin);
-- edge attributes through subdivision (they could feed its semi-sharp creases) and the connector;
+matched in Booleans; figure 63 (four motion schemes carving, the rules compared). Then the ANGLE rule, edge attributes
+through subdivision (tracked edges, each piece its input edge's value), quaternions and angles mixed sign-free there;
+figure 64. Open:
+- edge attributes through the connector, and as semi-sharp crease weights for subdivision;
 - cell attributes on volume meshes (tetrahedra, hexahedra), which have none yet;
 - features along a sweep's walls (a feature vertex's path), footpoints through Booleans.
 

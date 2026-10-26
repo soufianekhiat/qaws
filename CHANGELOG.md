@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- The `ANGLE` attribute rule (periodic, mixed the short way round). Subdivision carries edge attributes (an edge's pieces
+  keep its value) and mixes quaternions and angles sign-free (q q^T, cosines and sines). Test 181, figure 64.
 - Attribute rules `VECTOR` (mixed linearly, turned with sweeps, never negated) and `QUATERNION` (mixed on one side and
   made unit, composed with sweeps' rotations). Booleans match a vertex attribute with a corner one of the same name.
   Test 181, figure 63 (sweep schemes carving, the rules compared).

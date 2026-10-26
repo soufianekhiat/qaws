@@ -35,11 +35,18 @@
  *     through a quarter turn about z: at the end pose's outer corners the vector
  *     turned to (0, 1, 0) and the quaternion the quarter turn's, at the
  *     start's both as given;
+ *   - through subdivision: an ANGLE of 3 and -3 radians meets at pi (the
+ *     short way round), not 0; QUATERNIONs of 170 and -170 degrees about z
+ *     meet at the half turn (sign-free, no flip through the identity); edge
+ *     values on a quad's edges kept by their pieces after two Catmull-Clark
+ *     levels (4 each, the inner edges 0), on two triangles' edges after one
+ *     Loop level (2 each);
  *   - refused: one name of two elements, a NORMAL of 2 components.
  */
 
 #include "test_common.h"
 #include "qaws_mesh_sweep.h"
+#include "qaws_mesh_subdivide.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -753,6 +760,105 @@ static void test_vector_quaternion(void)
 	qaws_motion_destroy(mo);
 }
 
+/* the vertex of m nearest p */
+static unsigned int ac_nearest(qaws_mesh_3d const* m, double x, double y)
+{
+	unsigned int n = qaws_mesh_3d_get_vertex_count(m), i, best = 0;
+	double d = 1e300;
+	for (i = 0; i < n; i++)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(m, i);
+		double e = ((double)p.x - x) * ((double)p.x - x) + ((double)p.y - y) * ((double)p.y - y);
+		if (e < d)
+		{
+			d = e;
+			best = i;
+		}
+	}
+	return best;
+}
+
+/* the count of m's edges whose edge attribute "w" is v */
+static unsigned int ac_edges_valued(qaws_mesh_3d const* m, double v)
+{
+	unsigned int id, ne = qaws_mesh_3d_get_edge_count(m), i, c = 0;
+	qaws_scalar* w = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (ne + 1));
+	if (qaws_mesh_3d_find_attribute(&id, m, "w") == QAWS_STATUS_OK)
+	{
+		qaws_mesh_3d_get_attribute(w, m, id);
+		for (i = 0; i < ne; i++) c += (double)w[i] == v;
+	}
+	free(w);
+	return c;
+}
+
+static void test_subdivision_rules(void)
+{
+	static unsigned int const f4[4] = { 0, 1, 2, 3 }, s4[1] = { 4 }, t6[6] = { 0, 1, 2, 0, 2, 3 };
+	qaws_scalar x[12] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0 };
+	double const c85 = cos(85 * 3.14159265358979323846 / 180), s85 = sin(85 * 3.14159265358979323846 / 180);
+	qaws_scalar ang[4] = { 3, -3, -3, 3 }, q[16];
+	qaws_scalar wv[5];
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d *quad = NULL, *tri = NULL, *o = NULL, *ot = NULL;
+	qaws_mesh_subdivide_desc sd;
+	double ea = 1, eq = 1, unit = 0;
+	unsigned int cnt[6] = { 0, 0, 0, 0, 0, 0 }, tcnt[6] = { 0, 0, 0, 0, 0, 0 }, ne = 0, nte = 0, i, j;
+	char msg[500];
+	unsigned int e[10];
+	/* the left side 170 degrees about z, the right side -170 */
+	for (i = 0; i < 4; i++)
+	{
+		int left = i == 0 || i == 3;
+		q[4 * i] = (qaws_scalar)c85; q[4 * i + 1] = q[4 * i + 2] = 0; q[4 * i + 3] = (qaws_scalar)(left ? s85 : -s85);
+	}
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 4; d.face_vertices = f4; d.face_sizes = s4; d.face_count = 1;
+	qaws_mesh_3d_create(&quad, &d);
+	ac_add(quad, "a", QAWS_MESH_VERTEX, 1, QAWS_ATTRIBUTE_ANGLE, ang);
+	ac_add(quad, "q", QAWS_MESH_VERTEX, 4, QAWS_ATTRIBUTE_QUATERNION, q);
+	ne = qaws_mesh_3d_get_edge_count(quad);
+	for (i = 0; i < ne; i++) wv[i] = (qaws_scalar)(1 + i);
+	ac_add(quad, "w", QAWS_MESH_EDGE, 1, QAWS_ATTRIBUTE_LINEAR, wv);
+	memset(&sd, 0, sizeof sd);
+	sd.scheme = QAWS_MESH_SUBDIVIDE_CATMULL_CLARK;
+	sd.levels = 2;
+	if (qaws_mesh_3d_subdivide(&o, quad, &sd) == QAWS_STATUS_OK && o)
+	{
+		qaws_mesh_element el;
+		unsigned int n, c = ac_nearest(o, 0.5, 0.5), nv = qaws_mesh_3d_get_vertex_count(o);
+		qaws_scalar *va = ac_get(o, "a", &el, &n), *vq = ac_get(o, "q", &el, &n);
+		double half[4] = { 0, 0, 0, 1 };
+		if (va && vq)
+		{
+			ea = fabs(fabs((double)va[c]) - 3.14159265358979323846);
+			eq = ac_quat_error(vq + 4 * c, half);
+			for (i = 0; i < nv; i++)
+				unit = fmax(unit, fabs(sqrt((double)vq[4 * i] * vq[4 * i] + (double)vq[4 * i + 1] * vq[4 * i + 1] + (double)vq[4 * i + 2] * vq[4 * i + 2] + (double)vq[4 * i + 3] * vq[4 * i + 3]) - 1));
+		}
+		for (j = 0; j < 6; j++) cnt[j] = ac_edges_valued(o, j);
+		free(va); free(vq);
+	}
+	/* two triangles, Loop once: each of the 5 edges in 2 pieces */
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 4; d.face_vertices = t6; d.face_count = 2;
+	qaws_mesh_3d_create(&tri, &d);
+	nte = qaws_mesh_3d_get_edge_count(tri);
+	qaws_mesh_3d_get_edges(e, tri);
+	for (i = 0; i < nte; i++) wv[i] = (qaws_scalar)(1 + i);
+	ac_add(tri, "w", QAWS_MESH_EDGE, 1, QAWS_ATTRIBUTE_LINEAR, wv);
+	sd.scheme = QAWS_MESH_SUBDIVIDE_LOOP;
+	sd.levels = 1;
+	if (qaws_mesh_3d_subdivide(&ot, tri, &sd) == QAWS_STATUS_OK && ot)
+		for (j = 0; j < 6; j++) tcnt[j] = ac_edges_valued(ot, j);
+	sprintf(msg, "subdivided: the ANGLE at the centre off +-pi by %.1e, the QUATERNION off the half turn by %.1e (unit within %.1e); Catmull-Clark x2 edge values 1-4 on %u %u %u %u edges (4 each), 0 on %u (inner); Loop x1 1-5 on %u %u %u %u %u (2 each), 0 on %u (inner: 3 per triangle)",
+		ea, eq, unit, cnt[1], cnt[2], cnt[3], cnt[4], cnt[0], tcnt[1], tcnt[2], tcnt[3], tcnt[4], tcnt[5], tcnt[0]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(ea < 1e-12 && eq < 1e-12 && unit < 1e-12 && cnt[1] == 4 && cnt[2] == 4 && cnt[3] == 4 && cnt[4] == 4 && ne == 4 && nte == 5 &&
+		tcnt[1] == 2 && tcnt[2] == 2 && tcnt[3] == 2 && tcnt[4] == 2 && tcnt[5] == 2 && tcnt[0] == 6, msg);
+	qaws_mesh_3d_destroy(quad); qaws_mesh_3d_destroy(tri); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(ot);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *a = ac_box(0, 1, 0, 1, 0, 1), *b = ac_box(0.5, 1.5, 0.5, 1.5, 0.5, 1.5), *o = NULL;
@@ -786,6 +892,7 @@ int test_181_mesh_attribute_carry_main(void)
 	test_edge_edits();
 	test_edge_boolean();
 	test_vector_quaternion();
+	test_subdivision_rules();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
