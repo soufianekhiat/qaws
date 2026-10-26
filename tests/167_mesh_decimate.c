@@ -215,6 +215,28 @@ static double dm_volume(qaws_mesh_3d const* m, double* area)
 }
 
 /* memoryless: the icosphere to 320 faces, its volume kept to round-off, its deviation near the quadrics' */
+/* the smallest angle of a mesh's triangles (degrees) */
+static double dm_min_angle(qaws_mesh_3d const* m)
+{
+	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), i, k;
+	double best = 180;
+	for (i = 0; i < nt; i++)
+	{
+		unsigned int t[3];
+		qaws_vec3 p[3];
+		qaws_mesh_3d_get_triangle(t, m, i);
+		for (k = 0; k < 3; k++) p[k] = qaws_mesh_3d_get_vertex(m, t[k]);
+		for (k = 0; k < 3; k++)
+		{
+			qaws_vec3 a = p[k], b = p[(k + 1) % 3], c = p[(k + 2) % 3];
+			double u[3] = { b.x - a.x, b.y - a.y, b.z - a.z }, w[3] = { c.x - a.x, c.y - a.y, c.z - a.z };
+			double cs = (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / sqrt((u[0] * u[0] + u[1] * u[1] + u[2] * u[2]) * (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]));
+			best = fmin(best, acos(cs > 1 ? 1 : cs < -1 ? -1 : cs) * 57.29577951308232);
+		}
+	}
+	return best;
+}
+
 static void test_memoryless(void)
 {
 	qaws_mesh_3d *m = dm_icosphere(3), *q = dm_icosphere(3);
@@ -236,13 +258,38 @@ static void test_memoryless(void)
 	d.flags = QAWS_DECIMATE_MEMORYLESS;
 	d.octahedral_views = 2;
 	sr = qaws_mesh_3d_decimate(NULL, q, &d);
-	sprintf(msg, "memoryless: icosphere %u -> %u faces, closed %d, volume %.12f against %.12f (quadrics %.6f), deviation %.4f (quadrics %.4f); views refused (%d)",
-		r.faces_before, r.faces_after, top.closed, v1, v0, vq, (double)r.deviation.hausdorff[1], (double)rq.deviation.hausdorff[1], (int)sr);
+	sprintf(msg, "memoryless: icosphere %u -> %u faces, closed %d, volume %.12f against %.12f (quadrics %.6f), deviation %.4f (quadrics %.4f), smallest angle %.1f (quadrics %.1f); views refused (%d)",
+		r.faces_before, r.faces_after, top.closed, v1, v0, vq, (double)r.deviation.hausdorff[1], (double)rq.deviation.hausdorff[1], dm_min_angle(m), dm_min_angle(q), (int)sr);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && r.faces_after <= 320 && r.faces_after >= 300 && top.closed && fabs(v1 - v0) < 1e-12 * v0 &&
 		r.deviation.hausdorff[1] < 2 * rq.deviation.hausdorff[1] && sr == QAWS_STATUS_INVALID_ARGUMENT, msg);
 	qaws_mesh_3d_destroy(m);
 	qaws_mesh_3d_destroy(q);
+	{
+		/* a flat sheet with wavy sides (the grid sheared, its area 1): Lindstrom and Turk's border constraint keeps the
+		   border chains' area vectors, so its area */
+		unsigned int i, nv;
+		double a0 = 0, a1 = 0, flat = 0;
+		qaws_scalar* x;
+		m = dm_grid(12);
+		nv = qaws_mesh_3d_get_vertex_count(m);
+		x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+		qaws_mesh_3d_get_positions(x, m);
+		for (i = 0; i < nv; i++) x[3 * i + 1] += (qaws_scalar)(0.08 * sin(6.283185307179586 * (double)x[3 * i]));
+		qaws_mesh_3d_set_positions(m, x);
+		free(x);
+		dm_volume(m, &a0);
+		memset(&d, 0, sizeof d);
+		d.target_faces = 40;
+		d.flags = QAWS_DECIMATE_MEMORYLESS;
+		st = qaws_mesh_3d_decimate(&r, m, &d);
+		dm_volume(m, &a1);
+		for (i = 0; i < qaws_mesh_3d_get_vertex_count(m); i++) flat = fmax(flat, fabs((double)qaws_mesh_3d_get_vertex(m, i).z));
+		sprintf(msg, "memoryless, a wavy flat sheet %u -> %u faces: area %.15f (%.15f before), off its plane %.1e", r.faces_before, r.faces_after, a1, a0, flat);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && r.faces_after <= 40 && fabs(a1 - a0) < 1e-12 && flat == 0, msg);
+		qaws_mesh_3d_destroy(m);
+	}
 }
 
 static void test_sphere(void)

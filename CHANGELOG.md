@@ -64,6 +64,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Memoryless decimation: Lindstrom and Turk's border constraint (the border chain's area vector kept): a planar region's
+  area exact. Test 167.
 - Decimation keeps corner attributes (UVs, split normals) right through the collapses: wedges valued at the new
   position from their old triangles (they were left as copied, the moved vertex with its old corners' values). Test 167.
 - `qaws_mesh_3d_geodesic_borders`: the geodesic Voronoi regions' borders placed inside the triangles from each source's

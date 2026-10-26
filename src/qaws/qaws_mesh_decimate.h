@@ -70,7 +70,10 @@
  *              kept (one linear constraint on the new point), and the point
  *              is where the volumes the moving faces sweep, squared and
  *              summed, are least (with the border's and features' planes):
- *              a closed mesh keeps its volume to round-off. Views and
+ *              a closed mesh keeps its volume to round-off. Where a collapse
+ *              touches the border, Lindstrom and Turk's border constraint
+ *              keeps the chain's area vector (sum of v_i x v_i+1) too: a
+ *              planar region keeps its area. Views and
  *              attribute_weight are refused with it (they live in the
  *              stored quadrics); importance only locks.
  * Attributes follow the collapses by their rules (qaws_mesh.h); LINEAR and

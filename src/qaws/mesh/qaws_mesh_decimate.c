@@ -175,14 +175,53 @@ typedef struct dc_work
    volume under them (each face fanned, its tetrahedra to a) is linear in x: kept, one constraint. Each face moving with
    a or b sweeps a volume n . (x - o) (n its fan triangle's cross product, o the vertex leaving): their squares summed are
    the cost (read as a distance: over the sum of |n|^2), least under the constraint (with the border's and features'
-   planes, as now, and a hair of pull to the edge's middle for the directions nothing fixes). fixed: x is b. */
+   planes, as now). Lindstrom and Turk's border term: where the collapse touches the border, the area vector of its chain
+   there (the sum of v_i x v_i+1 over its edges) kept, the new chain's x x d (d: the far ends of the edges leaving a or b
+   less the near ends of those arriving), two more constraints where independent of the volume's; a hair of pull to the
+   edge's middle for the directions nothing fixes (their shape term, the ring's squared edges, tried: on an icosphere it
+   lowered the smallest angle, in the cost as in the placement). fixed: x is b. */
 static void dc_memless(dc_work const* w, unsigned int a, unsigned int b, int fixed, double* x, double* cost)
 {
 	qaws_hm const* m = w->m;
 	double A[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, B[3] = { 0, 0, 0 }, C = 0, g[3] = { 0, 0, 0 }, vold = 0, vconst = 0, nn = 0, mid[3], tr, eps, y[3];
+	double bd[3] = { 0, 0, 0 }, be[3] = { 0, 0, 0 };   /* the border chain: x x bd = be */
 	double const* o = m->x + 3 * (size_t)a;
-	unsigned int side, c, k, j;
-	for (k = 0; k < 3; k++) mid[k] = 0.5 * (m->x[3 * (size_t)a + k] + m->x[3 * (size_t)b + k]) - o[k];
+	unsigned int side, c, k, j, nbd = 0;
+	/* the border chain's edges round a and b (relative to a) */
+	for (side = 0; side < 2; side++)
+	{
+		unsigned int v = side ? b : a;
+		for (c = m->vc[v]; c != HM_NONE; c = hm_round(m, v, c))
+		{
+			unsigned int u = hm_to(m, c), pc = hm_prev(m, c), pu = m->cv[pc];
+			if (m->co[c] == HM_NONE)
+			{
+				/* a border edge v -> u */
+				double const *pv = m->x + 3 * (size_t)v, *pw = m->x + 3 * (size_t)u;
+				double s[3], t[3];
+				for (k = 0; k < 3; k++) { s[k] = pv[k] - o[k]; t[k] = pw[k] - o[k]; }
+				be[0] += s[1] * t[2] - s[2] * t[1];
+				be[1] += s[2] * t[0] - s[0] * t[2];
+				be[2] += s[0] * t[1] - s[1] * t[0];
+				if (u != a && u != b)
+					for (k = 0; k < 3; k++) bd[k] += t[k];
+				nbd++;
+			}
+			if (m->co[pc] == HM_NONE && pu != a && pu != b)
+			{
+				/* a border edge pu -> v arriving (counted here once: its start is not a or b) */
+				double const *pv = m->x + 3 * (size_t)v, *pw = m->x + 3 * (size_t)pu;
+				double s[3], t[3];
+				for (k = 0; k < 3; k++) { s[k] = pw[k] - o[k]; t[k] = pv[k] - o[k]; }
+				be[0] += s[1] * t[2] - s[2] * t[1];
+				be[1] += s[2] * t[0] - s[0] * t[2];
+				be[2] += s[0] * t[1] - s[1] * t[0];
+				for (k = 0; k < 3; k++) bd[k] -= s[k];
+				nbd++;
+			}
+		}
+	}
+	for (k = 0; k < 3; k++) mid[k] = 0.5 * (m->x[3 * (size_t)b + k] - o[k]);
 	for (side = 0; side < 2; side++)
 	{
 		unsigned int v = side ? b : a;
@@ -290,22 +329,82 @@ static void dc_memless(dc_work const* w, unsigned int a, unsigned int b, int fix
 		for (k = 0; k < 3; k++) y[k] = m->x[3 * (size_t)b + k] - o[k];
 	else
 	{
-		/* the least of x^T A x - 2 B . x + C (plus eps |x - mid|^2) with g . x = vold - vconst: the KKT system */
-		double M4[16], r4[4], gl = sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+		/* the least of x^T A x - 2 B . x + C (plus eps |x - mid|^2) under the constraints: the volume's
+		   g . x = vold - vconst, the border's (d x u_i) . x = u_i . be for u_i across d, each kept when independent of those
+		   before (Gram-Schmidt) */
+		double rows[3][4], M6[36], r6[6], r4[4], gl = sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+		unsigned int nr = 0, n6, z;
 		int ok;
+		if (gl > 0)
+		{
+			for (k = 0; k < 3; k++) rows[0][k] = g[k];
+			rows[0][3] = vold - vconst;
+			nr = 1;
+		}
+		if (nbd)
+		{
+			double dl = sqrt(bd[0] * bd[0] + bd[1] * bd[1] + bd[2] * bd[2]), u[2][3];
+			if (dl > 0)
+			{
+				/* u_0, u_1 across d */
+				double ax[3] = { 0, 0, 0 }, l;
+				unsigned int im = fabs(bd[0]) <= fabs(bd[1]) && fabs(bd[0]) <= fabs(bd[2]) ? 0 : (fabs(bd[1]) <= fabs(bd[2]) ? 1 : 2);
+				ax[im] = 1;
+				u[0][0] = bd[1] * ax[2] - bd[2] * ax[1];
+				u[0][1] = bd[2] * ax[0] - bd[0] * ax[2];
+				u[0][2] = bd[0] * ax[1] - bd[1] * ax[0];
+				l = sqrt(u[0][0] * u[0][0] + u[0][1] * u[0][1] + u[0][2] * u[0][2]);
+				for (k = 0; k < 3; k++) u[0][k] /= l;
+				u[1][0] = (bd[1] * u[0][2] - bd[2] * u[0][1]) / dl;
+				u[1][1] = (bd[2] * u[0][0] - bd[0] * u[0][2]) / dl;
+				u[1][2] = (bd[0] * u[0][1] - bd[1] * u[0][0]) / dl;
+				for (z = 0; z < 2; z++)
+				{
+					double rr[4], ln;
+					unsigned int q;
+					/* (d x u_z) . x = u_z . be */
+					rr[0] = bd[1] * u[z][2] - bd[2] * u[z][1];
+					rr[1] = bd[2] * u[z][0] - bd[0] * u[z][2];
+					rr[2] = bd[0] * u[z][1] - bd[1] * u[z][0];
+					rr[3] = u[z][0] * be[0] + u[z][1] * be[1] + u[z][2] * be[2];
+					ln = sqrt(rr[0] * rr[0] + rr[1] * rr[1] + rr[2] * rr[2]);
+					for (q = 0; q < nr; q++)
+					{
+						double dq = 0, lq = 0, f;
+						for (k = 0; k < 3; k++) { dq += rr[k] * rows[q][k]; lq += rows[q][k] * rows[q][k]; }
+						f = dq / lq;
+						for (k = 0; k < 4; k++) rr[k] -= f * rows[q][k];
+					}
+					if (sqrt(rr[0] * rr[0] + rr[1] * rr[1] + rr[2] * rr[2]) > 1e-6 * ln)
+					{
+						memcpy(rows[nr], rr, sizeof rr);
+						nr++;
+					}
+				}
+			}
+		}
+		n6 = 3 + nr;
+		memset(M6, 0, sizeof M6);
 		for (k = 0; k < 3; k++)
 		{
-			for (j = 0; j < 3; j++) M4[4 * k + j] = A[3 * k + j] + (k == j ? eps : 0);
-			M4[4 * k + 3] = g[k];
-			M4[12 + k] = g[k];
-			r4[k] = B[k] + eps * mid[k];
+			for (j = 0; j < 3; j++) M6[n6 * k + j] = A[3 * k + j] + (k == j ? eps : 0);
+			r6[k] = B[k] + eps * mid[k];
 		}
-		M4[15] = 0;
-		r4[3] = vold - vconst;
-		ok = gl > 0 && dc_solve(M4, r4, 4);
+		for (z = 0; z < nr; z++)
+		{
+			for (k = 0; k < 3; k++)
+			{
+				M6[n6 * k + 3 + z] = rows[z][k];
+				M6[n6 * (3 + z) + k] = rows[z][k];
+			}
+			r6[3 + z] = rows[z][3];
+		}
+		ok = nr > 0 && dc_solve(M6, r6, n6);
+		for (k = 0; ok && k < 3; k++) r4[k] = r6[k];
 		if (!ok)
 		{
 			double M3[9];
+			ok = 0;
 			for (k = 0; k < 9; k++) M3[k] = A[k] + (k % 4 == 0 ? eps : 0);
 			for (k = 0; k < 3; k++) r4[k] = B[k] + eps * mid[k];
 			ok = dc_solve(M3, r4, 3);
