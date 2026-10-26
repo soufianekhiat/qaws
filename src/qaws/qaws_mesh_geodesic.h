@@ -120,4 +120,15 @@ qaws_status qaws_mesh_3d_geodesic_exact_at(qaws_scalar* out_distances, qaws_mesh
 qaws_status qaws_mesh_3d_geodesic_nearest(unsigned int* out_sources, qaws_mesh_3d const* mesh, qaws_scalar const* distances,
 	qaws_mesh_location const* sources, unsigned int source_count);
 
+/* The borders between the geodesic Voronoi regions placed inside the triangles: distances holds each source's own
+   distances (source_count rows of the vertex count, from qaws_mesh_3d_geodesic_exact one source at a time), each vertex in
+   the region of its nearest. On a triangle whose corners lie in two regions the border is where the two sources' squared
+   distances agree: their difference is linear on the triangle unfolded (each the squared distance to a virtual source), so
+   its zeros on the edges are exact while each source reaches the triangle by one window; on a triangle in three regions
+   the junction (the three agree) joins the three crossings. Pieces as 2 locations each (out_ends) and the two sources they
+   part, the smaller first (out_pairs); either may be NULL. A region that holds no vertex of a triangle is not seen there
+   (the mesh's resolution). BUFFER_TOO_SMALL with the count when capacity is short. */
+qaws_status qaws_mesh_3d_geodesic_borders(qaws_mesh_location* out_ends, unsigned int* out_pairs, unsigned int* out_count, qaws_mesh_3d const* mesh,
+	qaws_scalar const* distances, unsigned int source_count, unsigned int capacity);
+
 #endif /* QAWS_MESH_GEODESIC_H */

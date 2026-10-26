@@ -658,3 +658,136 @@ done:
 	qaws_internal_free(done);
 	return st;
 }
+
+/* a border piece's end into the outputs: the location of weights w on triangle t's corners */
+static void gx_border_end(qaws_mesh_location* out, unsigned int t, double const* w)
+{
+	out->patch = t;
+	out->a = (qaws_scalar)w[1];
+	out->b = (qaws_scalar)w[2];
+}
+
+qaws_status qaws_mesh_3d_geodesic_borders(qaws_mesh_location* out_ends, unsigned int* out_pairs, unsigned int* out_count, qaws_mesh_3d const* mesh,
+	qaws_scalar const* distances, unsigned int source_count, unsigned int capacity)
+{
+	unsigned int nv, nt, t, n = 0;
+	if (!out_count || !mesh || !distances || !source_count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	nv = qaws_mesh_3d_get_vertex_count(mesh);
+	nt = qaws_mesh_3d_get_triangle_count(mesh);
+	for (t = 0; t < nt; t++)
+	{
+		unsigned int c[3], lab[3], k, s, ne = 0, pr[3][2];
+		double d2[3][3], pt[3][3];   /* (per corner the squared distances of the labels met; per crossing its weights) */
+		int skip = 0;
+		qaws_mesh_3d_get_triangle(c, mesh, t);
+		/* each corner's nearest source */
+		for (k = 0; k < 3; k++)
+		{
+			double bd = HUGE_VAL;
+			lab[k] = QAWS_MESH_NONE;
+			for (s = 0; s < source_count; s++)
+			{
+				double d = (double)distances[(size_t)s * nv + c[k]];
+				if (d < bd)
+				{
+					bd = d;
+					lab[k] = s;
+				}
+			}
+			skip |= lab[k] == QAWS_MESH_NONE;
+		}
+		if (skip || (lab[0] == lab[1] && lab[1] == lab[2]))
+			continue;
+		/* each edge between two regions: where the two sources' squared distances agree (their difference is linear on
+		   the triangle unfolded, each the squared distance to a virtual source) */
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int k1 = (k + 1) % 3, la = lab[k], lb = lab[k1];
+			double f0, f1, w;
+			if (la == lb)
+				continue;
+			f0 = (double)distances[(size_t)la * nv + c[k]] * (double)distances[(size_t)la * nv + c[k]] - (double)distances[(size_t)lb * nv + c[k]] * (double)distances[(size_t)lb * nv + c[k]];
+			f1 = (double)distances[(size_t)la * nv + c[k1]] * (double)distances[(size_t)la * nv + c[k1]] - (double)distances[(size_t)lb * nv + c[k1]] * (double)distances[(size_t)lb * nv + c[k1]];
+			w = f0 != f1 ? f0 / (f0 - f1) : 0.5;
+			w = w < 0 ? 0 : (w > 1 ? 1 : w);
+			pt[ne][k] = 1 - w;
+			pt[ne][k1] = w;
+			pt[ne][(k + 2) % 3] = 0;
+			pr[ne][0] = la < lb ? la : lb;
+			pr[ne][1] = la < lb ? lb : la;
+			ne++;
+		}
+		if (ne == 2)
+		{
+			if (n < capacity)
+			{
+				if (out_ends)
+				{
+					gx_border_end(&out_ends[2 * (size_t)n], t, pt[0]);
+					gx_border_end(&out_ends[2 * (size_t)n + 1], t, pt[1]);
+				}
+				if (out_pairs)
+				{
+					out_pairs[2 * (size_t)n] = pr[0][0];
+					out_pairs[2 * (size_t)n + 1] = pr[0][1];
+				}
+			}
+			n++;
+		}
+		else if (ne == 3)
+		{
+			/* three regions: the junction where the three agree (two linear equations and the weights' sum), clamped into
+			   the triangle, joined to each crossing */
+			double J[3], A[3][3], r[3] = { 0, 0, 1 }, det, sum = 0;
+			unsigned int z;
+			for (k = 0; k < 3; k++)
+			{
+				for (z = 0; z < 3; z++)
+				{
+					double dd = (double)distances[(size_t)lab[z] * nv + c[k]];
+					d2[k][z] = dd * dd;
+				}
+				A[0][k] = d2[k][0] - d2[k][1];
+				A[1][k] = d2[k][0] - d2[k][2];
+				A[2][k] = 1;
+			}
+			det = A[0][0] * (A[1][1] * A[2][2] - A[1][2] * A[2][1]) - A[0][1] * (A[1][0] * A[2][2] - A[1][2] * A[2][0]) + A[0][2] * (A[1][0] * A[2][1] - A[1][1] * A[2][0]);
+			if (fabs(det) > 0)
+			{
+				for (k = 0; k < 3; k++)
+				{
+					double M[3][3];
+					memcpy(M, A, sizeof M);
+					for (z = 0; z < 3; z++) M[z][k] = r[z];
+					J[k] = (M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0]) + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0])) / det;
+				}
+			}
+			else
+				J[0] = J[1] = J[2] = 1.0 / 3;
+			for (k = 0; k < 3; k++)
+			{
+				J[k] = J[k] < 0 ? 0 : J[k];
+				sum += J[k];
+			}
+			for (k = 0; k < 3; k++) J[k] = sum > 0 ? J[k] / sum : 1.0 / 3;
+			for (z = 0; z < 3; z++, n++)
+				if (n < capacity)
+				{
+					if (out_ends)
+					{
+						gx_border_end(&out_ends[2 * (size_t)n], t, J);
+						gx_border_end(&out_ends[2 * (size_t)n + 1], t, pt[z]);
+					}
+					if (out_pairs)
+					{
+						out_pairs[2 * (size_t)n] = pr[z][0];
+						out_pairs[2 * (size_t)n + 1] = pr[z][1];
+					}
+				}
+		}
+	}
+	*out_count = n;
+	return n > capacity ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
+}

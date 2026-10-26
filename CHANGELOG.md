@@ -64,6 +64,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `qaws_mesh_3d_geodesic_borders`: the geodesic Voronoi regions' borders placed inside the triangles from each source's
+  exact distances (the squared distances' difference linear on a triangle unfolded; junctions of three exact). Test 164,
+  figure 28.
 - Adaptive Catmull-Clark (`adaptive_angle`): faces at a turn split into quads, their neighbours fanned in triangles from
   their face points (no T-junction). Test 172, figure 54.
 - sqrt(3) subdivision: Kobbelt's ternary rule on borders and creases every second level (the ternary cubic

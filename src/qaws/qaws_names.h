@@ -912,6 +912,7 @@
 #define qaws_mesh_3d_fair QAWS_SFX(qaws_mesh_3d_fair)
 #define qaws_mesh_3d_find_attribute QAWS_SFX(qaws_mesh_3d_find_attribute)
 #define qaws_mesh_3d_flip_edge QAWS_SFX(qaws_mesh_3d_flip_edge)
+#define qaws_mesh_3d_geodesic_borders QAWS_SFX(qaws_mesh_3d_geodesic_borders)
 #define qaws_mesh_3d_geodesic_exact QAWS_SFX(qaws_mesh_3d_geodesic_exact)
 #define qaws_mesh_3d_geodesic_exact_at QAWS_SFX(qaws_mesh_3d_geodesic_exact_at)
 #define qaws_mesh_3d_geodesic_nearest QAWS_SFX(qaws_mesh_3d_geodesic_nearest)

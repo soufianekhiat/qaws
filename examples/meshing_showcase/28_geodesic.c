@@ -5,7 +5,8 @@
  *     the hole);
  *   - a bumpy sphere with three sources: each vertex's distance to the
  *     nearest, the isolines meeting where two sources are as near, the
- *     regions' borders (qaws_mesh_3d_geodesic_nearest) in red;
+ *     regions' borders in red, placed inside the triangles from each
+ *     source's exact distances (qaws_mesh_3d_geodesic_borders);
  *   - a sheet with a hill, the source at its left side: paths from the right
  *     side go round the hill, not over it.
  * Printed: the factoring and query times.
@@ -207,28 +208,33 @@ static void demo_geodesic(void)
 		ms_panel(c, 750, 0, 750, 720, m, 0.4, 0.35, "a bumpy sphere: the nearest of three", sub);
 		ms_gd_draw(c, m, g, d, ms_gd_top(d, nv), src, 3, NULL, 0);
 		{
-			/* the regions' borders (qaws_mesh_3d_geodesic_nearest): across each triangle whose vertices' sources differ */
+			/* the regions' borders inside the triangles, from each source's exact distances */
 			static double const red[3] = { 210, 40, 40 };
-			unsigned int* lab = (unsigned int*)malloc(sizeof(unsigned int) * nv), ntr = qaws_mesh_3d_get_triangle_count(m), f, k;
-			if (lab && qaws_mesh_3d_geodesic_nearest(lab, m, d, src, 3) == QAWS_STATUS_OK)
-				for (f = 0; f < ntr; f++)
+			qaws_scalar* ds = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+			unsigned int cnt = 0, cap = 8192, k, s, ok = ds != NULL;
+			qaws_mesh_location* ends = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * 2 * cap);
+			clock_t t0 = clock();
+			for (s = 0; s < 3 && ok; s++)
+				ok = qaws_mesh_3d_geodesic_exact(ds + (size_t)s * nv, m, &src[s], 1, (qaws_scalar)HUGE_VAL) == QAWS_STATUS_OK;
+			if (ok && ends && qaws_mesh_3d_geodesic_borders(ends, NULL, &cnt, m, ds, 3, cap) == QAWS_STATUS_OK)
+				for (k = 0; k < cnt; k++)
 				{
-					unsigned int tv[3], nm = 0;
-					double mid[2][3];
-					qaws_mesh_3d_get_triangle(tv, m, f);
-					for (k = 0; k < 3 && nm < 2; k++)
-						if (lab[tv[k]] != lab[tv[(k + 1) % 3]])
-						{
-							qaws_vec3 a = qaws_mesh_3d_get_vertex(m, tv[k]), b = qaws_mesh_3d_get_vertex(m, tv[(k + 1) % 3]);
-							mid[nm][0] = 0.5 * ((double)a.x + b.x);
-							mid[nm][1] = 0.5 * ((double)a.y + b.y);
-							mid[nm][2] = 0.5 * ((double)a.z + b.z);
-							nm++;
-						}
-					if (nm == 2)
-						er_line(c, mid[0], mid[1], red, 2.4);
+					double pa[3], pb[3];
+					unsigned int z;
+					for (z = 0; z < 2; z++)
+					{
+						unsigned int tv[3], j;
+						qaws_mesh_location l = ends[2 * k + z];
+						double* q = z ? pb : pa;
+						qaws_mesh_3d_get_triangle(tv, m, l.patch);
+						for (j = 0; j < 3; j++)
+							q[j] = (1 - (double)l.a - (double)l.b) * x[3 * tv[0] + j] + (double)l.a * x[3 * tv[1] + j] + (double)l.b * x[3 * tv[2] + j];
+					}
+					er_line(c, pa, pb, red, 2.4);
 				}
-			free(lab);
+			printf("  bumpy sphere: %u border pieces, exact distances and borders in %.0f ms\n", cnt, 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC);
+			free(ds);
+			free(ends);
 		}
 		printf("  bumpy sphere: %s\n", sub);
 		qaws_mesh_geodesic_destroy(g);

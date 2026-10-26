@@ -823,6 +823,98 @@ static void test_nearest(void)
 	free(lab);
 }
 
+/* a location's point in space */
+static void gd_point(double* x, qaws_mesh_3d const* m, qaws_mesh_location l)
+{
+	unsigned int c[3], k;
+	qaws_vec3 p[3];
+	qaws_mesh_3d_get_triangle(c, m, l.patch);
+	for (k = 0; k < 3; k++) p[k] = qaws_mesh_3d_get_vertex(m, c[k]);
+	x[0] = (1 - (double)l.a - (double)l.b) * p[0].x + (double)l.a * p[1].x + (double)l.b * p[2].x;
+	x[1] = (1 - (double)l.a - (double)l.b) * p[0].y + (double)l.a * p[1].y + (double)l.b * p[2].y;
+	x[2] = (1 - (double)l.a - (double)l.b) * p[0].z + (double)l.a * p[1].z + (double)l.b * p[2].z;
+}
+
+/* the regions' borders inside the triangles: on a grid from three sources each piece's ends equally far from its two
+   sources, the junction at their circumcentre; on a cube from two faces' middles the exact distances (anywhere) equal at
+   every end */
+static void test_borders(void)
+{
+	unsigned int n = 12, nv = (n + 1) * (n + 1), i, s, cnt = 0, cnt2 = 0, junction = 0;
+	static unsigned int const sv[3][2] = { { 2, 3 }, { 9, 8 }, { 3, 10 } };
+	qaws_mesh_3d *m = gd_grids(n, 1), *cube = gd_cube(4);
+	qaws_mesh_location src[3], ends[2 * 256], cs[2];
+	unsigned int pairs[2 * 256], nvc = qaws_mesh_3d_get_vertex_count(cube);
+	qaws_scalar* d = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv > nvc ? nv : nvc));
+	double sp[3][3], eb = 0, ej = 1e300, ec = 0, cc[2];
+	qaws_status st = QAWS_STATUS_OK, st2 = QAWS_STATUS_OK, sshort;
+	char msg[400];
+	for (s = 0; s < 3; s++)
+	{
+		qaws_vec3 q = qaws_mesh_3d_get_vertex(m, sv[s][0] * (n + 1) + sv[s][1]);
+		src[s] = gd_at_vertex(m, sv[s][0] * (n + 1) + sv[s][1]);
+		sp[s][0] = q.x; sp[s][1] = q.y; sp[s][2] = q.z;
+		if (st == QAWS_STATUS_OK)
+			st = qaws_mesh_3d_geodesic_exact(d + (size_t)s * nv, m, &src[s], 1, (qaws_scalar)HUGE_VAL);
+	}
+	{
+		/* the circumcentre of the three in the plane */
+		double ax = sp[0][0], ay = sp[0][1], bx = sp[1][0], by = sp[1][1], cx = sp[2][0], cy = sp[2][1];
+		double D = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+		cc[0] = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / D;
+		cc[1] = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / D;
+	}
+	if (st == QAWS_STATUS_OK)
+		st = qaws_mesh_3d_geodesic_borders(ends, pairs, &cnt, m, d, 3, 256);
+	for (i = 0; st == QAWS_STATUS_OK && i < 2 * cnt; i++)
+	{
+		double x[3], da, db;
+		unsigned int a = pairs[2 * (i / 2)], b = pairs[2 * (i / 2) + 1];
+		gd_point(x, m, ends[i]);
+		da = sqrt((x[0] - sp[a][0]) * (x[0] - sp[a][0]) + (x[1] - sp[a][1]) * (x[1] - sp[a][1]));
+		db = sqrt((x[0] - sp[b][0]) * (x[0] - sp[b][0]) + (x[1] - sp[b][1]) * (x[1] - sp[b][1]));
+		eb = fmax(eb, fabs(da - db));
+		ej = fmin(ej, hypot(x[0] - cc[0], x[1] - cc[1]));
+	}
+	junction = ej < 1e-12;
+	sshort = qaws_mesh_3d_geodesic_borders(NULL, NULL, &cnt2, m, d, 3, 2);
+	/* the cube: the middles of its faces x = 0 and y = 0 */
+	for (s = 0; s < 2; s++)
+	{
+		for (i = 0; i < nvc; i++)
+		{
+			qaws_vec3 q = qaws_mesh_3d_get_vertex(cube, i);
+			double c0 = s ? q.y : q.x, c1 = s ? q.x : q.y;
+			if (c0 == 0 && fabs(c1 - 0.5) < 1e-12 && fabs((double)q.z - 0.5) < 1e-12)
+				break;
+		}
+		cs[s] = gd_at_vertex(cube, i);
+		if (st2 == QAWS_STATUS_OK)
+			st2 = qaws_mesh_3d_geodesic_exact(d + (size_t)s * nvc, cube, &cs[s], 1, (qaws_scalar)HUGE_VAL);
+	}
+	if (st2 == QAWS_STATUS_OK)
+		st2 = qaws_mesh_3d_geodesic_borders(ends, pairs, &cnt2, cube, d, 2, 256);
+	if (st2 == QAWS_STATUS_OK && cnt2)
+	{
+		qaws_scalar* da = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * cnt2);
+		qaws_scalar* db = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * cnt2);
+		st2 = qaws_mesh_3d_geodesic_exact_at(da, cube, &cs[0], ends, 1, 2 * cnt2);
+		if (st2 == QAWS_STATUS_OK)
+			st2 = qaws_mesh_3d_geodesic_exact_at(db, cube, &cs[1], ends, 1, 2 * cnt2);
+		for (i = 0; st2 == QAWS_STATUS_OK && i < 2 * cnt2; i++)
+			ec = fmax(ec, fabs((double)da[i] - (double)db[i]));
+		free(da);
+		free(db);
+	}
+	sprintf(msg, "regions' borders inside triangles: a grid from three sources, %u pieces, ends equally far from their two within %.1e, the junction at the circumcentre %d; short capacity %d; a cube from two faces' middles, %u pieces, exact distances equal within %.1e",
+		cnt, eb, junction, (int)sshort, cnt2, ec);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && st2 == QAWS_STATUS_OK && cnt > 10 && eb < 1e-12 && junction && sshort == QAWS_STATUS_BUFFER_TOO_SMALL && cnt2 > 10 && ec < 1e-12, msg);
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(cube);
+	free(d);
+}
+
 int test_164_mesh_geodesic_main(void)
 {
 	g_pass = 0;
@@ -835,6 +927,7 @@ int test_164_mesh_geodesic_main(void)
 	test_exact_saddles();
 	test_exact_at();
 	test_nearest();
+	test_borders();
 	test_parts();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
