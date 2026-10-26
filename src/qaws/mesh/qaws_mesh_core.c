@@ -125,24 +125,118 @@ void hm_kill_vertex(qaws_hm* m, unsigned int v)
 	m->hole[0][m->nhole[0]++] = v;
 }
 
+int hm_rule_unit(unsigned int rule)
+{
+	return rule == QAWS_ATTRIBUTE_NORMALIZED || rule == QAWS_ATTRIBUTE_NORMAL;
+}
+
+/* the sRGB transfer function and its inverse (odd beyond [0, 1]) */
+static double hm_srgb_decode(double c)
+{
+	double a = fabs(c), l = a <= 0.04045 ? a / 12.92 : pow((a + 0.055) / 1.055, 2.4);
+	return c < 0 ? -l : l;
+}
+
+static double hm_srgb_encode(double l)
+{
+	double a = fabs(l), c = a <= 0.0031308 ? 12.92 * a : 1.055 * pow(a, 1 / 2.4) - 0.055;
+	return l < 0 ? -c : c;
+}
+
+/* Ottosson's linear sRGB to LMS, and the cube roots of LMS to Oklab; back by their exact inverses (the published
+   inverses are rounded: a colour would come back off by 1e-8) */
+static double const hm_lms[9] = { 0.4122214708, 0.5363325363, 0.0514459929, 0.2119034982, 0.6806995451, 0.1073969566,
+	0.0883024619, 0.2817188376, 0.6299787005 };
+static double const hm_lab[9] = { 0.2104542553, 0.7936177850, -0.0040720468, 1.9779984951, -2.4285922050, 0.4505937099,
+	0.0259040371, 0.7827717662, -0.8086757660 };
+
+static void hm_mul3(double const* M, double* v)
+{
+	double x = v[0], y = v[1], z = v[2];
+	v[0] = M[0] * x + M[1] * y + M[2] * z;
+	v[1] = M[3] * x + M[4] * y + M[5] * z;
+	v[2] = M[6] * x + M[7] * y + M[8] * z;
+}
+
+/* v = M^-1 v (Cramer) */
+static void hm_solve3(double const* M, double* v)
+{
+	double c[9], d;
+	unsigned int i;
+	c[0] = M[4] * M[8] - M[5] * M[7]; c[1] = M[2] * M[7] - M[1] * M[8]; c[2] = M[1] * M[5] - M[2] * M[4];
+	c[3] = M[5] * M[6] - M[3] * M[8]; c[4] = M[0] * M[8] - M[2] * M[6]; c[5] = M[2] * M[3] - M[0] * M[5];
+	c[6] = M[3] * M[7] - M[4] * M[6]; c[7] = M[1] * M[6] - M[0] * M[7]; c[8] = M[0] * M[4] - M[1] * M[3];
+	d = M[0] * c[0] + M[1] * c[3] + M[2] * c[6];
+	for (i = 0; i < 9; i++)
+		c[i] /= d;
+	hm_mul3(c, v);
+}
+
+void hm_space_in(double* v, unsigned int n, unsigned int rule)
+{
+	unsigned int k;
+	if (rule != QAWS_ATTRIBUTE_SRGB && rule != QAWS_ATTRIBUTE_OKLAB)
+		return;
+	for (k = 0; k < 3; k++)
+		v[k] = hm_srgb_decode(v[k]);
+	if (rule == QAWS_ATTRIBUTE_OKLAB)
+	{
+		hm_mul3(hm_lms, v);
+		for (k = 0; k < 3; k++)
+			v[k] = cbrt(v[k]);
+		hm_mul3(hm_lab, v);
+	}
+	if (n > 3)
+		for (k = 0; k < 3; k++)
+			v[k] *= v[3];
+}
+
+void hm_space_out(double* v, unsigned int n, unsigned int rule)
+{
+	unsigned int k;
+	if (hm_rule_unit(rule))
+	{
+		double l = 0;
+		for (k = 0; k < n; k++)
+			l += v[k] * v[k];
+		if (l > 0)
+			for (l = 1 / sqrt(l), k = 0; k < n; k++)
+				v[k] *= l;
+		return;
+	}
+	if (rule != QAWS_ATTRIBUTE_SRGB && rule != QAWS_ATTRIBUTE_OKLAB)
+		return;
+	if (n > 3 && v[3] != 0)
+		for (k = 0; k < 3; k++)
+			v[k] /= v[3];
+	if (rule == QAWS_ATTRIBUTE_OKLAB)
+	{
+		hm_solve3(hm_lab, v);
+		for (k = 0; k < 3; k++)
+			v[k] = v[k] * v[k] * v[k];
+		hm_solve3(hm_lms, v);
+	}
+	for (k = 0; k < 3; k++)
+		v[k] = hm_srgb_encode(v[k]);
+}
+
 void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned int n, unsigned int rule)
 {
-	double tmp[16], l = 0;
+	double x[16], y[16];
 	unsigned int k;
 	if (rule == QAWS_ATTRIBUTE_NEAREST)
 	{
 		memmove(dst, t < 0.5 ? a : b, sizeof(double) * n);
 		return;
 	}
+	memcpy(x, a, sizeof(double) * n);
+	memcpy(y, b, sizeof(double) * n);
+	hm_space_in(x, n, rule);
+	hm_space_in(y, n, rule);
 	for (k = 0; k < n; k++)
-	{
-		tmp[k] = (1 - t) * a[k] + t * b[k];
-		l += tmp[k] * tmp[k];
-	}
-	if (rule == QAWS_ATTRIBUTE_NORMALIZED && l > 0)
-		for (l = 1 / sqrt(l), k = 0; k < n; k++)
-			tmp[k] *= l;
-	memcpy(dst, tmp, sizeof(double) * n);
+		x[k] = (1 - t) * x[k] + t * y[k];
+	hm_space_out(x, n, rule);
+	memcpy(dst, x, sizeof(double) * n);
 }
 
 /* the weighted mean of s values (vals + stride * pos[i]) by rule; NEAREST: the heaviest */
@@ -150,30 +244,27 @@ static void hm_blend(double* out, double const* vals, unsigned int stride, unsig
 	unsigned int s, unsigned int n, unsigned int rule)
 {
 	unsigned int i, j;
-	double best = -1, l = 0;
-	memset(out, 0, sizeof(double) * n);
+	double best = -1, acc[16], v[16];
+	memset(acc, 0, sizeof(double) * n);
 	for (i = 0; i < s; i++)
 	{
-		double const* v = vals + (size_t)stride * pos[i];
+		memcpy(v, vals + (size_t)stride * pos[i], sizeof(double) * n);
 		if (rule == QAWS_ATTRIBUTE_NEAREST)
 		{
 			if (w[i] > best)
 			{
 				best = w[i];
-				memcpy(out, v, sizeof(double) * n);
+				memcpy(acc, v, sizeof(double) * n);
 			}
 			continue;
 		}
+		hm_space_in(v, n, rule);
 		for (j = 0; j < n; j++)
-			out[j] += w[i] * v[j];
+			acc[j] += w[i] * v[j];
 	}
-	if (rule != QAWS_ATTRIBUTE_NORMALIZED)
-		return;
-	for (j = 0; j < n; j++)
-		l += out[j] * out[j];
-	if (l > 0)
-		for (l = 1 / sqrt(l), j = 0; j < n; j++)
-			out[j] *= l;
+	if (rule != QAWS_ATTRIBUTE_NEAREST)
+		hm_space_out(acc, n, rule);
+	memcpy(out, acc, sizeof(double) * n);
 }
 
 /* ======================================================================== */

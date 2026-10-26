@@ -194,6 +194,7 @@ extern int test_177_quads_pairing_main(void);
 extern int test_178_quad_layout_main(void);
 extern int test_179_motion_main(void);
 extern int test_180_mesh_sweep_main(void);
+extern int test_181_mesh_attribute_carry_main(void);
 
 /* Test registry */
 typedef struct {
@@ -383,6 +384,7 @@ static test_suite const g_test_suites[] = {
 	{"178_quad_layout", test_178_quad_layout_main},
 	{"179_motion", test_179_motion_main},
 	{"180_mesh_sweep", test_180_mesh_sweep_main},
+	{"181_mesh_attribute_carry", test_181_mesh_attribute_carry_main},
 };
 
 int main(void) {

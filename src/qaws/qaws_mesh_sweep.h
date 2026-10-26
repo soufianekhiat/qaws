@@ -41,6 +41,12 @@
  *
  * A vertex motion must have the mesh's vertex count; the mesh's positions
  * are then ignored (the motion's at each time are used).
+ *
+ * The mesh's attributes are carried as qaws_mesh_3d_boolean carries them
+ * (vertex ones come out per corner): each layer repeats the mesh's values, a
+ * wall along its edge the front face's corners' there; directions (NORMAL,
+ * and NORMALIZED of 3 components) turn with a rigid motion's rotation, and a
+ * NORMAL face attribute on a wall is the wall's own normal.
  */
 
 typedef struct qaws_sweep_desc
@@ -73,6 +79,8 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out_mesh, qaws_sweep_report* repor
  * Each move's sweep (qaws_mesh_3d_sweep), then all of them as one operand
  * (overlapping closed parts: their winding numbers add, a union) against the
  * stock by qaws_mesh_boolean. The volumes are the meshes' signed volumes.
+ * The tool's and the stock's attributes are carried, matched by name
+ * (qaws_mesh_3d_boolean).
  */
 typedef struct qaws_sweep_boolean_report
 {

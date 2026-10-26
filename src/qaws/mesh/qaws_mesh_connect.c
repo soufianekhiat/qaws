@@ -320,6 +320,8 @@ static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 					: C->a->hm.cf[C->a->hm.vc[v]];
 				for (k = 0; k < dim; k++)
 					la[(size_t)dim * j + k] = (double)va[(size_t)dim * e + k];
+				if (da.element != QAWS_MESH_FACE && da.rule != QAWS_ATTRIBUTE_NEAREST)
+					hm_space_in(la + (size_t)dim * j, dim, da.rule);
 			}
 			for (j = 0; j < C->B->n; j++)
 			{
@@ -327,6 +329,8 @@ static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 					: mb->hm.cf[mb->hm.vc[v]];
 				for (k = 0; k < dim; k++)
 					lb[(size_t)dim * j + k] = (double)srcb[(size_t)dim * e + k];
+				if (da.element != QAWS_MESH_FACE && da.rule != QAWS_ATTRIBUTE_NEAREST)
+					hm_space_in(lb + (size_t)dim * j, dim, da.rule);
 			}
 			if (da.element == QAWS_MESH_FACE)
 				for (j = C->nfa + C->nfb; j < C->nf; j++)
@@ -346,7 +350,7 @@ static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 				for (j = 0; j < cnt; j++)
 				{
 					unsigned int v = da.element == QAWS_MESH_VERTEX ? nbase + j : C->fv[nbase + j];
-					double xa[16], xb[16], w, s, l2 = 0;
+					double xa[16], xb[16], w, s;
 					qaws_scalar* o = vo + (size_t)dim * (nbase + j);
 					if (v >= C->nva + C->nvb)
 					{
@@ -369,13 +373,11 @@ static qaws_status cn_carry_attributes(cn_carry const* C, qaws_mesh_3d* out)
 					cn_lerp(C->A, la, dim, s, xa);
 					cn_lerp(C->B, lb, dim, s, xb);
 					for (k = 0; k < dim; k++)
-					{
-						double y = da.rule == QAWS_ATTRIBUTE_NEAREST ? (w < 0.5 ? xa[k] : xb[k]) : (1 - w) * xa[k] + w * xb[k];
-						xa[k] = y;
-						l2 += y * y;
-					}
+						xa[k] = da.rule == QAWS_ATTRIBUTE_NEAREST ? (w < 0.5 ? xa[k] : xb[k]) : (1 - w) * xa[k] + w * xb[k];
+					if (da.rule != QAWS_ATTRIBUTE_NEAREST)
+						hm_space_out(xa, dim, da.rule);
 					for (k = 0; k < dim; k++)
-						o[k] = (qaws_scalar)(da.rule == QAWS_ATTRIBUTE_NORMALIZED && l2 > 0 ? xa[k] / sqrt(l2) : xa[k]);
+						o[k] = (qaws_scalar)xa[k];
 				}
 			}
 			st = qaws_mesh_3d_add_attribute(&at, out, vo, &da);

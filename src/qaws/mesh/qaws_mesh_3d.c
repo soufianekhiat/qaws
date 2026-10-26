@@ -893,7 +893,8 @@ qaws_status qaws_mesh_3d_add_attribute(unsigned int* out_attribute, qaws_mesh_3d
 	if (out_attribute)
 		*out_attribute = QAWS_MESH_NONE;
 	if (!mesh || !desc || desc->components < 1 || desc->components > 16 || (unsigned int)desc->element > QAWS_MESH_FACE
-		|| (unsigned int)desc->rule > QAWS_ATTRIBUTE_NEAREST)
+		|| (unsigned int)desc->rule > QAWS_ATTRIBUTE_OKLAB || (desc->rule == QAWS_ATTRIBUTE_NORMAL && desc->components != 3)
+		|| ((desc->rule == QAWS_ATTRIBUTE_SRGB || desc->rule == QAWS_ATTRIBUTE_OKLAB) && (desc->components < 3 || desc->components > 4)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	a = hm_attr_add(&mesh->hm, desc->name, (unsigned int)desc->element, (unsigned int)desc->rule, desc->components);
 	if (a == HM_NONE)

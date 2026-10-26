@@ -145,6 +145,11 @@ unsigned int hm_attr_add(qaws_hm* m, char const* name, unsigned int element, uns
 void hm_attr_remove(qaws_hm* m, unsigned int a);
 double* hm_attr_at(qaws_hm const* m, unsigned int a, unsigned int i);
 void hm_lerp(double* dst, double const* a, double const* b, double t, unsigned int n, unsigned int rule);
+/* a value into the space its rule blends in (colours: sRGB decoded to linear light, then Oklab; weighted by alpha) and
+   back (unit rules normalized); mixing between the two is linear */
+void hm_space_in(double* v, unsigned int n, unsigned int rule);
+void hm_space_out(double* v, unsigned int n, unsigned int rule);
+int hm_rule_unit(unsigned int rule);   /* NORMALIZED or NORMAL */
 int hm_foot_enable(qaws_hm* m);
 unsigned int hm_new_vertex(qaws_hm* m, double const* x);   /* capacity reserved by the caller */
 void hm_kill_vertex(qaws_hm* m, unsigned int v);

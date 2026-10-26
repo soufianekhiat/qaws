@@ -12,6 +12,15 @@
 #include "../qaws_volume_mesh.h"
 #include "../internal/qaws_internal_broadphase.h"
 #include "../internal/qaws_internal_ldlt.h"
+#include "../qaws_mesh_boolean.h"
+
+/* qaws_mesh_boolean; one: edges inside flat regions turned only between pieces of one source face; out_turned (may be
+   NULL, freed by the caller): per result face, 1 where it was turned over (qaws_internal_free; NULL on failure) */
+qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d_desc const* a, qaws_mesh_3d_desc const* b,
+	qaws_boolean_op op, qaws_intersect_desc const* desc, int one, unsigned char** out_turned);
+/* qaws_mesh_3d_boolean of soups of meshes: a's (na of them) as one operand, b's (nb; 0: the self-union) as the other */
+qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d const* const* a, unsigned int na,
+	qaws_mesh_3d const* const* b, unsigned int nb, qaws_boolean_op op, qaws_intersect_desc const* desc);
 
 /* ---- interpolants ------------------------------------------------------
  *

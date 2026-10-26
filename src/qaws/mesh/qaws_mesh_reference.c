@@ -935,7 +935,7 @@ qaws_status qaws_mesh_reference_evaluate_attribute(qaws_scalar* out, qaws_mesh_r
 	for (i = 0; i < count; i++)
 	{
 		unsigned int t = loc[i].patch, j;
-		double w[3], v[16] = { 0 }, best = -1, l = 0;
+		double w[3], v[16] = { 0 }, best = -1;
 		w[1] = (double)loc[i].a;
 		w[2] = (double)loc[i].b;
 		w[0] = 1 - w[1] - w[2];
@@ -944,7 +944,10 @@ qaws_status qaws_mesh_reference_evaluate_attribute(qaws_scalar* out, qaws_mesh_r
 		else
 			for (j = 0; j < 3; j++)
 			{
-				double const* s = hm_attr_at(m, attribute, at->element == QAWS_MESH_VERTEX ? r->tv[3 * t + j] : r->tc[3 * t + j]);
+				double s[16];
+				memcpy(s, hm_attr_at(m, attribute, at->element == QAWS_MESH_VERTEX ? r->tv[3 * t + j] : r->tc[3 * t + j]), sizeof(double) * at->n);
+				if (at->rule != QAWS_ATTRIBUTE_NEAREST)
+					hm_space_in(s, at->n, at->rule);
 				if (at->rule == QAWS_ATTRIBUTE_NEAREST)
 				{
 					if (w[j] > best)
@@ -957,14 +960,8 @@ qaws_status qaws_mesh_reference_evaluate_attribute(qaws_scalar* out, qaws_mesh_r
 					for (k = 0; k < at->n; k++)
 						v[k] += w[j] * s[k];
 			}
-		if (at->rule == QAWS_ATTRIBUTE_NORMALIZED)
-		{
-			for (k = 0; k < at->n; k++)
-				l += v[k] * v[k];
-			if (l > 0)
-				for (l = 1 / sqrt(l), k = 0; k < at->n; k++)
-					v[k] *= l;
-		}
+		if (at->element != QAWS_MESH_FACE && at->rule != QAWS_ATTRIBUTE_NEAREST)
+			hm_space_out(v, at->n, at->rule);
 		for (k = 0; k < at->n; k++)
 			out[(size_t)at->n * i + k] = (qaws_scalar)v[k];
 	}

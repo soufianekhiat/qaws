@@ -75,7 +75,14 @@ typedef enum qaws_attribute_rule
 {
 	QAWS_ATTRIBUTE_LINEAR = 0,          /* interpolated linearly (along an edge, or barycentric at a footpoint) */
 	QAWS_ATTRIBUTE_NORMALIZED,          /* linearly, then scaled to unit length (normals, tangents) */
-	QAWS_ATTRIBUTE_NEAREST              /* the nearest value: material ids, labels */
+	QAWS_ATTRIBUTE_NEAREST,             /* the nearest value: material ids, labels */
+	QAWS_ATTRIBUTE_NORMAL,              /* a normal (3 components): as NORMALIZED, and negated on the faces an operation
+	                                       turns over (a Boolean's reversed pieces); rotated with a swept mesh */
+	QAWS_ATTRIBUTE_SRGB,                /* a colour stored sRGB-encoded (3 components, or 4 with alpha), blended in linear
+	                                       light: decoded, mixed, encoded again; alpha mixed linearly, the colours weighted
+	                                       by it (premultiplied) */
+	QAWS_ATTRIBUTE_OKLAB                /* the same colours blended in Oklab (perceptually even, no dark or muddy
+	                                       midpoints between hues) */
 } qaws_attribute_rule;
 #endif
 
@@ -239,7 +246,8 @@ qaws_status qaws_mesh_3d_cut_isolines(unsigned int* out_edge_count, qaws_mesh_3d
 /* ---- attributes -------------------------------------------------------- */
 
 /* values: components per vertex, per corner (in qaws_mesh_3d_get_faces
-   order) or per face; NULL: zeros. */
+   order) or per face; NULL: zeros. INVALID_ARGUMENT for a NORMAL attribute
+   not of 3 components, an SRGB or OKLAB one not of 3 or 4. */
 qaws_status qaws_mesh_3d_add_attribute(unsigned int* out_attribute, qaws_mesh_3d* mesh, qaws_scalar const* values,
 	qaws_attribute_desc const* desc);
 unsigned int qaws_mesh_3d_get_attribute_count(qaws_mesh_3d const* mesh);

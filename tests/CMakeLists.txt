@@ -182,6 +182,7 @@ add_executable(
 178_quad_layout.c
 179_motion.c
 180_mesh_sweep.c
+181_mesh_attribute_carry.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

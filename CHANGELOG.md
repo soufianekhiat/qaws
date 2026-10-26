@@ -64,6 +64,11 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `qaws_mesh_3d_boolean`: Booleans of meshes carrying their attributes (matched by name; vertex and corner values
+  interpolated by rule in their source faces, per corner; face values copied; NORMAL ones negated on turned pieces).
+  `qaws_mesh_3d_sweep` and `qaws_mesh_sweep_boolean` carry attributes the same way, directions turned with the motion.
+  Attribute rules `NORMAL`, `SRGB` (linear-light blending) and `OKLAB` (perceptual blending), alpha premultiplied,
+  honoured by every operator that mixes values. Test 181, figure 61.
 - `qaws_mesh_sweep_boolean`: continuous Booleans, a tool swept along a sequence of moves against a stock (carving,
   sculpting, contact), the changed volume reported. Test 180, figure 60.
 - `qaws_mesh_3d_sweep` (`qaws_mesh_sweep.h`): the solid a closed mesh sweeps under a `qaws_motion`, time cut by the

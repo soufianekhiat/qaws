@@ -2796,7 +2796,7 @@ static void sx_tri_x(qaws_scalar const* pos, unsigned int const* t, unsigned int
 /* edge e = 3 f + i (f's corners a b c, the neighbour's d) worth turning: both faces in one plane, the quad convex, the
    opposite angles over pi, both faces of one operand (the caller checks the edge c d is new) */
 static int sx_flat_flip_ok(unsigned int const* t, qaws_scalar const* src, unsigned int const* nb, qaws_scalar const* pos, unsigned int e, double eps,
-	unsigned int split)
+	unsigned int split, int one)
 {
 	unsigned int f = e / 3, i = e % 3, g, j;
 	double P[3][3], Q[3][3], n1[3], n2[3], u[3], v[3], l, a[3], b[3], c[3], d[3], s1, s2, w[3];
@@ -2805,7 +2805,7 @@ static int sx_flat_flip_ok(unsigned int const* t, qaws_scalar const* src, unsign
 		return 0;
 	g = nb[e] / 3;
 	j = nb[e] % 3;
-	if (((unsigned int)src[f] < split) != ((unsigned int)src[g] < split))
+	if (((unsigned int)src[f] < split) != ((unsigned int)src[g] < split) || (one && src[f] != src[g]))
 		return 0;
 	sx_tri_x(pos, t, f, P);
 	sx_tri_x(pos, t, g, Q);
@@ -2875,6 +2875,7 @@ typedef struct sx_flat_scan
 	qaws_scalar const* pos;
 	double eps;
 	unsigned int split;
+	int one;
 	unsigned char* ok;
 } sx_flat_scan;
 
@@ -2884,7 +2885,7 @@ static qaws_status sx_flat_scan_job(void* user, unsigned int chunk, unsigned int
 	unsigned int e;
 	(void)chunk;
 	for (e = begin; e < end; e++)
-		S->ok[e] = S->nb[e] != SX_NONE && S->nb[e] > e && sx_flat_flip_ok(S->t, S->src, S->nb, S->pos, e, S->eps, S->split);
+		S->ok[e] = S->nb[e] != SX_NONE && S->nb[e] > e && sx_flat_flip_ok(S->t, S->src, S->nb, S->pos, e, S->eps, S->split, S->one);
 	return QAWS_STATUS_OK;
 }
 
@@ -2964,9 +2965,10 @@ static qaws_status sx_uses_job(void* user, unsigned int chunk, unsigned int begi
    input faces' edges kept; the shape does not change. The kept faces t come from the arrangement's pieces through
    kmap, whose edge uses grp (ngrp) give the neighbours nb (3 nt, SX_NONE across an edge not of exactly two faces turned
    opposite ways; as turned at the end). Returns the edges turned, and whether every directed edge is cancelled by one
-   turned the other way (closed; turning keeps that). */
+   turned the other way (closed; turning keeps that). one: only edges between pieces of one source face (attributes
+   carried from it are then never extrapolated). */
 static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int nt, qaws_scalar const* pos, double eps, unsigned int split,
-	unsigned long long const* grp, unsigned int ngrp, unsigned int const* kmap, unsigned int* nb, int* closed, qaws_batch_executor const* executor,
+	int one, unsigned long long const* grp, unsigned int ngrp, unsigned int const* kmap, unsigned int* nb, int* closed, qaws_batch_executor const* executor,
 	int* oom)
 {
 	unsigned int n = 3 * nt, cap = 16, i, top = 0, flips = 0, guard = 10 * nt + 64, nv = 0;
@@ -3014,6 +3016,7 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 		S.pos = pos;
 		S.eps = eps;
 		S.split = split;
+		S.one = one;
 		S.ok = (unsigned char*)qaws_internal_malloc((size_t)n + 1);
 		if (!S.ok || qaws_internal_parallel(n, 4096, sx_flat_scan_job, &S, executor) != QAWS_STATUS_OK)
 		{
@@ -3031,7 +3034,7 @@ static unsigned int sx_flatten(unsigned int* t, qaws_scalar* src, unsigned int n
 		unsigned int e = stack[--top], f, g, a, b, c, d, nbc, nca, nad, ndb;
 		int k;
 		unsigned int ei, ej;
-		if (!sx_flat_flip_ok(t, src, nb, pos, e, eps, split))
+		if (!sx_flat_flip_ok(t, src, nb, pos, e, eps, split, one))
 			continue;
 		f = e / 3;
 		ei = e % 3;
@@ -3108,6 +3111,12 @@ out:
 qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d_desc const* a, qaws_mesh_3d_desc const* b,
 	qaws_boolean_op op, qaws_intersect_desc const* desc)
 {
+	return sx_boolean(out, report, a, b, op, desc, 0, NULL);
+}
+
+qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d_desc const* a, qaws_mesh_3d_desc const* b,
+	qaws_boolean_op op, qaws_intersect_desc const* desc, int one, unsigned char** out_turned)
+{
 	qaws_boolean_report local;
 	qaws_scalar *x = NULL, *kpos = NULL, *keep_src = NULL, *pts = NULL, *wa = NULL, *wb = NULL;
 	unsigned int *fv = NULL, *fs = NULL, *ta = NULL, *tb = NULL, *keep = NULL, *used = NULL;
@@ -3121,6 +3130,8 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 	qaws_status st;
 	unsigned int na = 0, nb = 0, nv, nf, i, j, k, nk = 0, two = b != NULL;
 	memset(&o, 0, sizeof o);
+	if (out_turned)
+		*out_turned = NULL;
 	if (!report)
 		report = &local;
 	memset(report, 0, sizeof *report);
@@ -3401,6 +3412,15 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 		report->flipped += (unsigned int)front;
 	}
 	report->kept = nk;
+	if (out_turned)
+	{
+		*out_turned = (unsigned char*)qaws_internal_malloc((size_t)nk + 1);
+		if (!*out_turned)
+			goto oom;
+		for (i = 0; i < o.nt; i++)
+			if (kmap[i] != SX_NONE)
+				(*out_turned)[kmap[i] >> 1] = (unsigned char)(kmap[i] & 1);
+	}
 	/* the vertices kept, compacted */
 	{
 		unsigned int m = 0;
@@ -3420,7 +3440,7 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, q
 			kopp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nk + 1));
 			if (!kopp)
 				goto oom;
-			report->flat_flips = sx_flatten(keep, keep_src, nk, kpos, o.eps, a->face_count, grp, 3 * o.nt, kmap, kopp, &report->closed,
+			report->flat_flips = sx_flatten(keep, keep_src, nk, kpos, o.eps, a->face_count, one, grp, 3 * o.nt, kmap, kopp, &report->closed,
 				desc ? desc->executor : NULL, &bad);
 			if (bad)
 				goto oom;

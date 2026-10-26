@@ -101,7 +101,7 @@ static void sdv_rules(double* row, double const* pick, sdv_cols const* k, unsign
 			continue;
 		if (t->rule == QAWS_ATTRIBUTE_NEAREST)
 			memcpy(row + t->off, pick + t->off, sizeof(double) * t->n);
-		else if (t->rule == QAWS_ATTRIBUTE_NORMALIZED)
+		else if (hm_rule_unit(t->rule))
 		{
 			for (j = 0; j < t->n; j++) l += row[t->off + j] * row[t->off + j];
 			l = sqrt(l);
@@ -1549,7 +1549,11 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		double* rows = at[a].element == QAWS_MESH_VERTEX ? m.X : (at[a].element == QAWS_MESH_CORNER ? m.C : m.F);
 		qaws_mesh_3d_get_attribute(sv, mesh, a);
 		for (i = 0; i < count; i++)
+		{
 			for (j = 0; j < at[a].n; j++) rows[(size_t)i * w + at[a].off + j] = (double)sv[(size_t)i * at[a].n + j];
+			if (at[a].rule != QAWS_ATTRIBUTE_NEAREST)
+				hm_space_in(rows + (size_t)i * w + at[a].off, at[a].n, at[a].rule);   /* (mixed in the rule's space, back at the end) */
+		}
 	}
 	qaws_internal_free(sv);
 	qaws_internal_free(fsz);
@@ -1620,10 +1624,14 @@ qaws_status qaws_mesh_3d_subdivide(qaws_mesh_3d** out_mesh, qaws_mesh_3d const* 
 		qaws_attribute_desc d;
 		unsigned int count = at[a].element == QAWS_MESH_VERTEX ? m.nv : (at[a].element == QAWS_MESH_CORNER ? m.nc : m.nf);
 		unsigned int w = at[a].element == QAWS_MESH_VERTEX ? k.kv : (at[a].element == QAWS_MESH_CORNER ? k.kc : k.kf), id;
-		double const* rows = at[a].element == QAWS_MESH_VERTEX ? m.X : (at[a].element == QAWS_MESH_CORNER ? m.C : m.F);
+		double* rows = at[a].element == QAWS_MESH_VERTEX ? m.X : (at[a].element == QAWS_MESH_CORNER ? m.C : m.F);
 		qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
 		for (i = 0; i < count; i++)
+		{
+			if (at[a].rule != QAWS_ATTRIBUTE_NEAREST)
+				hm_space_out(rows + (size_t)i * w + at[a].off, at[a].n, at[a].rule);
 			for (j = 0; j < at[a].n; j++) sv[(size_t)i * at[a].n + j] = (qaws_scalar)rows[(size_t)i * w + at[a].off + j];
+		}
 		st = qaws_mesh_3d_add_attribute(&id, out, sv, &d);
 	}
 	if (ln && st == QAWS_STATUS_OK)

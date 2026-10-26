@@ -27,6 +27,127 @@ static qaws_status swp_at(swp_ctx* c, double t, double* X)
 	return st;
 }
 
+/* the soup as a mesh carrying the swept mesh's attributes: per soup face its triangle (sof; bit 31: turned, 30: a wall), per
+   soup corner the triangle's corner it repeats (soc), on the layer of its vertex; vertex attributes become corner ones,
+   directions (NORMAL, and NORMALIZED of 3 components) turn with a rigid motion, NORMAL ones are negated on turned faces;
+   a wall's NORMAL face value is its own normal (its face's is not: a wall stands across it) */
+static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d_desc const* md,
+	unsigned int const* sof, unsigned int const* soc, unsigned int nv, double const* layer_t, unsigned int layers)
+{
+	unsigned int na = qaws_mesh_3d_get_attribute_count(mesh), nf = qaws_mesh_3d_get_face_count(mesh), nc = qaws_mesh_3d_get_corner_count(mesh);
+	unsigned int nt = qaws_mesh_3d_get_triangle_count(mesh), a, i, j, k, *fv = NULL, *fs = NULL, *tf = NULL, *tc = NULL;
+	qaws_scalar *val = NULL, *sv = NULL;
+	double* rot = NULL;
+	qaws_status st;
+	int rigid = !qaws_motion_is_per_vertex(motion);
+	if ((st = qaws_mesh_3d_create(out, md)) != QAWS_STATUS_OK)
+		return st;
+	fv = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nc + 1));
+	fs = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
+	tf = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
+	tc = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + 1));
+	val = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 16, (size_t)(nv > nc ? (nv > nf ? nv : nf) : (nc > nf ? nc : nf)) + 1));
+	sv = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 16, 3 * (size_t)md->face_count + 1));
+	rot = (double*)qaws_internal_scratch_malloc(sizeof(double) * (9 * (size_t)layers + 1));
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!fv || !fs || !tf || !tc || !val || !sv || !rot)
+		goto done;
+	/* the triangles (fanned from each face's first corner) back to their faces' corners */
+	qaws_mesh_3d_get_faces(fv, fs, mesh);
+	for (i = 0, j = 0, k = 0; i < nf; k += fs[i++])
+		for (a = 0; a + 2 < fs[i]; a++, j++)
+		{
+			tf[j] = i;
+			tc[3 * (size_t)j] = k;
+			tc[3 * (size_t)j + 1] = k + a + 1;
+			tc[3 * (size_t)j + 2] = k + a + 2;
+		}
+	for (i = 0; i < layers; i++)
+	{
+		qaws_motion_state s;
+		if (rigid && qaws_motion_evaluate(&s, motion, (qaws_scalar)layer_t[i]) == QAWS_STATUS_OK)
+			for (k = 0; k < 9; k++)
+				rot[9 * (size_t)i + k] = (double)s.rotation[k];
+		else
+			for (k = 0; k < 9; k++)
+				rot[9 * (size_t)i + k] = k % 4 == 0;
+	}
+	st = QAWS_STATUS_OK;
+	for (a = 0; a < na && st == QAWS_STATUS_OK; a++)
+	{
+		qaws_attribute_desc d;
+		unsigned int n, id, cnt;
+		int dir;
+		qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
+		if (d.name && !strcmp(d.name, "source"))
+			continue;
+		n = d.components;
+		dir = d.rule == QAWS_ATTRIBUTE_NORMAL || (d.rule == QAWS_ATTRIBUTE_NORMALIZED && n == 3);
+		qaws_mesh_3d_get_attribute(val, mesh, a);
+		cnt = d.element == QAWS_MESH_FACE ? md->face_count : 3 * md->face_count;
+		for (i = 0; i < cnt; i++)
+		{
+			unsigned int g = d.element == QAWS_MESH_FACE ? sof[i] : sof[i / 3], f = g & 0x3FFFFFFFu, turned = g >> 31;
+			unsigned int c = d.element == QAWS_MESH_FACE ? 0 : tc[soc[i]], e = d.element == QAWS_MESH_FACE ? tf[f] : d.element == QAWS_MESH_VERTEX ? fv[c] : c;
+			unsigned int layer = d.element == QAWS_MESH_FACE ? 0 : md->face_vertices[i] / nv;
+			qaws_scalar const* x = val + (size_t)n * e;
+			qaws_scalar* o = sv + (size_t)n * i;
+			for (k = 0; k < n; k++)
+				o[k] = x[k];
+			if (dir && d.element != QAWS_MESH_FACE)
+			{
+				double const* R = rot + 9 * (size_t)layer;
+				for (k = 0; k < 3; k++)
+					o[k] = (qaws_scalar)(R[3 * k] * (double)x[0] + R[3 * k + 1] * (double)x[1] + R[3 * k + 2] * (double)x[2]);
+			}
+			if (d.rule == QAWS_ATTRIBUTE_NORMAL && turned)
+				for (k = 0; k < 3; k++)
+					o[k] = -o[k];
+		}
+		for (i = 0; d.rule == QAWS_ATTRIBUTE_NORMAL && d.element == QAWS_MESH_FACE && i < cnt; i++)
+			if (sof[i] >> 30 & 1)
+			{
+				qaws_scalar const *p0 = md->positions + 3 * (size_t)md->face_vertices[3 * (size_t)i], *p1 = md->positions + 3 * (size_t)md->face_vertices[3 * (size_t)i + 1],
+					*p2 = md->positions + 3 * (size_t)md->face_vertices[3 * (size_t)i + 2];
+				double u[3], w[3], nn[3], l;
+				for (k = 0; k < 3; k++)
+				{
+					u[k] = (double)p1[k] - (double)p0[k];
+					w[k] = (double)p2[k] - (double)p0[k];
+				}
+				nn[0] = u[1] * w[2] - u[2] * w[1];
+				nn[1] = u[2] * w[0] - u[0] * w[2];
+				nn[2] = u[0] * w[1] - u[1] * w[0];
+				l = sqrt(nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2]);
+				for (k = 0; k < 3; k++)
+					sv[3 * (size_t)i + k] = (qaws_scalar)(l > 0 ? nn[k] / l : 0);
+			}
+		/* (a face attribute's directions: the motion at 0, as the solid at 0's) */
+		if (dir && d.element == QAWS_MESH_FACE)
+			for (i = 0; i < cnt; i++)
+			{
+				qaws_scalar* o = sv + (size_t)n * i;
+				double y[3];
+				for (k = 0; k < 3; k++)
+					y[k] = rot[3 * k] * (double)o[0] + rot[3 * k + 1] * (double)o[1] + rot[3 * k + 2] * (double)o[2];
+				for (k = 0; k < 3; k++)
+					o[k] = (qaws_scalar)y[k];
+			}
+		if (d.element == QAWS_MESH_VERTEX)
+			d.element = QAWS_MESH_CORNER;
+		st = qaws_mesh_3d_add_attribute(&id, *out, sv, &d);
+	}
+done:
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_mesh_3d_destroy(*out);
+		*out = NULL;
+	}
+	qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(tf); qaws_internal_free(tc); qaws_internal_free(val);
+	qaws_internal_free(sv); qaws_internal_free(rot);
+	return st;
+}
+
 static int swp_cmp_u64(void const* a, void const* b)
 {
 	unsigned long long x = *(unsigned long long const*)a, y = *(unsigned long long const*)b;
@@ -48,7 +169,7 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	unsigned long long* key = NULL;
 	double *Xa = NULL, *Xb = NULL, *Xm = NULL, *times = NULL, tol, lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, diag = 0;
 	qaws_scalar *px = NULL, *sx = NULL;
-	unsigned int *sf = NULL, snv = 0, snf = 0, capv = 0, capf = 0;
+	unsigned int *sf = NULL, *sof = NULL, *soc = NULL, snv = 0, snf = 0, capv = 0, capf = 0;
 	unsigned char *front = NULL, *fr = NULL;
 	qaws_intersect_desc id;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -191,7 +312,9 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 		sx = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)capv + 1));
 		sf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)capf + 1));
 		fr = (unsigned char*)qaws_internal_scratch_malloc(qaws_internal_mul2((size_t)nt, S) + 1);
-		if (!sx || !sf || !fr)
+		sof = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)capf + 1));
+		soc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)capf + 1));
+		if (!sx || !sf || !fr || !sof || !soc)
 			goto oom;
 	}
 	for (ns = 0; ns <= report->slabs; ns++)
@@ -203,6 +326,11 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	}
 	snv = nv * (report->slabs + 1);
 	memcpy(sf, t, sizeof(unsigned int) * 3 * (size_t)nt);
+	for (i = 0; i < 3 * nt; i++)
+	{
+		sof[i / 3] = i / 3;
+		soc[i] = i;
+	}
 	snf = nt;
 	/* front faces per slab: the normal at its start against the vertices' mean displacement over it */
 	for (ns = 0; ns < report->slabs; ns++)
@@ -241,11 +369,15 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			/* the face at the start turned (unless the slab before extruded it), at the end (unless the next one does) */
 			if (!fp || !fp[f])
 			{
-				sf[3 * (size_t)snf] = oa + t[3 * f]; sf[3 * (size_t)snf + 1] = oa + t[3 * f + 2]; sf[3 * (size_t)snf + 2] = oa + t[3 * f + 1]; snf++;
+				sf[3 * (size_t)snf] = oa + t[3 * f]; sf[3 * (size_t)snf + 1] = oa + t[3 * f + 2]; sf[3 * (size_t)snf + 2] = oa + t[3 * f + 1];
+				sof[snf] = f | 0x80000000u;
+				soc[3 * (size_t)snf] = 3 * f; soc[3 * (size_t)snf + 1] = 3 * f + 2; soc[3 * (size_t)snf + 2] = 3 * f + 1; snf++;
 			}
 			if (!fn || !fn[f])
 			{
-				sf[3 * (size_t)snf] = ob + t[3 * f]; sf[3 * (size_t)snf + 1] = ob + t[3 * f + 1]; sf[3 * (size_t)snf + 2] = ob + t[3 * f + 2]; snf++;
+				sf[3 * (size_t)snf] = ob + t[3 * f]; sf[3 * (size_t)snf + 1] = ob + t[3 * f + 1]; sf[3 * (size_t)snf + 2] = ob + t[3 * f + 2];
+				sof[snf] = f;
+				soc[3 * (size_t)snf] = 3 * f; soc[3 * (size_t)snf + 1] = 3 * f + 1; soc[3 * (size_t)snf + 2] = 3 * f + 2; snf++;
 			}
 			/* walls on the border of the front region: edge u -> v, the quad (u, v, v', u') */
 			for (j = 0; j < 3; j++)
@@ -253,8 +385,12 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 				unsigned int g = twin[3 * f + j], u = t[3 * f + j], v = t[3 * f + (j + 1) % 3];
 				if (g != 0xFFFFFFFFu && fs[g])
 					continue;
-				sf[3 * (size_t)snf] = oa + u; sf[3 * (size_t)snf + 1] = oa + v; sf[3 * (size_t)snf + 2] = ob + v; snf++;
-				sf[3 * (size_t)snf] = oa + u; sf[3 * (size_t)snf + 1] = ob + v; sf[3 * (size_t)snf + 2] = ob + u; snf++;
+				sf[3 * (size_t)snf] = oa + u; sf[3 * (size_t)snf + 1] = oa + v; sf[3 * (size_t)snf + 2] = ob + v;
+				sof[snf] = f | 0x40000000u;
+				soc[3 * (size_t)snf] = 3 * f + j; soc[3 * (size_t)snf + 1] = 3 * f + (j + 1) % 3; soc[3 * (size_t)snf + 2] = 3 * f + (j + 1) % 3; snf++;
+				sf[3 * (size_t)snf] = oa + u; sf[3 * (size_t)snf + 1] = ob + v; sf[3 * (size_t)snf + 2] = ob + u;
+				sof[snf] = f | 0x40000000u;
+				soc[3 * (size_t)snf] = 3 * f + j; soc[3 * (size_t)snf + 1] = 3 * f + (j + 1) % 3; soc[3 * (size_t)snf + 2] = 3 * f + j; snf++;
 			}
 		}
 	}
@@ -267,7 +403,19 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 		md.face_count = snf;
 		memset(&id, 0, sizeof id);
 		id.executor = desc ? desc->executor : NULL;
-		st = qaws_mesh_boolean(out, &report->boolean, &md, NULL, QAWS_BOOLEAN_UNION, &id);
+		if (qaws_mesh_3d_get_attribute_count(mesh))
+		{
+			/* the attributes carried: the soup as a mesh of them */
+			qaws_mesh_3d* soup = NULL;
+			for (ns = 0; ns <= report->slabs; ns++)
+				times[ns] = ns < report->slabs ? times[2 * (size_t)ns] : times[2 * (size_t)ns - 1];   /* (each layer's time, in place) */
+			st = swp_soup(&soup, mesh, motion, &md, sof, soc, nv, times, report->slabs + 1);
+			if (st == QAWS_STATUS_OK)
+				st = cy_boolean(out, &report->boolean, (qaws_mesh_3d const* const*)&soup, 1, NULL, 0, QAWS_BOOLEAN_UNION, &id);
+			qaws_mesh_3d_destroy(soup);
+		}
+		else
+			st = qaws_mesh_boolean(out, &report->boolean, &md, NULL, QAWS_BOOLEAN_UNION, &id);
 		report->closed = report->boolean.closed;
 	}
 	goto done;
@@ -276,7 +424,7 @@ oom:
 done:
 	qaws_internal_free(px); qaws_internal_free(c.buf); qaws_internal_free(t); qaws_internal_free(twin); qaws_internal_free(key);
 	qaws_internal_free(Xa); qaws_internal_free(Xb); qaws_internal_free(Xm); qaws_internal_free(front); qaws_internal_free(times);
-	qaws_internal_free(sx); qaws_internal_free(sf); qaws_internal_free(fr);
+	qaws_internal_free(sx); qaws_internal_free(sf); qaws_internal_free(fr); qaws_internal_free(sof); qaws_internal_free(soc);
 	return st;
 }
 
@@ -303,9 +451,8 @@ qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out, qaws_sweep_boolean_repor
 	qaws_mesh_3d const* stock, unsigned int move_count, qaws_boolean_op op, qaws_sweep_desc const* desc)
 {
 	qaws_sweep_boolean_report local;
-	qaws_scalar *bx = NULL, *ax = NULL;
-	unsigned int *bt = NULL, *at = NULL, nbv = 0, nbt = 0, i, k;
-	qaws_mesh_3d_desc a, b;
+	qaws_mesh_3d** sw = NULL;
+	unsigned int i, ns = 0;
 	qaws_intersect_desc id;
 	qaws_status st = QAWS_STATUS_OK;
 	if (!report)
@@ -320,85 +467,42 @@ qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out, qaws_sweep_boolean_repor
 	for (i = 0; i < move_count; i++)
 		if (!moves[i])
 			return QAWS_STATUS_INVALID_ARGUMENT;
-	/* each move's sweep, into one operand */
+	sw = (qaws_mesh_3d**)qaws_internal_zalloc(move_count, sizeof *sw);
+	if (!sw)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	/* each move's sweep (its attributes the tool's), all of them one operand */
 	for (i = 0; i < move_count && st == QAWS_STATUS_OK; i++)
 	{
-		qaws_mesh_3d* s = NULL;
 		qaws_sweep_report r;
-		unsigned int nv, nt;
-		st = qaws_mesh_3d_sweep(&s, &r, tool, moves[i], desc);
+		st = qaws_mesh_3d_sweep(&sw[ns], &r, tool, moves[i], desc);
 		report->slabs += r.slabs;
-		if (st != QAWS_STATUS_OK || !s)
+		if (st == QAWS_STATUS_OK && sw[ns])
 		{
-			qaws_mesh_3d_destroy(s);
-			continue;
+			ns++;
+			report->moves++;
 		}
-		nv = qaws_mesh_3d_get_vertex_count(s);
-		nt = qaws_mesh_3d_get_triangle_count(s);
-		{
-			qaws_scalar* g = (qaws_scalar*)qaws_internal_realloc(bx, qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nbv + nv + 1));
-			unsigned int* h = g ? (unsigned int*)qaws_internal_realloc(bt, qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nbt + nt + 1)) : NULL;
-			if (g) bx = g;
-			if (!g || !h)
-			{
-				qaws_mesh_3d_destroy(s);
-				st = QAWS_STATUS_ALLOCATION_FAILURE;
-				break;
-			}
-			bt = h;
-		}
-		qaws_mesh_3d_get_positions(bx + 3 * (size_t)nbv, s);
-		qaws_mesh_3d_get_triangles(bt + 3 * (size_t)nbt, s);
-		for (k = 0; k < 3 * nt; k++) bt[3 * (size_t)nbt + k] += nbv;
-		nbv += nv;
-		nbt += nt;
-		report->moves++;
-		qaws_mesh_3d_destroy(s);
 	}
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	report->stock_volume = (qaws_scalar)swp_volume(stock);
-	{
-		unsigned int nv = qaws_mesh_3d_get_vertex_count(stock), nt = qaws_mesh_3d_get_triangle_count(stock);
-		ax = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * (3 * (size_t)nv + 1));
-		at = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (3 * (size_t)nt + 1));
-		if (!ax || !at)
-		{
-			st = QAWS_STATUS_ALLOCATION_FAILURE;
-			goto done;
-		}
-		qaws_mesh_3d_get_positions(ax, stock);
-		qaws_mesh_3d_get_triangles(at, stock);
-		memset(&a, 0, sizeof a);
-		a.positions = ax;
-		a.vertex_count = nv;
-		a.face_vertices = at;
-		a.face_count = nt;
-	}
 	memset(&id, 0, sizeof id);
 	id.executor = desc ? desc->executor : NULL;
-	if (!nbt)
+	if (!ns)
 	{
 		/* (the tool swept nothing: the stock, or nothing, as the op says) */
 		if (op == QAWS_BOOLEAN_INTERSECTION)
 			goto done;
-		st = qaws_mesh_boolean(out, &report->boolean, &a, NULL, QAWS_BOOLEAN_UNION, &id);
+		st = cy_boolean(out, &report->boolean, &stock, 1, NULL, 0, QAWS_BOOLEAN_UNION, &id);
 	}
 	else
-	{
-		memset(&b, 0, sizeof b);
-		b.positions = bx;
-		b.vertex_count = nbv;
-		b.face_vertices = bt;
-		b.face_count = nbt;
-		/* (sweep op stock: the stock first, taken from for the difference) */
-		st = qaws_mesh_boolean(out, &report->boolean, &a, &b, op, &id);
-	}
+		st = cy_boolean(out, &report->boolean, &stock, 1, (qaws_mesh_3d const* const*)sw, ns, op, &id);   /* (sweep op stock: the stock first, taken from for the difference) */
 	report->closed = report->boolean.closed;
 	report->result_volume = (qaws_scalar)swp_volume(*out);
 	report->changed_volume = (qaws_scalar)(op == QAWS_BOOLEAN_DIFFERENCE ? (double)report->stock_volume - (double)report->result_volume :
 		op == QAWS_BOOLEAN_UNION ? (double)report->result_volume - (double)report->stock_volume : (double)report->result_volume);
 done:
-	qaws_internal_free(bx); qaws_internal_free(bt); qaws_internal_free(ax); qaws_internal_free(at);
+	for (i = 0; i < ns; i++)
+		qaws_mesh_3d_destroy(sw[i]);
+	qaws_internal_free(sw);
 	return st;
 }

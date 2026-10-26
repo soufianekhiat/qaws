@@ -62,4 +62,27 @@ typedef struct qaws_boolean_report
 qaws_status qaws_mesh_boolean(qaws_mesh_3d** out_mesh, qaws_boolean_report* report, qaws_mesh_3d_desc const* a,
 	qaws_mesh_3d_desc const* b, qaws_boolean_op op, qaws_intersect_desc const* desc);
 
+/*
+ * The same Boolean of two meshes, their attributes carried (normals, UVs,
+ * colours, material ids, ...):
+ *   - matched by name (unnamed ones never match; an input's "source" is
+ *     replaced by the result's); an attribute of both operands must have the
+ *     same element, components and rule (INVALID_ARGUMENT otherwise); one
+ *     operand's alone reads zeros on the other's faces, a NORMAL one that
+ *     face's normal;
+ *   - face attributes: the source face's value;
+ *   - vertex and corner attributes: each result corner's value interpolated
+ *     by the rule (colours in their rule's space) at its place in its source
+ *     face (the face's fan triangle holding it, barycentric, clamped). Both
+ *     sides of a cut keep their own values, so they come out as CORNER
+ *     attributes of the same name: a cut stays sharp in the normals, two
+ *     solids' colours or UV charts do not bleed into each other;
+ *   - NORMAL attributes are negated on the pieces turned over (B's in A - B).
+ * With attributes, edges inside flat regions are turned only between pieces
+ * of one source face (values are never carried across faces). Feature edges
+ * and footpoints are not carried.
+ */
+qaws_status qaws_mesh_3d_boolean(qaws_mesh_3d** out_mesh, qaws_boolean_report* report, qaws_mesh_3d const* a, qaws_mesh_3d const* b,
+	qaws_boolean_op op, qaws_intersect_desc const* desc);
+
 #endif /* QAWS_MESH_BOOLEAN_H */

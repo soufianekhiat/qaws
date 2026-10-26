@@ -553,7 +553,7 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 		unsigned int n = m->attr[ak].n, cs[DC_WEDGE_MAX], grp[DC_WEDGE_MAX], nc = 0, i, j, v, c;
 		double best[DC_WEDGE_MAX], val[DC_WEDGE_MAX * 4];
 		nt[ak] = 0;
-		if (m->attr[ak].element != QAWS_MESH_CORNER || (m->attr[ak].rule != QAWS_ATTRIBUTE_LINEAR && m->attr[ak].rule != QAWS_ATTRIBUTE_NORMALIZED) || n > 4)
+		if (m->attr[ak].element != QAWS_MESH_CORNER || (m->attr[ak].rule != QAWS_ATTRIBUTE_LINEAR && !hm_rule_unit(m->attr[ak].rule)) || n > 4)
 			continue;
 		for (v = 0; v < 2; v++)
 			for (c = m->vc[v ? b : a]; c != HM_NONE && nc <= DC_WEDGE_MAX; c = hm_round(m, v ? b : a, c))
@@ -601,7 +601,7 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 					val[4 * g + k] = wt[0] * hm_attr_at(m, ak, cs[i])[k] + wt[1] * hm_attr_at(m, ak, cn)[k] + wt[2] * hm_attr_at(m, ak, cp)[k];
 			}
 		}
-		if (m->attr[ak].rule == QAWS_ATTRIBUTE_NORMALIZED)
+		if (hm_rule_unit(m->attr[ak].rule))
 			for (i = 0; i < nc; i++)
 				if (grp[i] == i)
 				{
@@ -972,7 +972,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	/* the vertex attributes in the quadric (Hoppe 1999): LINEAR and NORMALIZED ones, with attribute_weight */
 	w.alpha = desc ? (double)desc->attribute_weight : 0;
 	for (a0 = 0; w.alpha > 0 && a0 < m->na; a0++)
-		if (m->attr[a0].element == QAWS_MESH_VERTEX && (m->attr[a0].rule == QAWS_ATTRIBUTE_LINEAR || m->attr[a0].rule == QAWS_ATTRIBUTE_NORMALIZED))
+		if (m->attr[a0].element == QAWS_MESH_VERTEX && (m->attr[a0].rule == QAWS_ATTRIBUTE_LINEAR || hm_rule_unit(m->attr[a0].rule)))
 			na += m->attr[a0].n;
 	w.n1 = 4 + na;
 	w.K = w.n1 * (w.n1 + 1) / 2;
@@ -988,7 +988,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	if (!w.ca || !w.ck || !w.q || !w.M || !w.r || !w.z || !sopt || !wtab || !wnt)
 		goto done;
 	for (a0 = 0, k = 0; na && a0 < m->na; a0++)
-		if (m->attr[a0].element == QAWS_MESH_VERTEX && (m->attr[a0].rule == QAWS_ATTRIBUTE_LINEAR || m->attr[a0].rule == QAWS_ATTRIBUTE_NORMALIZED))
+		if (m->attr[a0].element == QAWS_MESH_VERTEX && (m->attr[a0].rule == QAWS_ATTRIBUTE_LINEAR || hm_rule_unit(m->attr[a0].rule)))
 			for (c = 0; c < m->attr[a0].n; c++, k++)
 			{
 				w.ca[k] = a0;
@@ -1184,7 +1184,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		for (k = 0; k < na; k++)
 			hm_attr_at(m, w.ca[k], b)[w.ck[k]] = sopt[k] / w.alpha;
 		for (a0 = 0; na && a0 < m->na; a0++)
-			if (m->attr[a0].element == QAWS_MESH_VERTEX && m->attr[a0].rule == QAWS_ATTRIBUTE_NORMALIZED)
+			if (m->attr[a0].element == QAWS_MESH_VERTEX && hm_rule_unit(m->attr[a0].rule))
 			{
 				double* y = hm_attr_at(m, a0, b), l = 0;
 				for (k = 0; k < m->attr[a0].n; k++) l += y[k] * y[k];

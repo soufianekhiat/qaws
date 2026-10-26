@@ -69,8 +69,16 @@ outside; indices stay dense through edits.
 - **Features**: feature edges (creases, the border, seams) and feature
   corners, set or detected by dihedral angle; edits keep them.
 - **Attributes** per vertex, per corner (a vertex seen from one face: UVs,
-  split normals) or per face, each with a rule (`LINEAR`, `NORMALIZED`,
-  `NEAREST`) that edits and operators follow.
+  split normals) or per face, each with a rule that edits and operators
+  follow: `LINEAR`, `NORMALIZED` (unit vectors), `NEAREST` (ids,
+  labels), `NORMAL` (3 components: also negated where an operation turns
+  a face over, and turned with a swept mesh), and two colour spaces for
+  sRGB-encoded colours (3 components, or 4 with alpha): `SRGB` blends in
+  linear light (decoded, mixed, encoded), `OKLAB` in Oklab (perceptually
+  even midpoints); with alpha the colours are weighted by it
+  (premultiplied), so transparent black does not darken a blend. Every
+  operator that mixes values (edits, remeshing, subdivision, decimation,
+  the connector, references, Booleans, sweeps) mixes them in the rule's space.
 - **Footpoints**: each vertex's location on the reference an operator
   worked on, kept through every operator (`qaws_mesh_3d_get_footpoints`).
 - **Measures**: `qaws_mesh_3d_measure_quality` (faces by size, angles,
@@ -1029,6 +1037,28 @@ A Boolean with few patches (most) sums its winding numbers directly, exact solid
 
 Figure 27 (key r) shows two spheres' union, intersection and difference (seen from the bite), and the CSG emblem: a cube and a sphere intersected, then three cylinders taken away, five Booleans in a row.
 
+### Attributes through Booleans
+
+```c
+qaws_mesh_3d_boolean(&out, &report, a, b, QAWS_BOOLEAN_DIFFERENCE, &desc);   /* meshes, their attributes carried */
+```
+
+- **Matching:** by name across the operands; one name must have one element, component count and rule (else INVALID_ARGUMENT). Unnamed attributes never match. An attribute on one operand only reads zeros on the other's faces, except a `NORMAL` one, which takes that face's normal. An input's `"source"` gives way to the result's.
+- **Faces:** a face attribute is the source face's value.
+- **Vertices and corners:** each result corner is placed in its source face (the fan triangle holding it, barycentric, clamped to it, never extrapolated) and its values mixed there by the rule. Both sides of a cut keep their own values, so vertex attributes come out per corner (same name): the cut stays sharp in the normals, and two solids' colours or UV charts do not bleed into each other.
+- **Turned pieces:** `NORMAL` attributes are negated on the pieces the Boolean turns over (B's in A − B).
+- **Flat regions:** with attributes, edges inside flat regions are turned only between pieces of one source face.
+- **Not carried:** feature edges and footpoints.
+
+The same transfer runs in `qaws_mesh_3d_sweep` and `qaws_mesh_sweep_boolean` (see Swept solids).
+
+| Check (test 181, f64) | Result |
+|---|---|
+| Edge split black → white, `OKLAB` | linear light 0.125 (Oklab L = 0.5), to 8e-16 |
+| Edge split transparent black → red, `SRGB` with alpha | red at alpha 0.5 (premultiplied), to 1e-16 |
+| Unit cube − cube shifted by half (volume 0.875): A's affine field, corner UVs and sRGB colour linear in light; B's own field; face materials on both; a face `NORMAL` on A only | every corner exact (0 error, the cut corners included); materials per face; normals along their faces on both A's and B's turned pieces |
+| One name per vertex on A and per face on B; a `NORMAL` of 2 components | INVALID_ARGUMENT |
+
 ## Geodesics on meshes
 
 `qaws_mesh_geodesic` (`qaws_mesh_geodesic.h`) gives geodesic distances and shortest paths on a mesh by the heat method (Crane, Weischedel, Wardetzky 2013). The object is made once per mesh; every query after that is a few solves.
@@ -1695,6 +1725,24 @@ qaws_mesh_3d_sweep(&out, &r, mesh, m, &d);        /* the region the closed mesh 
 **Continuous Booleans.** `qaws_mesh_sweep_boolean(&out, &report, tool, moves, stock, move_count, op, &desc)`: the tool swept by each move (a tool path), all the sweeps one operand (overlapping closed parts, their winding numbers add: a union) against the stock in one Boolean. DIFFERENCE carves (CNC simulation; the report's `changed_volume` is the removed volume), UNION sculpts (the stroke added), INTERSECTION gives the contact (the part of the stock the tool passes through). In test 180 a 0.5 cube carving a 4 × 2 × 1 block removes a slot of 0.5 and an L of two moves 0.375 (to 1e-15); the intersection, a separate Boolean, has the same volume, and the stock's equals the result's plus the removed.
 
 Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along a Hermite curve, a box turned a quarter, and a block carved by a ball tool along a curve and a straight slot (two moves).
+
+**Attributes.** A sweep carries the mesh's attributes as the Booleans do (vertex ones come out per corner):
+- each layer of the soup repeats the mesh's values;
+- a wall takes, along its edge, the values of the front face's corners there;
+- directions (`NORMAL`, and `NORMALIZED` of 3 components) turn with a rigid motion's rotation at the layer's time, so a turning tool's normals stay on it;
+- a `NORMAL` face attribute on a wall is the wall's own normal;
+- `qaws_mesh_sweep_boolean` matches the tool's and the stock's attributes by name.
+
+Test 181:
+- a cube swept along x carries a field constant along the motion exactly, and its face normals lie along every face;
+- a ball's radial vertex normals swept along a segment agree with the tube's faces as well as with the ball's own (mean dot 0.944 against 0.941);
+- a carved slot's faces carry the tool's material over exactly the slot's area, 4.
+
+Figure 61 (key Z) shows:
+- a coloured ball (sRGB, normals) less a box of its own colour;
+- a checker drawn from UVs carried through a bite;
+- a coloured ball swept along a curve while turning;
+- a block carved by a red tool.
 
 ## Example: a NURBS torus, its surface, tetrahedra and hexahedra
 

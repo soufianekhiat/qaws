@@ -311,6 +311,18 @@ Ideas noted (not ordered):
   et al. 2010): local tetrahedral remeshing during a simulation, quality-driven edge and face operations; next to
   `qaws_volume_mesh_improve`.
 
+### Attributes through Booleans and sweeps (2026-10-26)
+
+Done: `qaws_mesh_3d_boolean` carries vertex, corner and face attributes (by name; per corner in the result, each
+interpolated in its source face; NORMAL negated on turned pieces), `qaws_mesh_3d_sweep` and `qaws_mesh_sweep_boolean`
+carry them (directions turned with the motion; walls' face normals their own). Rules NORMAL, SRGB and OKLAB (alpha
+premultiplied), honoured by edits, remeshing, subdivision, decimation, the connector and references. Test 181,
+figure 61. Open:
+- edge attributes (crease weights, seam ids): a QAWS_MESH_EDGE element, stored on the corners' edges as features are,
+  copied to an edge's pieces when split and the default on new edges; every operator must keep it;
+- cell attributes on volume meshes (tetrahedra, hexahedra), which have none yet;
+- tangents with handedness (the sign turned with a reversed face), features and footpoints through Booleans.
+
 ## 0. Scope
 
 In:
