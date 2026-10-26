@@ -37,6 +37,10 @@ All notable changes to Qaws are documented here.
 - The resolution's final check of crossing pieces passes over pairs a floating point plane separates by more than a
   thousandth of the tolerance before any exact test (coplanar stacks of pieces paired millions of neighbours that only
   touch): a spinning wheel's quarter-turn sweep 31.5 s to 8.6 s, test 181 12 s to 2 s.
+- Decimation round busy vertices (a fan's centre, as sweeps and Booleans leave): after a collapse into a vertex of more
+  than 32 edges only the edges it gained are costed, the others when they come off the heap (a quadric only grows, so
+  the old cost bounds the new one); corner wedges grouped by union-find. A 33,695-face swept wheel simplified in 5 s
+  instead of 76 s.
 
 - Sweeps: `qaws_sweep_desc.simplify` removes the vertices the overlapping slabs leave in flat regions and on straight
   creases (each collapse within a thousandth of the tolerance) and turns the flat regions toward Delaunay: a turning

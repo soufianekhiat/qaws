@@ -164,6 +164,7 @@ typedef struct dc_work
 	double *q, *M, *r, *z;          /* scratch: a quadric, a system, its right side, an augmented point */
 	double *Q, *W;
 	unsigned int* stamp;
+	unsigned int* lazy;             /* per vertex: its stamp when its edges were last left to be costed as they come up */
 	unsigned char* border;
 	unsigned char* locked;          /* neither removed nor moved: a locked border, an importance of 0 or less */
 	double cosmax;                  /* the cosine of the largest turn of a face a collapse may make */
@@ -559,12 +560,30 @@ static int dc_wedge_same(double const* p, double const* q, unsigned int n, unsig
    attribute left as the collapse copies it), upgrade by growing the scratch */
 #define DC_WEDGE_MAX 256
 
+/* union-find over the wedge groups: the root of i (paths halved), and two joined (the least root kept) */
+static unsigned int dc_root(unsigned int* grp, unsigned int i)
+{
+	while (grp[i] != i)
+	{
+		grp[i] = grp[grp[i]];
+		i = grp[i];
+	}
+	return i;
+}
+
+static void dc_union(unsigned int* grp, unsigned int i, unsigned int j)
+{
+	unsigned int a = dc_root(grp, i), b = dc_root(grp, j);
+	if (a != b)
+		grp[a > b ? a : b] = a < b ? a : b;
+}
+
 static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, double const* x, double* tab, unsigned int* nt, unsigned int stride)
 {
 	unsigned int ak, off = 0;
 	for (ak = 0; ak < m->na; ak++)
 	{
-		unsigned int n = m->attr[ak].n, cs[DC_WEDGE_MAX], grp[DC_WEDGE_MAX], nc = 0, i, j, v, c;
+		unsigned int n = m->attr[ak].n, cs[DC_WEDGE_MAX], grp[DC_WEDGE_MAX], rep[DC_WEDGE_MAX], nc = 0, i, j, v, c;
 		double best[DC_WEDGE_MAX], val[DC_WEDGE_MAX * 4];
 		nt[ak] = 0;
 		if (m->attr[ak].element != QAWS_MESH_CORNER || n > 4)
@@ -577,29 +596,34 @@ static void dc_wedges_before(qaws_hm const* m, unsigned int a, unsigned int b, d
 					nc++;
 		if (nc > DC_WEDGE_MAX)
 			continue;
-		/* the groups: union by the least index */
-		for (i = 0; i < nc; i++) grp[i] = i;
-		for (i = 0; i < nc; i++)
-			for (j = i + 1; j < nc; j++)
+		/* the groups (union-find, the least index the root): equal values at one vertex (as dc_seams reads them; each corner
+		   against the distinct values met at its vertex so far), and a's corner with b's in each face holding the edge (a and b
+		   on the same side of any seam) */
+		{
+			unsigned int ce = hm_find_edge(m, a, b), fe[2], fc[2] = { HM_NONE, HM_NONE }, nr = 0, z;
+			fe[0] = ce != HM_NONE ? m->cf[ce] : HM_NONE;
+			fe[1] = ce != HM_NONE && m->co[ce] != HM_NONE ? m->cf[m->co[ce]] : HM_NONE;
+			for (i = 0; i < nc; i++)
+				grp[i] = i;
+			for (i = 0; i < nc; i++)
 			{
-				int join = 0;
-				if (m->cv[cs[i]] == m->cv[cs[j]])
-				{
-					join = dc_wedge_same(hm_attr_at(m, ak, cs[i]), hm_attr_at(m, ak, cs[j]), n, m->attr[ak].rule, 1e-12);   /* (as dc_seams reads them) */
-				}
+				for (j = 0; j < nr; j++)
+					if (m->cv[cs[rep[j]]] == m->cv[cs[i]] && dc_wedge_same(hm_attr_at(m, ak, cs[rep[j]]), hm_attr_at(m, ak, cs[i]), n, m->attr[ak].rule, 1e-12))
+						break;
+				if (j < nr)
+					dc_union(grp, rep[j], i);
 				else
-					join = m->cf[cs[i]] == m->cf[cs[j]];   /* (a face holding the edge: a and b on the same side of any seam) */
-				if (join)
-				{
-					unsigned int gi = grp[i], gj = grp[j], z;
-					while (grp[gi] != gi) gi = grp[gi];
-					while (grp[gj] != gj) gj = grp[gj];
-					if (gi != gj)
-						for (z = 0; z < nc; z++)
-							if (grp[z] == (gi > gj ? gi : gj)) grp[z] = gi < gj ? gi : gj;
-					grp[gi > gj ? gi : gj] = gi < gj ? gi : gj;
-				}
+					rep[nr++] = i;
+				for (z = 0; z < 2; z++)
+					if (fe[z] != HM_NONE && m->cf[cs[i]] == fe[z])
+					{
+						if (fc[z] == HM_NONE)
+							fc[z] = i;
+						else
+							dc_union(grp, fc[z], i);
+					}
 			}
+		}
 		for (i = 0; i < nc; i++)
 		{
 			while (grp[grp[i]] != grp[i]) grp[i] = grp[grp[i]];
@@ -691,6 +715,8 @@ static int dc_no_fold(qaws_hm const* m, unsigned int a, unsigned int b, double c
 	}
 	return 1;
 }
+
+#define DC_EAGER_VALENCE 32u   /* past it a vertex's edges are costed as they come off the heap, not all after each collapse */
 
 static int dc_push_edges(dc_work const* w, dc_heap* H, unsigned int v, unsigned int** ring, unsigned int* cap)
 {
@@ -960,7 +986,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	qaws_hm* m;
 	dc_work w;
 	dc_heap H;
-	unsigned int *ring = NULL, rcap = 64, f, v, k, c, live, target, na = 0, a0;
+	unsigned int *ring = NULL, *aring = NULL, acap = 0, na_ring = 0, rcap = 64, f, v, k, c, live, target, na = 0, a0;
 	double* sopt = NULL;
 	double* wtab = NULL;   /* the corner attributes' wedges round a collapse (dc_wedges_before) */
 	unsigned int* wnt = NULL;
@@ -1032,11 +1058,13 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	w.Q = (double*)qaws_internal_zalloc(qaws_internal_mul2(w.K, (size_t)m->nv + 1), sizeof(double));
 	w.W = (double*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(double));
 	w.stamp = (unsigned int*)qaws_internal_zalloc((size_t)m->nv + 1, sizeof(unsigned int));
+	w.lazy = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)m->nv + 1));
 	w.border = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
 	w.locked = (unsigned char*)qaws_internal_zalloc((size_t)m->nv + 1, 1);
 	ring = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * rcap);
-	if (!w.Q || !w.W || !w.stamp || !w.border || !w.locked || !ring)
+	if (!w.Q || !w.W || !w.stamp || !w.lazy || !w.border || !w.locked || !ring)
 		goto done;
+	memset(w.lazy, 0xFF, sizeof(unsigned int) * ((size_t)m->nv + 1));
 	for (v = 0; v < m->nv; v++)
 	{
 		w.border[v] = !(m->vflag[v] & HM_DELETED) && hm_is_border_vertex(m, v);
@@ -1186,8 +1214,26 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		dc_pop(&H, &e);
 		a = e.a;
 		b = e.b;
-		if ((m->vflag[a] & HM_DELETED) || (m->vflag[b] & HM_DELETED) || e.sa != w.stamp[a] || e.sb != w.stamp[b])
-			continue;   /* (stale) */
+		if ((m->vflag[a] & HM_DELETED) || (m->vflag[b] & HM_DELETED))
+			continue;
+		if (e.sa != w.stamp[a] || e.sb != w.stamp[b])
+		{
+			/* stale: costed again now if an end's edges were left to be (its quadric only grew, so the old cost was a lower
+			   bound and the order holds) */
+			if (((e.sa != w.stamp[a] && w.lazy[a] == w.stamp[a]) || (e.sb != w.stamp[b] && w.lazy[b] == w.stamp[b])) && hm_find_edge(m, a, b) != HM_NONE &&
+				dc_candidate(&w, a, b, x, NULL, &cost))
+			{
+				e.cost = cost;
+				e.sa = w.stamp[a];
+				e.sb = w.stamp[b];
+				if (!dc_push(&H, &e))
+				{
+					failed = 1;
+					break;
+				}
+			}
+			continue;
+		}
 		if (e.cost > bound2)
 			break;
 		if (!dc_candidate(&w, a, b, x, sopt, &cost) || !dc_no_fold(m, a, b, x, w.cosmax))
@@ -1210,6 +1256,19 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		t = l2 > 0 ? t / l2 : 1;
 		t = t < 0 ? 0 : t > 1 ? 1 : t;
 		dc_wedges_before(m, a, b, x, wtab, wnt, 8 * DC_WEDGE_MAX);
+		na_ring = w.memless ? 0 : hm_ring(m, a, aring, acap);
+		if (na_ring > acap)
+		{
+			unsigned int* g = (unsigned int*)qaws_internal_realloc(aring, sizeof(unsigned int) * (size_t)na_ring);
+			if (!g)
+			{
+				failed = 1;
+				break;
+			}
+			aring = g;
+			acap = na_ring;
+			hm_ring(m, a, aring, acap);
+		}
 		if (!hm_collapse(m, hm_find_edge(m, a, b), a, t, x))
 		{
 			failed = 1;   /* (out of memory: what was done stays, compacted) */
@@ -1231,7 +1290,32 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		report->collapses++;
 		if (sqrt(cost) > (double)report->max_error)
 			report->max_error = (qaws_scalar)sqrt(cost);
-		if (!dc_push_edges(&w, &H, b, &ring, &rcap))
+		if (!w.memless && hm_ring(m, b, ring, rcap) > DC_EAGER_VALENCE)
+		{
+			/* a busy vertex (a fan's centre): only the edges a brought costed now, the others as they come up */
+			unsigned int q;
+			w.lazy[b] = w.stamp[b];
+			for (q = 0; q < na_ring && !failed; q++)
+				if (aring[q] != b && !(m->vflag[aring[q]] & HM_DELETED))
+				{
+					unsigned int s;
+					for (s = 0; s < 2 && !failed; s++)
+					{
+						dc_entry ef;
+						double y[3];
+						ef.a = s ? aring[q] : b;
+						ef.b = s ? b : aring[q];
+						if (!dc_candidate(&w, ef.a, ef.b, y, NULL, &ef.cost))
+							continue;
+						ef.sa = w.stamp[ef.a];
+						ef.sb = w.stamp[ef.b];
+						failed = !dc_push(&H, &ef);
+					}
+				}
+			if (failed)
+				break;
+		}
+		else if (!dc_push_edges(&w, &H, b, &ring, &rcap))
 		{
 			failed = 1;
 			break;
@@ -1267,7 +1351,7 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 done:
 	qaws_mesh_reference_destroy(ref);
 	qaws_internal_free(w.Q); qaws_internal_free(w.W); qaws_internal_free(w.stamp); qaws_internal_free(w.border); qaws_internal_free(w.locked); qaws_internal_free(views); qaws_internal_free(share); qaws_internal_free(seen);
-	qaws_internal_free(ring); qaws_internal_free(H.e);
+	qaws_internal_free(ring); qaws_internal_free(aring); qaws_internal_free(H.e); qaws_internal_free(w.lazy);
 	qaws_internal_free(w.ca); qaws_internal_free(w.ck); qaws_internal_free(w.q); qaws_internal_free(w.M); qaws_internal_free(w.r); qaws_internal_free(w.z);
 	qaws_internal_free(sopt);
 	qaws_internal_free(wtab);
