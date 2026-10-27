@@ -45,12 +45,16 @@
  * the edge's length.
  *
  * Spins: a rigid motion turning a whole turn or more about one axis (its
- * angular velocity keeping its direction and sense) while moving at most the
- * tolerance along any turn passes over the same places again and again: a
- * grinding wheel, a drill. Each turn reaches every angle, so its sweep is
+ * angular velocity keeping its direction and sense) passes over the same
+ * places again and again: a grinding wheel, a drill, an end mill. When it
+ * moves at most the tolerance along any turn, or the body is itself symmetric
+ * about the axis within the tolerance (every vertex, edge middle and face
+ * centre on the border of its profile: any drift), Each turn reaches every angle, so its sweep is
  * the body's solid of revolution about the axis (through the body's origin
  * at 0) swept along the drift (the translation, as above). The solid of
- * revolution comes from the body's profile in the half plane of the axis:
+ * revolution (the profile's points on a straight line between their
+ * neighbours left out) comes from the body's profile in the half plane of the
+ * axis:
  * sliced across the axis between its vertex heights (a slice's topology
  * holds between them), each slice's pieces give the distance range they
  * cover (from 0 when the axis runs through them, out to their farthest
@@ -59,8 +63,12 @@
  * come from the body's point the turn first brings to each place (the
  * least angle behind it on its circle: the passes coincide, the first
  * stands; a flat face across the circle its own point), directions turned
- * by that angle; edge values do not survive the revolution (zeros). The
- * report's turns says a spin was found.
+ * by that angle; a NORMAL straying past 30 degrees from its face (a corner or
+ * edge of the body tracing the surface has no normal of it) the face's own;
+ * edge values do not survive the revolution (zeros). The report's turns says
+ * a spin was found. An asymmetric body spinning while it drifts past the
+ * tolerance a turn is swept by slabs as any motion: its hulls overlap turn
+ * after turn, and it is slow.
  *
  * A vertex motion must have the mesh's vertex count; the mesh's positions
  * are then ignored (the motion's at each time are used).

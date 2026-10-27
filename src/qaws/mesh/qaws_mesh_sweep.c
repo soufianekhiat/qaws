@@ -964,13 +964,14 @@ done:
    swept along the drift; the solid of revolution is made from the body's profile in the half plane of the axis (height,
    distance), the union over heights of each slice's pieces' distance ranges ---- */
 
-/* the motion a spin: rigid, its angular velocity keeping one direction u and sense, a whole turn or more, moving at most tol
-   along any turn; its turns (0: not a spin) */
-static double swp_spin(qaws_motion const* m, double tol, double* u)
+/* the motion a spin: rigid, its angular velocity keeping one direction u and sense, a whole turn or more; its turns (0: not
+   a spin), *slow whether it moves at most tol along any turn */
+static double swp_spin(qaws_motion const* m, double tol, double* u, int* slow)
 {
 	double total = 0, prev = 0, l;
 	unsigned int i, k, ns = 512;
 	qaws_motion_state s;
+	*slow = 1;
 	if (qaws_motion_is_per_vertex(m) || qaws_motion_evaluate(&s, m, (qaws_scalar)0.5) != QAWS_STATUS_OK)
 		return 0;
 	u[0] = (double)s.angular_velocity.x;
@@ -995,8 +996,10 @@ static double swp_spin(qaws_motion const* m, double tol, double* u)
 		c[1] = w[2] * u[0] - w[0] * u[2];
 		c[2] = w[0] * u[1] - w[1] * u[0];
 		v = sqrt((double)s.velocity.x * s.velocity.x + (double)s.velocity.y * s.velocity.y + (double)s.velocity.z * s.velocity.z);
-		if (!(a > 0) || sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) > 1e-6 * lw || v * 2 * 3.14159265358979323846 / a > tol)
+		if (!(a > 0) || sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) > 1e-6 * lw)
 			return 0;
+		if (v * 2 * 3.14159265358979323846 / a > tol)
+			*slow = 0;
 		if (i)
 			total += 0.5 * (prev + a) / ns;
 		prev = a;
@@ -1354,7 +1357,7 @@ static void swp_rv_bary(double const* x, double const* a, double const* b, doubl
    attributes from the body's surface where the turn first brings it (the least angle behind each point: passes coincide,
    the first stands), directions turned by that angle after the motion's rotation at 0 (R0) */
 static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, double const* X, unsigned int nv, unsigned int const* t,
-	unsigned int nt, double const* o, double const* u, double const* R0, double tol)
+	unsigned int nt, double const* o, double const* u, double const* R0, double tol, int symmetric_only)
 {
 	double e1[3], e2[3], l, ext = 0, tz, q, rmaxall = 0;
 	double *Z = NULL, *A = NULL, *Bc = NULL, *hs = NULL, *pts = NULL, *prof = NULL, *vx = NULL, *alpha = NULL, *wsrc = NULL;
@@ -1503,8 +1506,66 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 				prof[2 * (size_t)nprof + 1] = p[2 * j + 1] * q <= 1e-6 * ext ? 0 : p[2 * j + 1] * q;   /* (on the axis) */
 				nprof++;
 			}
+			{
+				/* the points on a straight line between their neighbours (each slice leaves one on a straight side) left out */
+				unsigned int s0 = pathoff[npath - 1], cnt = nprof - s0, changed = 1;
+				while (changed && cnt > 3)
+				{
+					changed = 0;
+					for (j = 0; j < cnt && cnt > 3;)
+					{
+						double const *a = prof + 2 * ((size_t)s0 + (j + cnt - 1) % cnt), *b = prof + 2 * ((size_t)s0 + j), *c = prof + 2 * ((size_t)s0 + (j + 1) % cnt);
+						double dx = c[0] - a[0], dy = c[1] - a[1], ll = hypot(dx, dy);
+						if (ll > 0 && fabs(dx * (b[1] - a[1]) - dy * (b[0] - a[0])) / ll <= 2 * q)
+						{
+							memmove(prof + 2 * ((size_t)s0 + j), prof + 2 * ((size_t)s0 + j + 1), sizeof(double) * 2 * (cnt - j - 1));
+							cnt--;
+							changed = 1;
+						}
+						else
+							j++;
+					}
+				}
+				nprof = s0 + cnt;
+			}
 		}
 		pathoff[npath] = nprof;
+	}
+	if (symmetric_only)
+	{
+		/* a fast drift: the revolution stands for the body only if the body is one (every vertex, edge middle and face centre
+		   within tol of the profile's border: a drill, an end mill, a wheel), else the slabs (UNSUPPORTED_OPERATION) */
+		unsigned int f2, s2;
+		for (f2 = 0; f2 < nt; f2++)
+			for (s2 = 0; s2 < 7; s2++)
+			{
+				/* (the corners, the edges' middles, the centre) */
+				static double const wt[7][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 0.5, 0.5, 0 }, { 0, 0.5, 0.5 }, { 0.5, 0, 0.5 }, { 1.0 / 3, 1.0 / 3, 1.0 / 3 } };
+				double zz = 0, aa = 0, bb = 0, rr, best = HUGE_VAL;
+				unsigned int pth, j;
+				for (k = 0; k < 3; k++)
+				{
+					unsigned int v = t[3 * (size_t)f2 + k];
+					zz += wt[s2][k] * Z[v];
+					aa += wt[s2][k] * A[v];
+					bb += wt[s2][k] * Bc[v];
+				}
+				rr = hypot(aa, bb);
+				for (pth = 0; pth < npath && best > tol; pth++)
+					for (j = pathoff[pth]; j < pathoff[pth + 1] && best > tol; j++)
+					{
+						unsigned int j2 = j + 1 < pathoff[pth + 1] ? j + 1 : pathoff[pth];
+						double const *pa = prof + 2 * (size_t)j, *pb = prof + 2 * (size_t)j2;
+						double dz = pb[0] - pa[0], dr = pb[1] - pa[1], ll = dz * dz + dr * dr, s3 = ll > 0 ? ((zz - pa[0]) * dz + (rr - pa[1]) * dr) / ll : 0;
+						s3 = s3 < 0 ? 0 : s3 > 1 ? 1 : s3;
+						best = fmin(best, hypot(zz - pa[0] - s3 * dz, rr - pa[1] - s3 * dr));
+					}
+				if (best > tol)
+				{
+					st = QAWS_STATUS_UNSUPPORTED_OPERATION;
+					goto done;
+				}
+			}
 	}
 	/* the revolution: N segments, the chords within tol of the widest circle; a profile point on the axis one vertex */
 	N = tol < rmaxall ? (unsigned int)ceil(3.14159265358979323846 / acos(1 - tol / rmaxall)) : 8;
@@ -1740,6 +1801,31 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 				if (dir)
 					for (k = 0; k < 3; k++)
 						o2[k] = (qaws_scalar)(R[3 * k] * y[0] + R[3 * k + 1] * y[1] + R[3 * k + 2] * y[2]);
+				if (d.rule == QAWS_ATTRIBUTE_NORMAL)
+				{
+					/* a source on a crease (a corner or edge tracing the surface) has no normal of it: the face's own where the turned
+					   one strays past 30 degrees */
+					unsigned int const* tv = tri + 3 * (size_t)(d.element == QAWS_MESH_FACE ? i : i / 3);
+					double const *pa = vx + 3 * (size_t)tv[0], *pb = vx + 3 * (size_t)tv[1], *pq = vx + 3 * (size_t)tv[2];
+					double ea[3], eb[3], fn[3], lf, lo = 0, dt = 0;
+					for (k = 0; k < 3; k++)
+					{
+						ea[k] = pb[k] - pa[k];
+						eb[k] = pq[k] - pa[k];
+					}
+					fn[0] = ea[1] * eb[2] - ea[2] * eb[1];
+					fn[1] = ea[2] * eb[0] - ea[0] * eb[2];
+					fn[2] = ea[0] * eb[1] - ea[1] * eb[0];
+					lf = sqrt(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
+					for (k = 0; k < 3; k++)
+					{
+						lo += (double)o2[k] * o2[k];
+						dt += (double)o2[k] * fn[k];
+					}
+					if (lf > 0 && !(dt > 0.866 * lf * sqrt(lo)))
+						for (k = 0; k < 3; k++)
+							o2[k] = (qaws_scalar)(fn[k] / lf);
+				}
 				if (d.rule == QAWS_ATTRIBUTE_QUATERNION)
 				{
 					qaws_scalar x4[4];
@@ -1774,7 +1860,7 @@ done:
 /* a spin's sweep: the solid of revolution at 0 (features its creases sharper than half the body's softest), swept along
    the drift (the translation from 0, no turn) */
 static qaws_status swp_spun(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, double const* X,
-	unsigned int nv, unsigned int const* t, unsigned int nt, double const* u, double tol, qaws_sweep_desc const* desc, double turns)
+	unsigned int nv, unsigned int const* t, unsigned int nt, double const* u, double tol, qaws_sweep_desc const* desc, double turns, int slow)
 {
 	qaws_motion_state s0, s1;
 	qaws_motion_pose p0, p1;
@@ -1791,7 +1877,7 @@ static qaws_status swp_spun(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_
 	o[2] = (double)s0.position.z;
 	for (k = 0; k < 9; k++)
 		R0[k] = (double)s0.rotation[k];
-	if ((st = swp_revolve(&rev, mesh, X, nv, t, nt, o, u, R0, tol)) != QAWS_STATUS_OK)
+	if ((st = swp_revolve(&rev, mesh, X, nv, t, nt, o, u, R0, tol, !slow)) != QAWS_STATUS_OK)
 		return st;
 	if ((st = qaws_mesh_3d_detect_features(rev, (qaws_scalar)(0.5 * swp_feature_angle(mesh)), 0, 0)) != QAWS_STATUS_OK)
 	{
@@ -1876,11 +1962,15 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	tol = desc && desc->tolerance > 0 ? (double)desc->tolerance : 1e-3 * diag;
 	{
 		/* a spin (a whole turn or more about one axis, drifting under tol a turn): its solid of revolution swept along the drift */
-		double ax[3], turns = swp_spin(motion, tol, ax);
+		/* (drifting faster: only a body symmetric about the axis; UNSUPPORTED_OPERATION otherwise, and the slabs below) */
+		int slow;
+		double ax[3], turns = swp_spin(motion, tol, ax, &slow);
 		if (turns > 0)
 		{
-			st = swp_spun(out, report, mesh, motion, Xa, nv, t, nt, ax, tol, desc, turns);
-			goto done;
+			st = swp_spun(out, report, mesh, motion, Xa, nv, t, nt, ax, tol, desc, turns, slow);
+			if (st != QAWS_STATUS_UNSUPPORTED_OPERATION)
+				goto done;
+			memset(report, 0, sizeof *report);
 		}
 	}
 	/* the slabs: [0, 1] halved until the chords' deviation (at the middle and quarters) is within tol */

@@ -19,7 +19,12 @@
  *     under the tolerance: found a spin (2 turns), swept as its solid of
  *     revolution, the annulus between the box's nearest and farthest
  *     distances from the axis (volume within the chords' 2 tol of the
- *     circumference), closed;
+ *     circumference), closed; a cube on the axis turning two turns: a
+ *     cylinder of few faces (the profile's straight sides one edge each), its
+ *     NORMAL corner values the faces' (a crease tracing the surface has no
+ *     normal of it: the face's own); a 64-gon cylinder drifting 100
+ *     tolerances a turn, symmetric about the axis, still its revolution along
+ *     the drift (the disc swept along the segment);
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -302,6 +307,116 @@ static void test_spin(void)
 	qaws_motion_destroy(m);
 }
 
+/* a 64-gon cylinder about z, radius r, height 1 */
+static qaws_mesh_3d* sw_cylinder(double r)
+{
+	unsigned int n = 64, i, k = 0, f[3 * 256];
+	qaws_scalar x[3 * 130];
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (i = 0; i < n; i++)
+	{
+		double u = 2 * SW_PI * i / n;
+		x[3 * i] = x[3 * (n + i)] = (qaws_scalar)(r * cos(u));
+		x[3 * i + 1] = x[3 * (n + i) + 1] = (qaws_scalar)(r * sin(u));
+		x[3 * i + 2] = 0;
+		x[3 * (n + i) + 2] = 1;
+	}
+	x[6 * n] = x[6 * n + 1] = x[6 * n + 2] = 0;
+	x[6 * n + 3] = x[6 * n + 4] = 0;
+	x[6 * n + 5] = 1;
+	for (i = 0; i < n; i++)
+	{
+		unsigned int a = i, b = (i + 1) % n, c = n + (i + 1) % n, e = n + i;
+		f[k++] = a; f[k++] = b; f[k++] = c;
+		f[k++] = a; f[k++] = c; f[k++] = e;
+		f[k++] = 2 * n; f[k++] = b; f[k++] = a;
+		f[k++] = 2 * n + 1; f[k++] = e; f[k++] = c;
+	}
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 2 * n + 2; d.face_vertices = f; d.face_count = 4 * n;
+	qaws_mesh_3d_create(&m, &d);
+	return m;
+}
+
+/* two turns about z drifting dx along x */
+static qaws_motion* sw_spin(double dx)
+{
+	qaws_motion_pose s, e;
+	qaws_motion* m = NULL;
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(4 * SW_PI);
+	e.position.x = (qaws_scalar)dx;
+	s.velocity.x = e.velocity.x = (qaws_scalar)dx;
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	return m;
+}
+
+static void test_spin_more(void)
+{
+	double tol = 0.002, r = 0.5, dd = 0.4, area = 32 * r * r * sin(2 * SW_PI / 64), want = area + 2 * r * dd, v, least = 2;
+	qaws_mesh_3d *cube = sw_box(-0.5, 0.5, -0.5, 0.5, 0, 1), *cyl = sw_cylinder(r), *o = NULL, *oc = NULL;
+	qaws_motion *m0 = sw_spin(0.001), *m1 = sw_spin(dd);
+	qaws_sweep_desc d;
+	qaws_sweep_report r0, r1;
+	unsigned int nt = qaws_mesh_3d_get_triangle_count(cube), i, k, c[3], id, nf = 0;
+	qaws_scalar* nn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 9 * nt);
+	qaws_attribute_desc ad;
+	char msg[400];
+	/* the cube's faces' normals per corner */
+	for (i = 0; i < nt; i++)
+	{
+		qaws_vec3 a, b, e;
+		double u[3], w[3], n[3], l;
+		qaws_mesh_3d_get_triangle(c, cube, i);
+		a = qaws_mesh_3d_get_vertex(cube, c[0]); b = qaws_mesh_3d_get_vertex(cube, c[1]); e = qaws_mesh_3d_get_vertex(cube, c[2]);
+		u[0] = b.x - a.x; u[1] = b.y - a.y; u[2] = b.z - a.z;
+		w[0] = e.x - a.x; w[1] = e.y - a.y; w[2] = e.z - a.z;
+		n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
+		l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		for (k = 0; k < 9; k++) nn[9 * i + k] = (qaws_scalar)(n[k % 3] / l);
+	}
+	memset(&ad, 0, sizeof ad);
+	ad.name = "n"; ad.element = QAWS_MESH_CORNER; ad.components = 3; ad.rule = QAWS_ATTRIBUTE_NORMAL;
+	qaws_mesh_3d_add_attribute(&id, cube, nn, &ad);
+	free(nn);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)tol;
+	memset(&r0, 0, sizeof r0);
+	memset(&r1, 0, sizeof r1);
+	if (qaws_mesh_3d_sweep(&o, &r0, cube, m0, &d) == QAWS_STATUS_OK && o && qaws_mesh_3d_find_attribute(&id, o, "n") == QAWS_STATUS_OK)
+	{
+		unsigned int no = qaws_mesh_3d_get_triangle_count(o);
+		qaws_scalar* nv = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 9 * no);
+		nf = no;
+		qaws_mesh_3d_get_attribute(nv, o, id);
+		for (i = 0; i < no; i++)
+		{
+			qaws_vec3 a, b, e;
+			double u[3], w[3], n[3], l;
+			qaws_mesh_3d_get_triangle(c, o, i);
+			a = qaws_mesh_3d_get_vertex(o, c[0]); b = qaws_mesh_3d_get_vertex(o, c[1]); e = qaws_mesh_3d_get_vertex(o, c[2]);
+			u[0] = b.x - a.x; u[1] = b.y - a.y; u[2] = b.z - a.z;
+			w[0] = e.x - a.x; w[1] = e.y - a.y; w[2] = e.z - a.z;
+			n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
+			l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+			for (k = 0; k < 3; k++)
+				least = fmin(least, (n[0] * nv[9 * i + 3 * k] + n[1] * nv[9 * i + 3 * k + 1] + n[2] * nv[9 * i + 3 * k + 2]) / l);
+		}
+		free(nv);
+	}
+	qaws_mesh_3d_sweep(&oc, &r1, cyl, m1, &d);
+	v = sw_volume(oc);
+	sprintf(msg, "a cube's two turns: %u faces, NORMALs against the faces at least %.4f; a cylinder drifting 100 tolerances a turn (%.2f turns): volume %.5f (the disc along the segment %.5f), closed %d",
+		nf, least, (double)r1.turns, v, want, r1.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(nf > 0 && nf < 400 && least > 0.999 && fabs((double)r1.turns - 2) < 1e-6 && fabs(v - want) < 2 * SW_PI * r * 2 * tol + 1e-3 && r1.closed, msg);
+	qaws_mesh_3d_destroy(cube); qaws_mesh_3d_destroy(cyl); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(oc);
+	qaws_motion_destroy(m0); qaws_motion_destroy(m1);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *c = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -328,6 +443,7 @@ int test_180_mesh_sweep_main(void)
 	test_tube();
 	test_carving();
 	test_spin();
+	test_spin_more();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

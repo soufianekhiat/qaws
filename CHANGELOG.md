@@ -32,7 +32,9 @@ All notable changes to Qaws are documented here.
 - Sweeps of spins: a motion turning a whole turn or more about one axis, drifting under the tolerance a turn (a grinding
   wheel, a drill), is swept as the body's solid of revolution along its drift (`qaws_sweep_report.turns`): passes over
   the same places coincide instead of piling up hulls dozens deep. Attributes from the point the turn first brings to
-  each place. A torus 100/10 mm, 3 turns at 10 turns/s, carves its groove in 1.5 s (figure 68).
+  each place. A torus 100/10 mm, 3 turns at 10 turns/s, carves its groove in 1.5 s (figure 68). A body symmetric about
+  the axis (an end mill, a drill) is revolved at any drift; NORMALs where a crease traced the surface are the faces'; the
+  profile's straight sides one edge each (a spinning cube 5,460 faces to 168).
 
 ### Changed
 
