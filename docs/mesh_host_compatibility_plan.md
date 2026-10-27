@@ -56,5 +56,5 @@ are covered by views of f32 buffers in an f64 build.
 | Mesh views | `qaws_mesh_view`, validation, `qaws_mesh_3d_create_from_view`, `qaws_mesh_3d_set_positions_from_view` (`docs/api/mesh_view.md`) | 185 |
 | BVH from views | `qaws_mesh_bvh_create_view`, `qaws_mesh_bvh_refit_view`; `qaws_mesh_bvh_refit` in place (it allocated a new array per call) | 185, 159 |
 | Borrowed vertex motions | `qaws_motion_create_vertices_borrowed`: the two frames read at each evaluation, exact contact times; a rewritten frame seen at the next call | 185 |
-| Scratch | | |
+| Scratch | contact detection, the explicit and implicit sweeps: every temporary through the scratch allocator (lists first grown there), sizes checked; a leak found by the scratch arena (a sweep of a mesh without features kept a block per call) fixed: suites 180, 181, 183 to 185 hold nothing with `QAWS_TEST_SCRATCH=1` (180 held 6, 181 3, 184 1) | 180, 181, 183-185 |
 | Executor for contact | | |

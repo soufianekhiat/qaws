@@ -396,15 +396,15 @@ static qaws_status swi_sources(swi_ctx* c, double const* x, size_t n, unsigned i
 static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d const* mesh)
 {
 	unsigned int nvo = qaws_mesh_3d_get_vertex_count(out), nto = qaws_mesh_3d_get_triangle_count(out), i, k, j;
-	qaws_scalar* xo = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 3 * ((size_t)nvo + 1));
-	unsigned int* tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)nto + 1));
-	double* X = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)nvo + 1));
-	unsigned int* src = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nvo + 3 * (size_t)nto + 1));
-	double* w = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)nvo + 3 * (size_t)nto + 1));
-	double* tb = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nvo + 1));
-	double* cR = (double*)qaws_internal_malloc(sizeof(double) * 27 * ((size_t)nto + 1));
-	double* tn = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)c->nt + 1));
-	unsigned int *vto = (unsigned int*)qaws_internal_zalloc((size_t)c->nv + 2, sizeof(unsigned int)), *vtl = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)c->nt + 1));
+	qaws_scalar* xo = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nvo + 1));
+	unsigned int* tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nto + 1));
+	double* X = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nvo + 1));
+	unsigned int* src = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nvo + 3 * (size_t)nto + 1));
+	double* w = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nvo + 3 * (size_t)nto + 1));
+	double* tb = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)nvo + 1));
+	double* cR = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 27, (size_t)nto + 1));
+	double* tn = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)c->nt + 1));
+	unsigned int *vto = (unsigned int*)qaws_internal_scratch_zalloc((size_t)c->nv + 2, sizeof(unsigned int)), *vtl = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)c->nt + 1));
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!xo || !tri || !X || !src || !w || !tb || !cR || !tn || !vto || !vtl)
 		goto done;
@@ -542,14 +542,14 @@ qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_repo
 	c.cur = ~0u;
 	if (!c.nt || (c.pv && qaws_motion_get_vertex_count(motion) != c.nv))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	c.t = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)c.nt + 1));
-	c.x = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)c.nv + 1));
-	c.buf = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)c.nv + 1));
-	vel = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)c.nv + 1));
-	c.q = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 4 * SWI_CHUNK);
-	c.h = (qaws_mesh_hit*)qaws_internal_malloc(sizeof(qaws_mesh_hit) * SWI_CHUNK);
-	c.best = (double*)qaws_internal_malloc(sizeof(double) * 8 * SWI_CHUNK);
-	c.bj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * SWI_CHUNK);
+	c.t = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 3 * (size_t)c.nt + 1));
+	c.x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c.nv + 1));
+	c.buf = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c.nv + 1));
+	vel = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c.nv + 1));
+	c.q = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * 4 * SWI_CHUNK);
+	c.h = (qaws_mesh_hit*)qaws_internal_scratch_malloc(sizeof(qaws_mesh_hit) * SWI_CHUNK);
+	c.best = (double*)qaws_internal_scratch_malloc(sizeof(double) * 8 * SWI_CHUNK);
+	c.bj = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * 3 * SWI_CHUNK);
 	if (!c.t || !c.x || !c.buf || !vel || !c.q || !c.h || !c.best || !c.bj)
 		goto done;
 	c.d = c.q + 3 * SWI_CHUNK;
@@ -591,9 +591,9 @@ qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_repo
 	report->slabs = c.ns;
 	report->deviation = (qaws_scalar)(c.ns > 1 ? 0.5 * vmax / (c.ns - 1) : 0);
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	c.ts = (double*)qaws_internal_malloc(sizeof(double) * c.ns);
-	c.cen = (double*)qaws_internal_malloc(sizeof(double) * 4 * (size_t)c.ns);
-	c.pose = c.pv ? NULL : (double*)qaws_internal_malloc(sizeof(double) * 12 * (size_t)c.ns);
+	c.ts = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), c.ns));
+	c.cen = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4, c.ns));
+	c.pose = c.pv ? NULL : (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 12, c.ns));
 	if (!c.ts || !c.cen || (!c.pv && !c.pose))
 		goto done;
 	for (j = 0; j < c.ns; j++)

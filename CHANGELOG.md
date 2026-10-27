@@ -34,6 +34,7 @@ All notable changes to Qaws are documented here.
   `qaws_mesh_bvh_create_view`, `qaws_mesh_bvh_refit_view`, `qaws_motion_create_vertices_borrowed` (each vertex on
   its chord between two frames of the host's buffer, read at each evaluation: exact contact times); no staging copy, no
   allocation per frame (`qaws_mesh_bvh_refit` now refits in place too). Test 185, `docs/api/mesh_view.md`.
+  Contact detection and the sweeps take their temporaries from the thread's scratch allocator.
 - Implicit sweeps: `qaws_mesh_3d_sweep_implicit`, the swept solid as the level set of the least over time of the moving
   shape's signed distance, sampled in time (bounding spheres pruning, golden sections refining a rigid motion's time),
   dual contoured on a grid (`qaws_sweep_desc.resolution`); any motion, smooth, within a cell of the explicit sweep
@@ -100,6 +101,8 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Sweeps: a mesh without feature edges leaked a block per sweep (`swp_crease_features` returned before freeing it); found by
+  the scratch arena of the test runner.
 - Booleans: a patch's two samples (just in front of and behind it) are brought within 0.4 of the first other surface
   their rays meet: sheets nearer than the samples' 1e-6 D (a turning box's hull walls within 1e-5 of one another at
   its rim) put a sample on the wrong side and dropped a strip, leaving the result open (figure 60's thin box turned a

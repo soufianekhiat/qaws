@@ -35,6 +35,12 @@ static qaws_status swp_at(swp_ctx* c, double t, double* X)
    a wall's NORMAL face value is its own normal (its face's is not: a wall stands across it); a soup edge repeating an
    edge of the mesh at one layer (a cap's, a wall's top or bottom) takes its edge values and feature flag, the others
    zeros */
+/* a temporary list grown: its first block from the scratch allocator, the next by the block's own */
+static void* swp_grow(void* p, size_t bytes)
+{
+	return p ? qaws_internal_realloc(p, bytes) : qaws_internal_scratch_malloc(bytes);
+}
+
 /* o = the rotation R's quaternion times q (w x y z) */
 static void swp_compose(qaws_scalar* o, qaws_scalar const* q, double const* R)
 {
@@ -528,7 +534,7 @@ static int swp_on_segment(qaws_scalar const* a, qaws_scalar const* b, qaws_vec3 
    and last poses (positions pos, layers 0 and last of nv each) need only turn at all */
 static qaws_status swp_crease_features(qaws_mesh_3d* m, double angle, qaws_mesh_3d const* mesh, qaws_scalar const* pos, unsigned int nv, unsigned int last)
 {
-	unsigned int nin = qaws_mesh_3d_get_feature_edge_count(mesh), *ife = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nin + 1));
+	unsigned int nin = qaws_mesh_3d_get_feature_edge_count(mesh), *ife = NULL;
 	unsigned int ne = qaws_mesh_3d_get_edge_count(m), nfe = qaws_mesh_3d_get_feature_edge_count(m), i, kept = 0;
 	double cmax = cos(angle);
 	unsigned int *e = NULL, *fe = NULL;
@@ -538,6 +544,7 @@ static qaws_status swp_crease_features(qaws_mesh_3d* m, double angle, qaws_mesh_
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!nfe)
 		return QAWS_STATUS_OK;
+	ife = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nin + 1));
 	e = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)ne + 1));
 	fe = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nfe + 1));
 	rc = (unsigned char*)qaws_internal_scratch_zalloc((size_t)ne + 1, 1);
@@ -608,7 +615,7 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 		ie = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)m + 1));
 		se = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)sne + 1));
 		smap = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)sne + 1));
-		ifeat = (unsigned char*)qaws_internal_zalloc((size_t)ine + 1, 1);
+		ifeat = (unsigned char*)qaws_internal_scratch_zalloc((size_t)ine + 1, 1);
 		if (!ie || !se || !smap || !ifeat)
 			goto done;
 		qaws_mesh_3d_get_edges(ie, mesh);
@@ -904,8 +911,8 @@ static int swp_flat_delaunay(qaws_hm* m, double eps)
 static int swp_attr_lock(qaws_hm const* m, qaws_scalar* imp)
 {
 	unsigned int v, f, k, a, j, c;
-	double* G = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)m->nf + 1));
-	double* N = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)m->nf + 1));
+	double* G = (double*)qaws_internal_scratch_malloc(sizeof(double) * 3 * ((size_t)m->nf + 1));
+	double* N = (double*)qaws_internal_scratch_malloc(sizeof(double) * 3 * ((size_t)m->nf + 1));
 	if (!G || !N)
 	{
 		qaws_internal_free(G);
@@ -1023,8 +1030,8 @@ static qaws_status swp_tidy(qaws_mesh_3d* m, double tol)
 		return st;
 	/* the features carried as an edge value (pieces keep it): the decimation makes every seam a feature, they are put back after */
 	ne = qaws_mesh_3d_get_edge_count(m);
-	ev = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
-	fv = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((size_t)ne + 1));
+	ev = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
+	fv = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * ((size_t)ne + 1));
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!ev || !fv)
 		goto done;
@@ -1043,7 +1050,7 @@ static qaws_status swp_tidy(qaws_mesh_3d* m, double tol)
 		goto done;
 	memset(&d, 0, sizeof d);
 	d.max_error = (qaws_scalar)(1e-3 * tol);
-	imp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((size_t)m->hm.nv + 1));
+	imp = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * ((size_t)m->hm.nv + 1));
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!imp || !swp_attr_lock(&m->hm, imp))
 		goto done;
@@ -1056,8 +1063,8 @@ static qaws_status swp_tidy(qaws_mesh_3d* m, double tol)
 	ne = qaws_mesh_3d_get_edge_count(m);
 	qaws_internal_free(ev);
 	qaws_internal_free(fv);
-	ev = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
-	fv = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((size_t)ne + 1));
+	ev = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (2 * (size_t)ne + 1));
+	fv = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * ((size_t)ne + 1));
 	if (!ev || !fv || qaws_mesh_3d_find_attribute(&a, m, "qaws_sweep_feature") != QAWS_STATUS_OK)
 		goto done;
 	qaws_mesh_3d_get_edges(ev, m);
@@ -1184,7 +1191,7 @@ static int swp_rv_slice(swp_rv_piece** out, unsigned int* capo, double h, double
 		if (ne + 2 > *cape)
 		{
 			unsigned int cap = 2 * *cape + 64;
-			unsigned long long* g = (unsigned long long*)qaws_internal_realloc(*ends, sizeof(unsigned long long) * 2 * (size_t)cap);
+			unsigned long long* g = (unsigned long long*)swp_grow(*ends, sizeof(unsigned long long) * 2 * (size_t)cap);
 			if (!g)
 				return -1;
 			*ends = g;
@@ -1206,9 +1213,9 @@ static int swp_rv_slice(swp_rv_piece** out, unsigned int* capo, double h, double
 		return 0;
 	/* the loops: segments chained by their shared edge keys */
 	{
-		unsigned long long* sorted = (unsigned long long*)qaws_internal_malloc(sizeof(unsigned long long) * 2 * (size_t)ne);
-		unsigned int* mate = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (size_t)ne);
-		used = (unsigned char*)qaws_internal_zalloc((size_t)ne / 2 + 1, 1);
+		unsigned long long* sorted = (unsigned long long*)qaws_internal_scratch_malloc(sizeof(unsigned long long) * 2 * (size_t)ne);
+		unsigned int* mate = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * (size_t)ne);
+		used = (unsigned char*)qaws_internal_scratch_zalloc((size_t)ne / 2 + 1, 1);
 		if (!sorted || !mate || !used)
 		{
 			qaws_internal_free(sorted); qaws_internal_free(mate); qaws_internal_free(used);
@@ -1242,7 +1249,7 @@ static int swp_rv_slice(swp_rv_piece** out, unsigned int* capo, double h, double
 				if (np + 1 > *capp)
 				{
 					unsigned int cap = 2 * *capp + 64;
-					double* g = (double*)qaws_internal_realloc(*pts, sizeof(double) * 2 * (size_t)cap);
+					double* g = (double*)swp_grow(*pts, sizeof(double) * 2 * (size_t)cap);
 					if (!g)
 					{
 						qaws_internal_free(sorted); qaws_internal_free(mate); qaws_internal_free(used);
@@ -1263,7 +1270,7 @@ static int swp_rv_slice(swp_rv_piece** out, unsigned int* capo, double h, double
 			if (nl + 1 > *capl)
 			{
 				unsigned int cap = 2 * *capl + 16;
-				unsigned int* g = (unsigned int*)qaws_internal_realloc(*loop, sizeof(unsigned int) * 4 * (size_t)cap);
+				unsigned int* g = (unsigned int*)swp_grow(*loop, sizeof(unsigned int) * 4 * (size_t)cap);
 				if (!g)
 				{
 					qaws_internal_free(sorted); qaws_internal_free(mate); qaws_internal_free(used);
@@ -1321,7 +1328,7 @@ static int swp_rv_slice(swp_rv_piece** out, unsigned int* capo, double h, double
 		if (npc + 1 > *capo)
 		{
 			unsigned int cap = 2 * *capo + 16;
-			swp_rv_piece* g = (swp_rv_piece*)qaws_internal_realloc(*out, sizeof(swp_rv_piece) * (size_t)cap);
+			swp_rv_piece* g = (swp_rv_piece*)swp_grow(*out, sizeof(swp_rv_piece) * (size_t)cap);
 			if (!g)
 				return -1;
 			*out = g;
@@ -1361,7 +1368,7 @@ static int swp_rv_sources(swp_rv_src** src, unsigned int* cap, double z0, double
 		if (n + 9 > *cap)
 		{
 			unsigned int c2 = 2 * *cap + 32;
-			swp_rv_src* g = (swp_rv_src*)qaws_internal_realloc(*src, sizeof(swp_rv_src) * (size_t)c2);
+			swp_rv_src* g = (swp_rv_src*)swp_grow(*src, sizeof(swp_rv_src) * (size_t)c2);
 			if (!g)
 				return -1;
 			*src = g;
@@ -1482,14 +1489,14 @@ qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int 
 {
 	unsigned int na = qaws_mesh_3d_get_attribute_count(mesh), nf = qaws_mesh_3d_get_face_count(mesh), nc = qaws_mesh_3d_get_corner_count(mesh), a;
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(mesh), nto = qaws_mesh_3d_get_triangle_count(out), nvo = qaws_mesh_3d_get_vertex_count(out), i, k;
-	unsigned int *fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nc + 1)), *fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
-	unsigned int *tf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nt + 1)), *tc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)nt + 1));
-	unsigned int* tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)nto + 1));
-	qaws_scalar* xo = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 3 * ((size_t)nvo + 1));
+	unsigned int *fv = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nc + 1)), *fs = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
+	unsigned int *tf = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nt + 1)), *tc = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * 3 * ((size_t)nt + 1));
+	unsigned int* tri = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * 3 * ((size_t)nto + 1));
+	qaws_scalar* xo = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * 3 * ((size_t)nvo + 1));
 	size_t cmax = (size_t)(nv > nc ? (nv > nf ? nv : nf) : (nc > nf ? nc : nf)) + 1;
-	qaws_scalar* val = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 16 * cmax);
-	double* dv = (double*)qaws_internal_malloc(sizeof(double) * 16 * cmax);
-	qaws_scalar* sv = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 16 * (3 * (size_t)nto + (size_t)qaws_mesh_3d_get_edge_count(out) + 1));
+	qaws_scalar* val = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * 16 * cmax);
+	double* dv = (double*)qaws_internal_scratch_malloc(sizeof(double) * 16 * cmax);
+	qaws_scalar* sv = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * 16 * (3 * (size_t)nto + (size_t)qaws_mesh_3d_get_edge_count(out) + 1));
 	unsigned int j, c2;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (!fv || !fs || !tf || !tc || !tri || !xo || !val || !dv || !sv)
@@ -1622,10 +1629,10 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 	e2[0] = u[1] * e1[2] - u[2] * e1[1];
 	e2[1] = u[2] * e1[0] - u[0] * e1[2];
 	e2[2] = u[0] * e1[1] - u[1] * e1[0];
-	Z = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv + 1));
-	A = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv + 1));
-	Bc = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv + 1));
-	hs = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv + 1));
+	Z = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)nv + 1));
+	A = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)nv + 1));
+	Bc = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)nv + 1));
+	hs = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)nv + 1));
 	if (!Z || !A || !Bc || !hs)
 		goto done;
 	for (i = 0; i < nv; i++)
@@ -1677,7 +1684,7 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 						if (nquad + 1 > capq)
 						{
 							unsigned int c2 = 2 * capq + 64;
-							int64_t* gq = (int64_t*)qaws_internal_realloc(quads, sizeof(int64_t) * 8 * (size_t)c2);
+							int64_t* gq = (int64_t*)swp_grow(quads, sizeof(int64_t) * 8 * (size_t)c2);
 							if (!gq)
 								goto done;
 							quads = gq;
@@ -1700,7 +1707,7 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 	if (!nquad)
 		goto bad;
 	/* their union: the profile (outer paths and holes) */
-	paths = (qaws_path64*)qaws_internal_malloc(sizeof(qaws_path64) * (size_t)nquad);
+	paths = (qaws_path64*)qaws_internal_scratch_malloc(sizeof(qaws_path64) * (size_t)nquad);
 	if (!paths)
 		goto done;
 	for (i = 0; i < nquad; i++)
@@ -1727,8 +1734,8 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 			if (qaws_clip64_result_get_path_exact(&p, &n, cr, i) == QAWS_STATUS_OK)
 				tot += n;
 		}
-		prof = (double*)qaws_internal_malloc(sizeof(double) * 2 * ((size_t)tot + 1));
-		pathoff = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nr + 2));
+		prof = (double*)qaws_internal_scratch_malloc(sizeof(double) * 2 * ((size_t)tot + 1));
+		pathoff = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nr + 2));
 		if (!prof || !pathoff)
 			goto done;
 		for (i = 0; i < nr; i++)
@@ -1808,12 +1815,12 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 	/* the revolution: N segments, the chords within tol of the widest circle; a profile point on the axis one vertex */
 	N = tol < rmaxall ? (unsigned int)ceil(3.14159265358979323846 / acos(1 - tol / rmaxall)) : 8;
 	N = N < 8 ? 8 : N > 2048 ? 2048 : N;
-	ring = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nprof + 1));
-	vx = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)nprof * N + 1));
-	tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 6 * ((size_t)nprof * N + 1));
-	alpha = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nprof * N + 1));
-	wsrc = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)nprof * N + 1));
-	fsrc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nprof * N + 1));
+	ring = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nprof + 1));
+	vx = (double*)qaws_internal_scratch_malloc(sizeof(double) * 3 * ((size_t)nprof * N + 1));
+	tri = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * 6 * ((size_t)nprof * N + 1));
+	alpha = (double*)qaws_internal_scratch_malloc(sizeof(double) * ((size_t)nprof * N + 1));
+	wsrc = (double*)qaws_internal_scratch_malloc(sizeof(double) * 3 * ((size_t)nprof * N + 1));
+	fsrc = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nprof * N + 1));
 	if (!ring || !vx || !tri || !alpha || !wsrc || !fsrc)
 		goto done;
 	for (i = 0; i < nprof; i++)
@@ -1949,7 +1956,7 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 	}
 	{
 		qaws_mesh_3d_desc md;
-		qaws_scalar* xs = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 3 * ((size_t)nvo + 1));
+		qaws_scalar* xs = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * 3 * ((size_t)nvo + 1));
 		if (!xs)
 			goto done;
 		for (i = 0; i < 3 * nvo; i++)
@@ -1967,9 +1974,9 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 	/* the attributes from their sources (per corner its vertex's: the source triangle, its weights, the turn by alpha about u
 	   after R0) */
 	{
-		unsigned int* cs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)nto + 1));
-		double* cw = (double*)qaws_internal_malloc(sizeof(double) * 9 * ((size_t)nto + 1));
-		double* cR = (double*)qaws_internal_malloc(sizeof(double) * 27 * ((size_t)nto + 1));
+		unsigned int* cs = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * 3 * ((size_t)nto + 1));
+		double* cw = (double*)qaws_internal_scratch_malloc(sizeof(double) * 9 * ((size_t)nto + 1));
+		double* cR = (double*)qaws_internal_scratch_malloc(sizeof(double) * 27 * ((size_t)nto + 1));
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 		if (cs && cw && cR)
 		{
@@ -2180,7 +2187,7 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			if (ntimes + 2 > captimes)
 			{
 				unsigned int cap = captimes ? 2 * captimes : 64;
-				double* g = (double*)qaws_internal_realloc(times, sizeof(double) * cap);
+				double* g = (double*)swp_grow(times, sizeof(double) * cap);
 				if (!g)
 				{
 					qaws_internal_free(stack);
@@ -2211,15 +2218,15 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			goto oom;
 		capv = (unsigned int)need_v;
 		capf = (unsigned int)need_f;
-		sx = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)capv + 1));
-		sf = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)capf + 1));
+		sx = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)capv + 1));
+		sf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)capf + 1));
 		fr = (unsigned char*)qaws_internal_scratch_zalloc(qaws_internal_mul2((size_t)nt, S) + 1, 1);
 		gv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (size_t)nt + 1));
 		gc = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (size_t)nt + 1));
 		gs = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
 		tg = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nt + 1));
-		sof = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)capf + 1));
-		soc = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)capf + 1));
+		sof = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)capf + 1));
+		soc = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)capf + 1));
 		if (!sx || !sf || !fr || !sof || !soc || !gv || !gc || !gs || !tg)
 			goto oom;
 	}
@@ -2348,7 +2355,7 @@ qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out, qaws_sweep_boolean_repor
 	for (i = 0; i < move_count; i++)
 		if (!moves[i])
 			return QAWS_STATUS_INVALID_ARGUMENT;
-	sw = (qaws_mesh_3d**)qaws_internal_zalloc(move_count, sizeof *sw);
+	sw = (qaws_mesh_3d**)qaws_internal_scratch_zalloc(move_count, sizeof *sw);
 	if (!sw)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	/* each move's sweep (its attributes the tool's), all of them one operand */

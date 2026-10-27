@@ -47,6 +47,12 @@ typedef struct cc_ctx
 	unsigned int* vid;              /* per vertex: the least vertex at its position (at 0) */
 } cc_ctx;
 
+/* a temporary list grown: its first block from the scratch allocator, the next by the block's own */
+static void* cc_grow(void* p, size_t bytes)
+{
+	return p ? qaws_internal_realloc(p, bytes) : qaws_internal_scratch_malloc(bytes);
+}
+
 /* a body's vertices at t, in double */
 static qaws_status cc_at(cc_body* b, double t, double* X)
 {
@@ -181,7 +187,7 @@ static unsigned int cc_query(cc_ctx* c, double const* lo, double const* hi)
 			return ~0u;
 		{
 			unsigned int cap = n > 2 * c->capc ? n : 2 * c->capc + 64;
-			unsigned int* g = (unsigned int*)qaws_internal_realloc(c->cand, sizeof(unsigned int) * cap);
+			unsigned int* g = (unsigned int*)cc_grow(c->cand, qaws_internal_mul2(sizeof(unsigned int), cap));
 			if (!g)
 				return ~0u;
 			c->cand = g;
@@ -284,7 +290,7 @@ static int cc_touch(cc_ctx* c, double const* A, double const* B, unsigned int* f
 				if (c->npairs + 1 > c->cappairs)
 				{
 					unsigned int cap = 2 * c->cappairs + 64;
-					unsigned long long* gp = (unsigned long long*)qaws_internal_realloc(c->pairs, sizeof(unsigned long long) * cap);
+					unsigned long long* gp = (unsigned long long*)cc_grow(c->pairs, qaws_internal_mul2(sizeof(unsigned long long), cap));
 					if (!gp)
 						return -1;
 					c->pairs = gp;
@@ -387,7 +393,7 @@ static int cc_first(cc_ctx* c, double a, double b, double const* XA, double cons
 		return 1;
 	}
 	m = 0.5 * (a + b);
-	XM = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c->a.nv + 1));
+	XM = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c->a.nv + 1));
 	if (!XM)
 	{
 		*st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -733,7 +739,7 @@ typedef struct ccx_lin
    velocities its displacement): its ends into p0, p1 */
 static int ccx_linear(qaws_motion const* m, unsigned int nv, double* p0, double* p1)
 {
-	qaws_scalar *x = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)nv + 1)), *v = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)nv + 1));
+	qaws_scalar *x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)nv + 1)), *v = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)nv + 1));
 	unsigned int q, i;
 	int ok = m && qaws_motion_is_per_vertex(m) && x && v;
 	for (q = 0; ok && q <= 4; q++)
@@ -958,7 +964,7 @@ static int ccx_first_lin(cc_ctx* c, ccx_lin const* ba, ccx_lin const* bo, double
 	int E = 0x7FFFFFFF, have = 0;
 	unsigned int i, q, k, z;
 	uint64_t best = (uint64_t)1 << CCX_DEPTH;
-	ccx_node* stk = (ccx_node*)qaws_internal_malloc(sizeof(ccx_node) * (2 * CCX_DEPTH + 4));
+	ccx_node* stk = (ccx_node*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(ccx_node), 2 * CCX_DEPTH + 4));
 	if (!stk)
 		return -1;
 	/* the least exponent of every double in play */
@@ -1042,9 +1048,9 @@ static qaws_status cc_body_init(cc_body* b, qaws_mesh_3d const* m, qaws_motion c
 	b->nt = qaws_mesh_3d_get_triangle_count(m);
 	if (!b->nt || (mo && qaws_motion_is_per_vertex(mo) && qaws_motion_get_vertex_count(mo) != b->nv))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	b->t = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (3 * (size_t)b->nt + 1));
-	b->x = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)b->nv + 1));
-	b->buf = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)b->nv + 1));
+	b->t = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 3 * (size_t)b->nt + 1));
+	b->x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)b->nv + 1));
+	b->buf = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)b->nv + 1));
 	if (!b->t || !b->x || !b->buf)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	qaws_mesh_3d_get_triangles(b->t, m);
@@ -1067,7 +1073,7 @@ static qaws_status cc_speed(cc_body* b, double* vmax)
 	qaws_scalar* vel;
 	if (!b->m)
 		return QAWS_STATUS_OK;
-	vel = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)b->nv + 1));
+	vel = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)b->nv + 1));
 	if (!vel)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	for (i = 0; i <= 64 && st == QAWS_STATUS_OK; i++)
@@ -1114,8 +1120,8 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 	if (self)
 	{
 		/* vertices at one position (seams not welded) taken as one: x, y, z, index sorted */
-		double* s = (double*)qaws_internal_malloc(sizeof(double) * (4 * (size_t)c.a.nv + 1));
-		c.vid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)c.a.nv + 1));
+		double* s = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 4 * (size_t)c.a.nv + 1));
+		c.vid = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)c.a.nv + 1));
 		if (!s || !c.vid)
 		{
 			qaws_internal_free(s);
@@ -1139,18 +1145,18 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 		qaws_internal_free(s);
 	}
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	X0 = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.a.nv + 1));
-	X1 = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.a.nv + 1));
-	Xm = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.a.nv + 1));
-	O0 = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.o.nv + 1));
-	O1 = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.o.nv + 1));
-	Om = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.o.nv + 1));
-	c.OA = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.o.nv + 1));
-	c.OB = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.o.nv + 1));
-	c.bpos = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (6 * (size_t)c.o.nv + 1));
-	c.bsim = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (24 * (size_t)c.o.nt + 1));
-	c.bel = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (8 * (size_t)c.o.nt + 1));
-	c.seen = (unsigned int*)qaws_internal_zalloc((size_t)c.o.nt + 1, sizeof(unsigned int));
+	X0 = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c.a.nv + 1));
+	X1 = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c.a.nv + 1));
+	Xm = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c.a.nv + 1));
+	O0 = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c.o.nv + 1));
+	O1 = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c.o.nv + 1));
+	Om = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c.o.nv + 1));
+	c.OA = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c.o.nv + 1));
+	c.OB = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 3 * (size_t)c.o.nv + 1));
+	c.bpos = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 6 * (size_t)c.o.nv + 1));
+	c.bsim = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 24 * (size_t)c.o.nt + 1));
+	c.bel = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 8 * (size_t)c.o.nt + 1));
+	c.seen = (unsigned int*)qaws_internal_scratch_zalloc((size_t)c.o.nt + 1, sizeof(unsigned int));
 	if (!X0 || !X1 || !Xm || !O0 || !O1 || !Om || !c.OA || !c.OB || !c.bpos || !c.bsim || !c.bel || !c.seen)
 		goto done;
 	/* the obstacle's prisms in its BVH: per triangle its two caps and its sides' halves over the positions at both ends */
@@ -1211,7 +1217,7 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 	dt = vmax > 0 ? tol / (1.5 * vmax) : 1;
 	/* the slabs: [0, 1] halved until both bodies' chords (at the middle and quarters) are within tol, as the sweep's */
 	{
-		double* stack = (double*)qaws_internal_malloc(sizeof(double) * 2 * (2 * (size_t)maxs + 2));
+		double* stack = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 2, 2 * (size_t)maxs + 2));
 		unsigned int nsk = 0, ns = 1;
 		if (!stack)
 		{
@@ -1263,7 +1269,7 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 			if (ntimes + 2 > captimes)
 			{
 				unsigned int cap = captimes ? 2 * captimes : 64;
-				double* gr = (double*)qaws_internal_realloc(times, sizeof(double) * cap);
+				double* gr = (double*)cc_grow(times, qaws_internal_mul2(sizeof(double), cap));
 				if (!gr)
 				{
 					st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -1287,7 +1293,7 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 		double Ra[9], Ta0[3], Ta1[3], Ro[9], To0[3], To1[3];
 		/* each body straight: rigid (turned once, translated linearly) or a vertex motion moving each vertex on its chord at a
 		   constant rate (then the cubic events) */
-		double *qa = (double*)qaws_internal_malloc(sizeof(double) * (6 * (size_t)c.a.nv + 1)), *qo = (double*)qaws_internal_malloc(sizeof(double) * (6 * (size_t)c.o.nv + 1));
+		double *qa = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 6 * (size_t)c.a.nv + 1)), *qo = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), 6 * (size_t)c.o.nv + 1));
 		int sa = ccx_straight(motion, Ra, Ta0, Ta1), so = ccx_straight(obstacle_motion, Ro, To0, To1), lina = 0, lino = 0, straight, cubic;
 		ccx_lin ba, bo;
 		if (!qa || !qo)
