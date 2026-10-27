@@ -1690,6 +1690,7 @@
 #define sm_system_factor QAWS_SFX(sm_system_factor)
 #define sm_system_free QAWS_SFX(sm_system_free)
 #define sm_system_solve QAWS_SFX(sm_system_solve)
+#define swp_carry QAWS_SFX(swp_carry)
 #define sx_boolean QAWS_SFX(sx_boolean)
 #define vim_unsplit_border QAWS_SFX(vim_unsplit_border)
 #define vm_attr_carry QAWS_SFX(vm_attr_carry)
