@@ -8,7 +8,9 @@
  *   - a rod turning a quarter about z toward a wall: its corner on the wall at the interval's end (the motion's own
  *     rotation, rational in t);
  *   - a small cube inside a big one: contact at 0;
- *   - a vertex motion (a box's top rising into a ceiling): it touches at 0.5;
+ *   - a vertex motion (a box's top rising into a ceiling): it touches at 0.5, exactly (the doubles 0.2, 0.7 and 1.2 put
+ *     it 2.8e-17 below 0.5, half way between two doubles; each vertex on its chord at a
+ *     constant rate: the events cubics, isolated exactly);
  *   - straight moves exactly: the ball at 0.5, the cube at the wall at 0.19 (the double nearest 19/100), two cubes
  *     flying at each other at 0.7, the ball and a slab rising to meet it at 0.375, all marked exact;
  *   - a rod turning toward a wall moving toward it (not straight): its corner on the wall within the tolerance at the
@@ -16,7 +18,9 @@
  *   - a mesh against itself (qaws_mesh_3d_first_self_contact): two boxes of one mesh, one moved 1 toward the other by
  *     a vertex motion, meeting at 0.8; a box turning (rigid): never; a strip whose vertices go straight from flat to
  *     a ring: x(s, t) = (1 - t) s + t r sin(s / r) is a graph over x while dx/ds = 1 - t + t cos(s / r) > 0, so before
- *     0.5, and pinches at s = pi r at 0.5: the first contact just past 0.5, between triangles sharing no vertex.
+ *     0.5, and pinches at s = pi r at 0.5: the first contact just past 0.5, between triangles sharing no vertex; the
+ *     boxes and the strip move each vertex on its chord at a constant rate, so their times are exact (0.8; the strip's
+ *     0.5008967, as a brute force over a grid of 1e-6 bisected finds, triangles 38 and 42).
  */
 
 #include "test_common.h"
@@ -161,11 +165,10 @@ static void test_more(void)
 		v[i] = p1[i] - p0[i];
 	qaws_motion_create_vertices(&mv, p0, p1, v, v, NULL, NULL, 8, 0);
 	qaws_mesh_3d_first_contact(&r3, bx, mv, ceil, NULL, &d);
-	sprintf(msg, "a rod turning into a wall: [%.6f, %.6f], its corner at y %.6f then %.6f (the wall at 0.5); inside at 0: contact %d at %.1f; a deforming box: [%.6f, %.6f] (0.5)",
-		(double)r.time, (double)r.time_upper, ylo, yhi, r2.contact, (double)r2.time, (double)r3.time, (double)r3.time_upper);
+	sprintf(msg, "a rod turning into a wall: [%.6f, %.6f], its corner at y %.6f then %.6f (the wall at 0.5); inside at 0: contact %d at %.1f; a deforming box: [%.17g, %.17g] (0.5, exact %d)",
+		(double)r.time, (double)r.time_upper, ylo, yhi, r2.contact, (double)r2.time, (double)r3.time, (double)r3.time_upper, r3.exact);
 	printf("  %s\n", msg);
-	TEST_ASSERT(r.contact && ylo <= 0.5 + 1e-9 && yhi >= 0.5 - 1e-4 && r2.contact && r2.time == 0 && r3.contact && (double)r3.time <= 0.5 + 1e-9 &&
-		(double)r3.time_upper >= 0.5 - 1e-4, msg);
+	TEST_ASSERT(r.contact && ylo <= 0.5 + 1e-9 && yhi >= 0.5 - 1e-4 && r2.contact && r2.time == 0 && r3.contact && r3.exact && fabs((double)r3.time - 0.5) <= 1e-16, msg);
 	qaws_motion_destroy(mr); qaws_motion_destroy(ms); qaws_motion_destroy(mv);
 	qaws_mesh_3d_destroy(rod); qaws_mesh_3d_destroy(wall); qaws_mesh_3d_destroy(sm); qaws_mesh_3d_destroy(big); qaws_mesh_3d_destroy(bx); qaws_mesh_3d_destroy(ceil);
 }
@@ -306,7 +309,7 @@ static void test_self(void)
 	sprintf(msg, "itself: two boxes of one mesh in [%.6f, %.6f] (0.8); a turning box: contact %d; a strip pinching (at 0.5): contact %d in [%.6f, %.6f], triangles %u and %u (shared vertex %u) at (%.4f, %.4f) in x, z (the cusp at (0.4348, 0.2768))",
 		(double)r.time, (double)r.time_upper, r2.contact, r3.contact, (double)r3.time, (double)r3.time_upper, r3.face, r3.obstacle_face, shared, (double)r3.point.x, (double)r3.point.z);
 	printf("  %s\n", msg);
-	TEST_ASSERT(r.contact && (double)r.time <= 0.8 + 1e-9 && (double)r.time_upper >= 0.8 - 1e-4 && !r2.contact && r3.contact && (double)r3.time >= 0.5 - 1e-9 && (double)r3.time < 0.505 &&
+	TEST_ASSERT(r.contact && r.exact && fabs((double)r.time - 0.8) < 1e-15 && !r2.contact && r3.contact && r3.exact && fabs((double)r3.time - 0.5008967) < 1e-6 &&
 		!shared && fabs((double)r3.point.x - 1 / 2.3) < 0.01 && fabs((double)r3.point.z - rad) < 0.01, msg);
 	free(c0); free(c1); free(cv);
 	qaws_motion_destroy(mt); qaws_motion_destroy(mr); qaws_motion_destroy(mc);

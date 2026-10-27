@@ -714,6 +714,319 @@ static int ccx_first(cc_ctx* c, double const* qa, double const* Ta0, double cons
 	return have;
 }
 
+/* ---- straight vertex motions, exactly: every vertex at U + t V (U, V integers times 2^E), so a vertex reaching a face's
+   plane or two edges becoming coplanar is a root of a cubic in t (a determinant of three vectors linear in t), isolated in
+   the Bernstein basis on [0, 1] (no root where its four coefficients share a strict sign; else halved exactly, the earlier
+   half first) down to 2^-CCX_DEPTH, the event checked there exactly; the earliest one stands ---- */
+
+#define CCX_DEPTH 62u
+
+/* a body's straight motion: vertex i at base_i + T0 + t ((end_i - base_i, or 0) + T1 - T0) */
+typedef struct ccx_lin
+{
+	double const* base;
+	double const* end;              /* NULL: a rigid body's points (base turned once) */
+	double T0[3], T1[3];
+} ccx_lin;
+
+/* a vertex motion moving each vertex on its chord at a constant rate (its positions at the quarters the chords', its
+   velocities its displacement): its ends into p0, p1 */
+static int ccx_linear(qaws_motion const* m, unsigned int nv, double* p0, double* p1)
+{
+	qaws_scalar *x = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)nv + 1)), *v = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)nv + 1));
+	unsigned int q, i;
+	int ok = m && qaws_motion_is_per_vertex(m) && x && v;
+	for (q = 0; ok && q <= 4; q++)
+	{
+		double f = 0.25 * (q == 0 ? 0 : q == 1 ? 4 : q - 1);   /* (0 and 1 first: the ends) */
+		if (qaws_motion_transform_points(x, v, m, (qaws_scalar)f, NULL, nv) != QAWS_STATUS_OK)
+			ok = 0;
+		for (i = 0; ok && i < 3 * nv; i++)
+		{
+			double d, sc;
+			if (q == 0)
+				p0[i] = (double)x[i];
+			else if (q == 1)
+				p1[i] = (double)x[i];
+			d = (q == 0 ? (double)x[i] : p1[i]) - p0[i];
+			sc = 1e-12 * (1 + fabs(p0[i]) + fabs(d));
+			if (q >= 1 && fabs((double)v[i] - (p1[i] - p0[i])) > sc)
+				ok = 0;
+			if (q >= 2 && fabs((double)x[i] - (p0[i] + f * (p1[i] - p0[i]))) > sc)
+				ok = 0;
+		}
+	}
+	qaws_internal_free(x);
+	qaws_internal_free(v);
+	return ok;
+}
+
+/* r = a . (b x c) */
+static int ccx_det(qaws_exact_int* r, ccx_v const* a, ccx_v const* b, ccx_v const* c)
+{
+	ccx_v x;
+	return ccx_cross(&x, b, c) && ccx_dot(r, a, &x);
+}
+
+/* the cubic det(u0 + t v0, u1 + t v1, u2 + t v2): its power coefficients c[0..3] */
+static int ccx_cubic(qaws_exact_int* c, ccx_v const* u, ccx_v const* v)
+{
+	qaws_exact_int x;
+	static unsigned char const pick[8][3] = { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 1, 0 }, { 1, 0, 1 }, { 0, 1, 1 }, { 1, 1, 1 } };
+	unsigned int k;
+	for (k = 0; k < 4; k++)
+		qaws_exact_int_zero(&c[k]);
+	for (k = 0; k < 8; k++)
+	{
+		unsigned int deg = pick[k][0] + pick[k][1] + pick[k][2];
+		if (!ccx_det(&x, pick[k][0] ? &v[0] : &u[0], pick[k][1] ? &v[1] : &u[1], pick[k][2] ? &v[2] : &u[2]) || !ccx_ok(qaws_exact_int_add(&c[deg], &c[deg], &x)))
+			return 0;
+	}
+	return 1;
+}
+
+/* the positions at t = idx 2^-L, times 2^L: U 2^L + idx V */
+static int ccx_at(ccx_v* r, ccx_v const* U, ccx_v const* V, unsigned int L, uint64_t idx)
+{
+	qaws_exact_int x, y;
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		if (!ccx_ok(qaws_exact_int_shl(&x, &U->c[k], L)) || !ccx_ok(qaws_exact_int_mul_i64(&y, &V->c[k], (int64_t)idx)) || !ccx_ok(qaws_exact_int_add(&r->c[k], &x, &y)))
+			return 0;
+	}
+	return 1;
+}
+
+/* the event of kind q (0-2: the mesh's corner q on the obstacle's face, 3-5: the obstacle's corner on the mesh's face, 6-14:
+   an edge of each) between corners A and O (U, V each) holding at t = idx 2^-L: the point inside the face (its border counts)
+   or the edges crossing; -1 out of range */
+static int ccx_holds(unsigned int q, ccx_v const* AU, ccx_v const* AV, ccx_v const* OU, ccx_v const* OV, unsigned int L, uint64_t idx)
+{
+	ccx_v A[3], O[3], e1, e2, n, r, E;
+	unsigned int k;
+	int s[4];
+	for (k = 0; k < 3; k++)
+		if (!ccx_at(&A[k], &AU[k], &AV[k], L, idx) || !ccx_at(&O[k], &OU[k], &OV[k], L, idx))
+			return -1;
+	if (q < 6)
+	{
+		ccx_v const *p = q < 3 ? &A[q] : &O[q - 3], *T = q < 3 ? O : A;
+		if (!ccx_sub(&e1, &T[1], &T[0]) || !ccx_sub(&e2, &T[2], &T[0]) || !ccx_cross(&n, &e1, &e2))
+			return -1;
+		if (qaws_exact_int_is_zero(&n.c[0]) && qaws_exact_int_is_zero(&n.c[1]) && qaws_exact_int_is_zero(&n.c[2]))
+			return 0;
+		for (k = 0; k < 3; k++)
+			if (!ccx_sub(&E, &T[(k + 1) % 3], &T[k]) || !ccx_sub(&r, p, &T[k]) || !ccx_side(&s[k], &n, &E, &r))
+				return -1;
+		return (s[0] >= 0 && s[1] >= 0 && s[2] >= 0) || (s[0] <= 0 && s[1] <= 0 && s[2] <= 0);
+	}
+	{
+		unsigned int i = (q - 6) / 3, j = (q - 6) % 3;
+		ccx_v const *a0 = &A[i], *a1 = &A[(i + 1) % 3], *b0 = &O[j], *b1 = &O[(j + 1) % 3];
+		if (!ccx_sub(&e1, a1, a0) || !ccx_sub(&e2, b1, b0) || !ccx_cross(&n, &e1, &e2))
+			return -1;
+		if (qaws_exact_int_is_zero(&n.c[0]) && qaws_exact_int_is_zero(&n.c[1]) && qaws_exact_int_is_zero(&n.c[2]))
+			return 0;
+		if (!ccx_sub(&r, b0, a0) || !ccx_side(&s[0], &n, &e1, &r) || !ccx_sub(&r, b1, a0) || !ccx_side(&s[1], &n, &e1, &r) ||
+			!ccx_sub(&r, a0, b0) || !ccx_side(&s[2], &n, &e2, &r) || !ccx_sub(&r, a1, b0) || !ccx_side(&s[3], &n, &e2, &r))
+			return -1;
+		return s[0] * s[1] <= 0 && s[2] * s[3] <= 0;
+	}
+}
+
+typedef struct ccx_node
+{
+	qaws_exact_int b[4];            /* Bernstein coefficients on the interval, up to a positive factor */
+	unsigned int L;
+	uint64_t idx;                   /* the interval [idx, idx + 1] 2^-L */
+} ccx_node;
+
+/* the earliest t (as idx at level CCX_DEPTH) before *best where the cubic c vanishes and the event holds; 1 found, 0 none,
+   -1 out of range. st: a stack of 2 CCX_DEPTH + 2 nodes */
+static int ccx_root(qaws_exact_int const* c, unsigned int q, ccx_v const* AU, ccx_v const* AV, ccx_v const* OU, ccx_v const* OV, uint64_t* best, ccx_node* stk)
+{
+	unsigned int n = 0, k;
+	qaws_exact_int x;
+	if (qaws_exact_int_is_zero(&c[0]) && qaws_exact_int_is_zero(&c[1]) && qaws_exact_int_is_zero(&c[2]) && qaws_exact_int_is_zero(&c[3]))
+		return 0;   /* (coplanar throughout: the edges about it meet first) */
+	/* power to Bernstein, times 3: 3 c0, 3 c0 + c1, 3 c0 + 2 c1 + c2, 3 (c0 + c1 + c2 + c3) */
+	{
+		ccx_node* r = &stk[n++];
+		qaws_exact_int t3;
+		if (!ccx_ok(qaws_exact_int_mul_i64(&r->b[0], &c[0], 3)) || !ccx_ok(qaws_exact_int_add(&r->b[1], &r->b[0], &c[1])) ||
+			!ccx_ok(qaws_exact_int_add(&r->b[2], &r->b[1], &c[1])) || !ccx_ok(qaws_exact_int_add(&r->b[2], &r->b[2], &c[2])) ||
+			!ccx_ok(qaws_exact_int_add(&t3, &c[0], &c[1])) || !ccx_ok(qaws_exact_int_add(&t3, &t3, &c[2])) || !ccx_ok(qaws_exact_int_add(&t3, &t3, &c[3])) ||
+			!ccx_ok(qaws_exact_int_mul_i64(&r->b[3], &t3, 3)))
+			return -1;
+		r->L = 0;
+		r->idx = 0;
+	}
+	while (n)
+	{
+		ccx_node nd = stk[--n];
+		int s0 = qaws_exact_int_sign(&nd.b[0]), pos = 1, neg = 1, h;
+		uint64_t at = nd.idx << (CCX_DEPTH - nd.L);
+		if (at >= *best)
+			continue;
+		for (k = 0; k < 4; k++)
+		{
+			int s = qaws_exact_int_sign(&nd.b[k]);
+			pos &= s > 0;
+			neg &= s < 0;
+		}
+		if (pos || neg)
+			continue;
+		if (s0 == 0 || nd.L == CCX_DEPTH)
+		{
+			/* a root at the interval's start, or the interval as small as it gets: the event there */
+			if ((h = ccx_holds(q, AU, AV, OU, OV, nd.L, nd.idx)) < 0)
+				return -1;
+			if (h)
+			{
+				*best = at;
+				return 1;
+			}
+			if (nd.L == CCX_DEPTH)
+				continue;
+		}
+		{
+			/* halved (de Casteljau, times 8): the later half pushed first */
+			ccx_node *lo = &stk[n], *hi = &stk[n + 1];
+			qaws_exact_int m1, m2, mid;
+			unsigned int tz = ~0u;
+			/* hi: [b0 + 3 b1 + 3 b2 + b3, 2 (b1 + 2 b2 + b3), 4 (b2 + b3), 8 b3]; lo: [8 b0, 4 (b0 + b1), 2 (b0 + 2 b1 + b2), mid] */
+			if (!ccx_ok(qaws_exact_int_mul_i64(&m1, &nd.b[1], 3)) || !ccx_ok(qaws_exact_int_mul_i64(&m2, &nd.b[2], 3)) || !ccx_ok(qaws_exact_int_add(&mid, &m1, &m2)) ||
+				!ccx_ok(qaws_exact_int_add(&mid, &mid, &nd.b[0])) || !ccx_ok(qaws_exact_int_add(&mid, &mid, &nd.b[3])))
+				return -1;
+			if (!ccx_ok(qaws_exact_int_shl(&hi->b[3], &nd.b[3], 3)) || !ccx_ok(qaws_exact_int_add(&x, &nd.b[2], &nd.b[3])) || !ccx_ok(qaws_exact_int_shl(&hi->b[2], &x, 2)) ||
+				!ccx_ok(qaws_exact_int_add(&x, &x, &nd.b[2])) || !ccx_ok(qaws_exact_int_add(&x, &x, &nd.b[1])) || !ccx_ok(qaws_exact_int_shl(&hi->b[1], &x, 1)))
+				return -1;
+			hi->b[0] = mid;
+			if (!ccx_ok(qaws_exact_int_shl(&lo->b[0], &nd.b[0], 3)) || !ccx_ok(qaws_exact_int_add(&x, &nd.b[0], &nd.b[1])) || !ccx_ok(qaws_exact_int_shl(&lo->b[1], &x, 2)) ||
+				!ccx_ok(qaws_exact_int_add(&x, &x, &nd.b[1])) || !ccx_ok(qaws_exact_int_add(&x, &x, &nd.b[2])) || !ccx_ok(qaws_exact_int_shl(&lo->b[2], &x, 1)))
+				return -1;
+			lo->b[3] = mid;
+			lo->L = hi->L = nd.L + 1;
+			lo->idx = 2 * nd.idx;
+			hi->idx = 2 * nd.idx + 1;
+			/* (the common powers of two out of each, so the integers stay small) */
+			for (k = 0; k < 8; k++)
+			{
+				qaws_exact_int const* z = k < 4 ? &lo->b[k] : &hi->b[k - 4];
+				if (!qaws_exact_int_is_zero(z))
+					tz = qaws_exact_int_ctz(z) < tz ? qaws_exact_int_ctz(z) : tz;
+			}
+			if (tz != ~0u && tz)
+				for (k = 0; k < 4; k++)
+				{
+					qaws_exact_int_shr(&lo->b[k], &lo->b[k], tz);
+					qaws_exact_int_shr(&hi->b[k], &hi->b[k], tz);
+				}
+			/* (the earlier half popped first) */
+			{
+				ccx_node t = *lo;
+				*lo = *hi;
+				*hi = t;
+			}
+			n += 2;
+		}
+	}
+	return 0;
+}
+
+/* a body's vertex v at 0 and its displacement over [0, 1], as integers times 2^E */
+static int ccx_uv(ccx_v* U, ccx_v* V, ccx_lin const* b, unsigned int v, int E)
+{
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		qaws_exact_int x, y, z;
+		if (!ccx_from(&x, b->base[3 * (size_t)v + k], E) || !ccx_from(&y, b->T0[k], E) || !ccx_ok(qaws_exact_int_add(&U->c[k], &x, &y)) ||
+			!ccx_from(&z, b->T1[k], E) || !ccx_ok(qaws_exact_int_sub(&V->c[k], &z, &y)))
+			return 0;
+		if (b->end && (!ccx_from(&z, b->end[3 * (size_t)v + k], E) || !ccx_ok(qaws_exact_int_sub(&z, &z, &x)) || !ccx_ok(qaws_exact_int_add(&V->c[k], &V->c[k], &z))))
+			return 0;
+	}
+	return 1;
+}
+
+/* the exact first contact among the pairs in c->pairs, the bodies moving straight (ba, bo): its time into *t (within
+   2^-CCX_DEPTH, rounded) and its pair; 0 none, 1 found, -1 out of range or allocation */
+static int ccx_first_lin(cc_ctx* c, ccx_lin const* ba, ccx_lin const* bo, double* t, unsigned int* bf, unsigned int* bg)
+{
+	int E = 0x7FFFFFFF, have = 0;
+	unsigned int i, q, k, z;
+	uint64_t best = (uint64_t)1 << CCX_DEPTH;
+	ccx_node* stk = (ccx_node*)qaws_internal_malloc(sizeof(ccx_node) * (2 * CCX_DEPTH + 4));
+	if (!stk)
+		return -1;
+	/* the least exponent of every double in play */
+	for (z = 0; z < 2; z++)
+	{
+		ccx_lin const* b = z ? bo : ba;
+		unsigned int nv = z ? c->o.nv : c->a.nv;
+		for (i = 0; i < 3 * nv + 6; i++)
+		{
+			double d[2] = { i < 3 * nv ? b->base[i] : i < 3 * nv + 3 ? b->T0[i - 3 * nv] : b->T1[i - 3 * nv - 3], i < 3 * nv && b->end ? b->end[i] : 0 };
+			for (k = 0; k < 2; k++)
+			{
+				int64_t m;
+				int e;
+				if (d[k] != 0 && qaws_exact_split_double(d[k], &m, &e) && e < E)
+					E = e;
+			}
+		}
+	}
+	if (E == 0x7FFFFFFF)
+		E = 0;
+	for (i = 0; i < c->npairs; i++)
+	{
+		unsigned int f = (unsigned int)(c->pairs[i] >> 32), g = (unsigned int)c->pairs[i];
+		ccx_v AU[3], AV[3], OU[3], OV[3];
+		for (k = 0; k < 3; k++)
+			if (!ccx_uv(&AU[k], &AV[k], ba, c->a.t[3 * (size_t)f + k], E) || !ccx_uv(&OU[k], &OV[k], bo, c->o.t[3 * (size_t)g + k], E))
+				goto range;
+		for (q = 0; q < 15; q++)
+		{
+			ccx_v u[3], v[3];
+			qaws_exact_int cf[4];
+			int r;
+			if (q < 6)
+			{
+				/* det(T1 - T0, T2 - T0, p - T0) */
+				ccx_v const *pU = q < 3 ? &AU[q] : &OU[q - 3], *pV = q < 3 ? &AV[q] : &OV[q - 3], *TU = q < 3 ? OU : AU, *TV = q < 3 ? OV : AV;
+				if (!ccx_sub(&u[0], &TU[1], &TU[0]) || !ccx_sub(&v[0], &TV[1], &TV[0]) || !ccx_sub(&u[1], &TU[2], &TU[0]) || !ccx_sub(&v[1], &TV[2], &TV[0]) ||
+					!ccx_sub(&u[2], pU, &TU[0]) || !ccx_sub(&v[2], pV, &TV[0]))
+					goto range;
+			}
+			else
+			{
+				/* det(a1 - a0, b1 - b0, b0 - a0) */
+				unsigned int a0 = (q - 6) / 3, a1 = (a0 + 1) % 3, b0 = (q - 6) % 3, b1 = (b0 + 1) % 3;
+				if (!ccx_sub(&u[0], &AU[a1], &AU[a0]) || !ccx_sub(&v[0], &AV[a1], &AV[a0]) || !ccx_sub(&u[1], &OU[b1], &OU[b0]) || !ccx_sub(&v[1], &OV[b1], &OV[b0]) ||
+					!ccx_sub(&u[2], &OU[b0], &AU[a0]) || !ccx_sub(&v[2], &OV[b0], &AV[a0]))
+					goto range;
+			}
+			if (!ccx_cubic(cf, u, v) || (r = ccx_root(cf, q, AU, AV, OU, OV, &best, stk)) < 0)
+				goto range;
+			if (r)
+			{
+				*bf = f;
+				*bg = g;
+				have = 1;
+			}
+		}
+	}
+	qaws_internal_free(stk);
+	if (have)
+		*t = ldexp((double)best, -(int)CCX_DEPTH);
+	return have;
+range:
+	qaws_internal_free(stk);
+	return -1;
+}
+
 static int cc_cmp_double(void const* a, void const* b)
 {
 	double x = *(double const*)a, y = *(double const*)b;
@@ -972,26 +1285,41 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 		/* the slabs in time order: the first that touches, halved; for straight moves the exact time among the pairs touching
 		   about it, the search going on past the interval when none of them meets */
 		double Ra[9], Ta0[3], Ta1[3], Ro[9], To0[3], To1[3];
-		int straight = ccx_straight(motion, Ra, Ta0, Ta1) && ccx_straight(obstacle_motion, Ro, To0, To1);
-		double *qa = NULL, *qo = NULL;
-		if (straight)
+		/* each body straight: rigid (turned once, translated linearly) or a vertex motion moving each vertex on its chord at a
+		   constant rate (then the cubic events) */
+		double *qa = (double*)qaws_internal_malloc(sizeof(double) * (6 * (size_t)c.a.nv + 1)), *qo = (double*)qaws_internal_malloc(sizeof(double) * (6 * (size_t)c.o.nv + 1));
+		int sa = ccx_straight(motion, Ra, Ta0, Ta1), so = ccx_straight(obstacle_motion, Ro, To0, To1), lina = 0, lino = 0, straight, cubic;
+		ccx_lin ba, bo;
+		if (!qa || !qo)
 		{
-			/* (the bodies' points turned once: every vertex at q + T(t)) */
-			qa = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.a.nv + 1));
-			qo = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.o.nv + 1));
-			if (!qa || !qo)
-			{
-				qaws_internal_free(qa);
-				qaws_internal_free(qo);
-				st = QAWS_STATUS_ALLOCATION_FAILURE;
-				goto done;
-			}
-			for (i = 0; i < c.a.nv; i++)
-				for (k = 0; k < 3; k++)
-					qa[3 * (size_t)i + k] = Ra[3 * k] * (double)c.a.x[3 * (size_t)i] + Ra[3 * k + 1] * (double)c.a.x[3 * (size_t)i + 1] + Ra[3 * k + 2] * (double)c.a.x[3 * (size_t)i + 2];
-			for (i = 0; i < c.o.nv; i++)
-				for (k = 0; k < 3; k++)
-					qo[3 * (size_t)i + k] = Ro[3 * k] * (double)c.o.x[3 * (size_t)i] + Ro[3 * k + 1] * (double)c.o.x[3 * (size_t)i + 1] + Ro[3 * k + 2] * (double)c.o.x[3 * (size_t)i + 2];
+			qaws_internal_free(qa);
+			qaws_internal_free(qo);
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		lina = !sa && ccx_linear(motion, c.a.nv, qa, qa + 3 * (size_t)c.a.nv);
+		lino = !so && ccx_linear(obstacle_motion, c.o.nv, qo, qo + 3 * (size_t)c.o.nv);
+		straight = (sa || lina) && (so || lino);
+		cubic = lina || lino;
+		/* (rigid: the bodies' points turned once, every vertex at q + T(t)) */
+		for (i = 0; sa && i < c.a.nv; i++)
+			for (k = 0; k < 3; k++)
+				qa[3 * (size_t)i + k] = Ra[3 * k] * (double)c.a.x[3 * (size_t)i] + Ra[3 * k + 1] * (double)c.a.x[3 * (size_t)i + 1] + Ra[3 * k + 2] * (double)c.a.x[3 * (size_t)i + 2];
+		for (i = 0; so && i < c.o.nv; i++)
+			for (k = 0; k < 3; k++)
+				qo[3 * (size_t)i + k] = Ro[3 * k] * (double)c.o.x[3 * (size_t)i] + Ro[3 * k + 1] * (double)c.o.x[3 * (size_t)i + 1] + Ro[3 * k + 2] * (double)c.o.x[3 * (size_t)i + 2];
+		memset(&ba, 0, sizeof ba);
+		memset(&bo, 0, sizeof bo);
+		ba.base = qa;
+		ba.end = lina ? qa + 3 * (size_t)c.a.nv : NULL;
+		bo.base = qo;
+		bo.end = lino ? qo + 3 * (size_t)c.o.nv : NULL;
+		for (k = 0; k < 3; k++)
+		{
+			ba.T0[k] = sa ? Ta0[k] : 0;
+			ba.T1[k] = sa ? Ta1[k] : 0;
+			bo.T0[k] = so ? To0[k] : 0;
+			bo.T1[k] = so ? To1[k] : 0;
 		}
 		for (i = 0; i < ntimes / 2; i++)
 		{
@@ -1021,6 +1349,7 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 					double wa = fmax(0, ta - dt), wb = fmin(1, tb + dt);
 					qaws_exact_int num, den;
 					unsigned int ef = 0, eg = 0;
+					double tx = 0;
 					int rx;
 					if ((st = cc_at(&c.a, wa, X0)) != QAWS_STATUS_OK || (st = cc_at(&c.a, wb, X1)) != QAWS_STATUS_OK || (st = cc_obstacle(&c, wa, wb)) != QAWS_STATUS_OK)
 						break;
@@ -1033,7 +1362,7 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 						st = QAWS_STATUS_ALLOCATION_FAILURE;
 						break;
 					}
-					rx = ccx_first(&c, qa, Ta0, Ta1, qo, To0, To1, &num, &den, &ef, &eg);
+					rx = cubic ? ccx_first_lin(&c, &ba, &bo, &tx, &ef, &eg) : ccx_first(&c, qa, Ta0, Ta1, qo, To0, To1, &num, &den, &ef, &eg);
 					if (rx < 0)
 					{
 						/* (past the integers' range: the bracket as found) */
@@ -1046,7 +1375,7 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 					}
 					if (rx > 0)
 					{
-						double t = qaws_exact_ratio_to_double(&num, &den);
+						double t = cubic ? tx : qaws_exact_ratio_to_double(&num, &den);
 						report->contact = 1;
 						report->exact = 1;
 						report->time = report->time_upper = (qaws_scalar)t;

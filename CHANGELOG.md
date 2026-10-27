@@ -42,7 +42,8 @@ All notable changes to Qaws are documented here.
   (test 183, figure 71). The obstacle may move too (its own motion, prisms against prisms); straight motions on both
   sides give the exact time (vertex-face and edge-edge coplanarity roots on exact integers, `report.exact`).
   `qaws_mesh_3d_first_self_contact`: a mesh against itself under a vertex motion, over its triangle pairs sharing no
-  vertex (a strip pinching at its cusp, two parts of one mesh closing).
+  vertex (a strip pinching at its cusp, two parts of one mesh closing). Vertex motions moving each vertex on its chord at
+  a constant rate get exact times too: cubic events on exact integers, isolated by Bernstein halving.
 - Sweeps of spins: a motion turning a whole turn or more about one axis, drifting under the tolerance a turn (a grinding
   wheel, a drill), is swept as the body's solid of revolution along its drift (`qaws_sweep_report.turns`): passes over
   the same places coincide instead of piling up hulls dozens deep. Attributes from the point the turn first brings to

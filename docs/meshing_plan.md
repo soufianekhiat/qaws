@@ -306,7 +306,8 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    moving meshes and the exact kernel for straight motions (obstacle_motion, report.exact; two cubes at 0.7
    and boxes at 2.65 / 6 exactly). Then self-collision
    (qaws_mesh_3d_first_self_contact: pairs sharing no vertex; a strip pinching at its cusp at 0.5, two parts of one
-   mesh at 0.8). Not done: folds within one vertex's ring.
+   mesh at 0.8). Then exact times for straight vertex motions (cubics isolated by Bernstein halving). Not done: folds
+   within one vertex's ring.
 6. **The implicit route, for comparison and sculpting.** The swept volume's signed distance as the least over time of
    the moving shape's distance (ISV-SDF; the BVH's signed distance for the shape, a 1D minimization in t per query
    bracketed by the slabs), contoured by the offsets' contouring (item 17 of the enrichments, adaptive blocks): smooth

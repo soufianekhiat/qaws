@@ -206,7 +206,13 @@ qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out_mesh, qaws_sweep_boolean_
  * rational, its point checked inside the face or both edges, all on the
  * exact kernel's integers; the earliest is the contact (exact set, time and
  * time_upper the double nearest it). Pairs only within the tolerance meet
- * no event, and the search goes on past them.
+ * no event, and the search goes on past them. A vertex motion moving each
+ * vertex on its chord at a constant rate is straight too: the events are
+ * roots of cubics in t on exact integers, isolated by exact halving in the
+ * Bernstein basis to 2^-62 and checked there (time within 2^-62, rounded).
+ * Otherwise a vertex motion's bracket is conservative: a triangle whose
+ * corners move apart sweeps a curved surface its prisms hold, so they may
+ * touch before it does (none comes before time).
  * Meshes meeting at 0 (triangles crossing, or one inside the other by the
  * winding number) give time 0. The overlap's volume over the whole motion
  * is qaws_mesh_sweep_boolean's INTERSECTION.
