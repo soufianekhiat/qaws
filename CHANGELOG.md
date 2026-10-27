@@ -29,6 +29,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Passes over one place: `qaws_sweep_desc.combines` combine an attribute's values over the passes of a spin (each turn)
+  or of the implicit sweep (each run of time within reach) by FIRST, LAST, MINIMUM, MAXIMUM, SUM or AVERAGE; generated
+  `passes` and `dwell` (tests 180, 184, figure 76).
 - Attribute promotion (`qaws_mesh_promote.h`, after Houdini's Attribute Promote): `qaws_mesh_3d_promote_attribute` moves
   an attribute between vertices, corners, faces and edges by MAXIMUM, MINIMUM, AVERAGE (by its rule), MODE, MEDIAN, SUM,
   SUM_OF_SQUARES, RMS, FIRST or LAST, with a piece attribute, an index attribute, a new name; `qaws_mesh_3d_reduce_attribute`

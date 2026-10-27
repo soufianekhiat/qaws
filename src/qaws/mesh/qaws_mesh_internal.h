@@ -317,16 +317,29 @@ typedef struct wt_cross
 
 /* the swept mesh's attributes onto out (qaws_mesh_sweep.c): per out corner its source triangle (of the mesh's nt, faces fanned
    from their first corner), weights on it and a rotation (9, NULL none); edges: out edges from points of one mesh edge take
-   its values (else zeros); ct, desc: each corner's time and the sweep's tracks (NULL: none) */
-qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* csrc, double const* cw, double const* cR, int edges,
-	double const* ct, qaws_sweep_desc const* desc);
+   its values (else zeros); ct, desc: each corner's time and the sweep's tracks (NULL: none). cpo (NULL: one source per
+   corner, at its index): per corner the range of its passes' sources in csrc, cw, cR, ct (3 nto + 1 offsets), combined per
+   attribute by desc's combines */
+qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* cpo, unsigned int const* csrc, double const* cw,
+	double const* cR, int edges, double const* ct, qaws_sweep_desc const* desc);
 
 /* the generated attributes (qaws_sweep_desc.generate) onto out (qaws_mesh_sweep_generate.c): per out corner its time (ct), its
-   source triangle (of the mesh's nt) and weights */
+   source triangle (of the mesh's nt) and weights; with cpo (as swp_carry's) per pass, combined by desc's combines, cdw each
+   pass's time within reach (NULL: 0) */
 qaws_status swp_generate(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_motion const* motion, unsigned int flags, unsigned int nt,
-	unsigned int const* csrc, double const* cw, double const* ct);
+	unsigned int const* cpo, unsigned int const* csrc, double const* cw, double const* ct, double const* cdw, qaws_sweep_desc const* desc);
 /* the time a rigid motion has turned by angle (radians, summed; 0 or 1 past its ends) */
 double swp_time_at_angle(qaws_motion const* m, double angle);
+/* a rigid motion's turned angle tabulated (scratch, the caller frees it; NULL on failure), its total, the time it reaches an
+   angle */
+double* swp_angle_table(qaws_motion const* m);
+double swp_table_total(double const* tab);
+double swp_table_time(double const* tab, double angle);
+/* an attribute's way of combining passes (qaws_sweep_combine; FIRST without one); whether passes are wanted at all; np
+   passes' values (n each) combined into out */
+unsigned int swp_combine_of(qaws_sweep_desc const* desc, char const* name);
+int swp_passes_wanted(qaws_sweep_desc const* desc);
+void swp_combine(double* out, double const* vals, unsigned int np, unsigned int n, unsigned int rule, unsigned int combine);
 /* the sweep's track of an attribute by name (NULL: none); the tracks checked against the body (INVALID_ARGUMENT); element e's
    value of a track at t (count elements of n components, blended by rule) */
 qaws_attribute_track const* swp_track(qaws_sweep_desc const* desc, char const* name);

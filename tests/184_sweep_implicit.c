@@ -8,6 +8,9 @@
  *   - a vertex motion (a box's top rising from 1 to 2): closed, volume 2 within 3%;
  *   - refusals: no mesh, a vertex motion of another count;
  *   - an attribute track: a vertex "heat" animated from 0 to 1 equals the generated time at every corner;
+ *   - passes: a ball out along x and back (x = 3 t (1 - t), even about t = 0.5): most corners passed twice, at t and 1 - t
+ *     (a ball's sweep is touched at an instant, unlike a face sliding along itself, touched over a span), so the heat track
+ *     combined by SUM is 1 there (within the pass times' refinement), the others once;
  *   - generated attributes (qaws_sweep_desc.generate): the cube moved by (1, 1, 0) at a constant rate: velocity (1, 1, 0)
  *     at every corner, distance sqrt 2 times the time, orientation the identity, and each corner its source point (its
  *     source_face and source_uv on the cube) moved by (time, time, 0), within a cell;
@@ -437,6 +440,103 @@ static void test_track(void)
 	qaws_mesh_3d_destroy(c);
 }
 
+/* a UV ball of radius r at the origin, poles on z */
+static qaws_mesh_3d* si_ball(double r, unsigned int nu, unsigned int nv)
+{
+	unsigned int n = nu * (nv - 1) + 2, i, j, k = 0;
+	qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	unsigned int* f = (unsigned int*)malloc(sizeof(unsigned int) * 6 * nu * nv);
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (j = 1; j < nv; j++)
+		for (i = 0; i < nu; i++)
+		{
+			double th = 3.14159265358979323846 * j / nv, ph = 2 * 3.14159265358979323846 * i / nu;
+			unsigned int q = (j - 1) * nu + i;
+			x[3 * q] = (qaws_scalar)(r * sin(th) * cos(ph));
+			x[3 * q + 1] = (qaws_scalar)(r * sin(th) * sin(ph));
+			x[3 * q + 2] = (qaws_scalar)(r * cos(th));
+		}
+	x[3 * (n - 2)] = x[3 * (n - 2) + 1] = 0;
+	x[3 * (n - 2) + 2] = (qaws_scalar)r;
+	x[3 * (n - 1)] = x[3 * (n - 1) + 1] = 0;
+	x[3 * (n - 1) + 2] = (qaws_scalar)-r;
+	for (i = 0; i < nu; i++)
+	{
+		unsigned int i1 = (i + 1) % nu;
+		f[k++] = n - 2; f[k++] = i; f[k++] = i1;
+		for (j = 1; j + 1 < nv; j++)
+		{
+			unsigned int a = (j - 1) * nu + i, b = (j - 1) * nu + i1, c = j * nu + i1, e = j * nu + i;
+			f[k++] = a; f[k++] = e; f[k++] = c;
+			f[k++] = a; f[k++] = c; f[k++] = b;
+		}
+		f[k++] = n - 1; f[k++] = (nv - 2) * nu + i1; f[k++] = (nv - 2) * nu + i;
+	}
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = n; d.face_vertices = f; d.face_count = k / 3;
+	qaws_mesh_3d_create(&m, &d);
+	free(x); free(f);
+	return m;
+}
+
+static void test_passes(void)
+{
+	qaws_mesh_3d* c = si_ball(0.2, 24, 12), *o = NULL;
+	qaws_motion* m = NULL;
+	qaws_motion_pose s, e;
+	qaws_sweep_desc d;
+	qaws_attribute_track tr;
+	qaws_attribute_combine cb;
+	qaws_attribute_desc ad;
+	unsigned int nb = qaws_mesh_3d_get_vertex_count(c), i, id, nc = 0, two = 0, one = 0, more = 0;
+	qaws_scalar *zero = (qaws_scalar*)calloc(nb + 1, sizeof(qaws_scalar)), *keys = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * (nb + 1)), times[2] = { 0, 1 }, *pv = NULL, *hv = NULL;
+	double wh = 0;
+	char msg[300];
+	for (i = 0; i < 2 * nb; i++)
+		keys[i] = (qaws_scalar)(i < nb ? 0 : 1);
+	memset(&ad, 0, sizeof ad);
+	ad.name = "heat"; ad.element = QAWS_MESH_VERTEX; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(&id, c, zero, &ad);
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	s.velocity.x = 3;
+	e.velocity.x = -3;
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	tr.name = "heat"; tr.times = times; tr.values = keys; tr.key_count = 2;
+	cb.name = "heat"; cb.combine = QAWS_SWEEP_COMBINE_SUM;
+	memset(&d, 0, sizeof d);
+	d.resolution = 24;
+	d.tracks = &tr; d.track_count = 1;
+	d.combines = &cb; d.combine_count = 1;
+	d.generate = QAWS_SWEEP_GENERATE_PASSES;
+	qaws_mesh_3d_sweep_implicit(&o, NULL, c, m, &d);
+	if (o)
+	{
+		nc = qaws_mesh_3d_get_corner_count(o);
+		pv = si_corner_values(o, "passes", 1); hv = si_corner_values(o, "heat", 1);
+	}
+	for (i = 0; pv && hv && i < nc; i++)
+	{
+		if (pv[i] == 2)
+		{
+			two++;
+			wh = fmax(wh, fabs((double)hv[i] - 1));
+		}
+		else if (pv[i] == 1)
+			one++;
+		else
+			more++;
+	}
+	sprintf(msg, "passes there and back: %u corners passed twice (heat summed off 1 by %.3f), %u once, %u other", two, wh, one, more);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && pv && hv && two > nc / 2 && wh < 0.05 && !more, msg);
+	free(pv); free(hv); free(zero); free(keys);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o);
+}
+
 int test_184_sweep_implicit_main(void)
 {
 	g_pass = 0;
@@ -447,6 +547,7 @@ int test_184_sweep_implicit_main(void)
 	test_attributes();
 	test_generate();
 	test_track();
+	test_passes();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

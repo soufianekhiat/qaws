@@ -109,7 +109,9 @@
      VELOCITY     "velocity" (VECTOR, 3): the point's velocity then;
      DISTANCE     "distance" (LINEAR): the length its origin had travelled by then;
      SOURCE       "source_face" (NEAREST): the body's face of that point, and "source_uv" (LINEAR, 2): the point's weights on
-                  the face's triangle's second and third corners (any of the body's values can be looked up from them).
+                  the face's triangle's second and third corners (any of the body's values can be looked up from them);
+     PASSES       "passes" (NEAREST): how many times the body passed there (see qaws_sweep_combine; by slabs 1);
+     DWELL        "dwell" (LINEAR): the time it stayed within reach over them (the implicit sweep: within 1.5 cells; else 0).
    A vertex motion has no turn, pose or origin: INDEX, ANGLE and DISTANCE 0, ORIENTATION the identity, POSITION 0 (its
    VELOCITY the point's). A generated name replaces an attribute of that name on the body. */
 #ifndef QAWS_ENUM_QAWS_SWEEP_GENERATE
@@ -123,9 +125,34 @@ typedef enum qaws_sweep_generate
 	QAWS_SWEEP_GENERATE_POSITION = 16,
 	QAWS_SWEEP_GENERATE_VELOCITY = 32,
 	QAWS_SWEEP_GENERATE_DISTANCE = 64,
-	QAWS_SWEEP_GENERATE_SOURCE = 128
+	QAWS_SWEEP_GENERATE_SOURCE = 128,
+	QAWS_SWEEP_GENERATE_PASSES = 256,
+	QAWS_SWEEP_GENERATE_DWELL = 512
 } qaws_sweep_generate;
 #endif
+
+/* How the values of the passes over one place combine (qaws_sweep_desc.combines, per attribute by name: the body's, a
+   track's or a generated one). A place is passed again when the body comes back to it: a spin each turn, the implicit
+   sweep each run of time it comes within 1.5 cells; by slabs only the first pass is known. FIRST (the default) the first
+   touch's; LAST the last pass's; MINIMUM, MAXIMUM and SUM per component; AVERAGE by the attribute's rule. */
+#ifndef QAWS_ENUM_QAWS_SWEEP_COMBINE
+#define QAWS_ENUM_QAWS_SWEEP_COMBINE
+typedef enum qaws_sweep_combine
+{
+	QAWS_SWEEP_COMBINE_FIRST = 0,
+	QAWS_SWEEP_COMBINE_LAST,
+	QAWS_SWEEP_COMBINE_MINIMUM,
+	QAWS_SWEEP_COMBINE_MAXIMUM,
+	QAWS_SWEEP_COMBINE_AVERAGE,
+	QAWS_SWEEP_COMBINE_SUM
+} qaws_sweep_combine;
+#endif
+
+typedef struct qaws_attribute_combine
+{
+	char const* name;
+	qaws_sweep_combine combine;
+} qaws_attribute_combine;
 
 /* An attribute of the body animated over the motion: keys at increasing times in [0, 1], each holding every value of the
    attribute (its element count times its components, as qaws_mesh_3d_get_attribute gives them). The sweep reads it at the
@@ -156,6 +183,8 @@ typedef struct qaws_sweep_desc
 	unsigned int generate;              /* qaws_sweep_generate flags ORed: the attributes to add */
 	qaws_attribute_track const* tracks; /* attributes animated over the motion (NULL: none) */
 	unsigned int track_count;
+	qaws_attribute_combine const* combines;   /* per attribute how its passes combine (NULL: the first touch for all) */
+	unsigned int combine_count;
 	int strict;                         /* nonzero: slabs also halved until no edge twists by more than 4 tolerances over one (an
 	                                       edge sliding along itself while turning: its hull's notch, a quarter of the twist,
 	                                       within the tolerance), so the result passes the true sweep by about the tolerance

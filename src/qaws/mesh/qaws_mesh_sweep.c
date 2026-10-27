@@ -986,7 +986,7 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 					ct[c] = layer_t[layer < layers ? layer : layers - 1];
 				}
 			}
-			st = swp_generate(*out, mesh, motion, generate, nt, cs, cw, ct);
+			st = swp_generate(*out, mesh, motion, generate, nt, NULL, cs, cw, ct, NULL, desc);
 		}
 		qaws_internal_free(cs); qaws_internal_free(cw); qaws_internal_free(ct); qaws_internal_free(rx); qaws_internal_free(mt);
 	}
@@ -1774,9 +1774,11 @@ done:
    past 30 degrees from its out triangle: the triangle's own); with edges, an out edge whose two ends come from points of one
    edge of the mesh (a ring a point of that edge traces, a meridian along it) takes that edge's values, else (and without
    edges) zeros */
-qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* csrc, double const* cw, double const* cR, int edges,
-	double const* ct, qaws_sweep_desc const* desc)
+qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* cpo, unsigned int const* csrc, double const* cw,
+	double const* cR, int edges, double const* ct, qaws_sweep_desc const* desc)
 {
+	unsigned int maxp = 1, *fsrc = NULL;
+	double *pv = NULL, *fw = NULL, *fR = NULL;
 	unsigned int na = qaws_mesh_3d_get_attribute_count(mesh), nf = qaws_mesh_3d_get_face_count(mesh), nc = qaws_mesh_3d_get_corner_count(mesh), a;
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(mesh), nto = qaws_mesh_3d_get_triangle_count(out), nvo = qaws_mesh_3d_get_vertex_count(out), i, k;
 	unsigned int *fv = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nc + 1)), *fs = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
@@ -1794,6 +1796,33 @@ qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int 
 	qaws_mesh_3d_get_faces(fv, fs, mesh);
 	qaws_mesh_3d_get_triangles(tri, out);
 	qaws_mesh_3d_get_positions(xo, out);
+	/* (passes: per corner a range of sources; the edges read each corner's first) */
+	for (i = 0; cpo && i < 3 * nto; i++)
+		maxp = cpo[i + 1] - cpo[i] > maxp ? cpo[i + 1] - cpo[i] : maxp;
+	pv = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 16, (size_t)maxp + 1));
+	if (!pv)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	if (cpo && edges)
+	{
+		fsrc = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nto + 1));
+		fw = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 9, (size_t)nto + 1));
+		fR = cR ? (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 27, (size_t)nto + 1)) : NULL;
+		if (!fsrc || !fw || (cR && !fR))
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (i = 0; i < 3 * nto; i++)
+		{
+			fsrc[i] = csrc[cpo[i]];
+			memcpy(fw + 3 * (size_t)i, cw + 3 * (size_t)cpo[i], sizeof(double) * 3);
+			if (fR)
+				memcpy(fR + 9 * (size_t)i, cR + 9 * (size_t)cpo[i], sizeof(double) * 9);
+		}
+	}
 	for (i = 0, j = 0, k = 0; i < nf; k += fs[i++])
 		for (c2 = 0; c2 + 2 < fs[i]; c2++, j++)
 		{
@@ -1818,7 +1847,7 @@ qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int 
 		{
 			memset(sv, 0, sizeof(qaws_scalar) * n * (size_t)qaws_mesh_3d_get_edge_count(out));
 			if (edges)
-				st = swp_carry_edges(sv, val, n, out, tri, nto, mesh, fv, tc, csrc, cw, cR, xo);
+				st = swp_carry_edges(sv, val, n, out, tri, nto, mesh, fv, tc, cpo ? fsrc : csrc, cpo ? fw : cw, cpo ? fR : cR, xo);
 			if (st == QAWS_STATUS_OK)
 				st = qaws_mesh_3d_add_attribute(&id, out, sv, &d);
 			continue;
@@ -1828,40 +1857,64 @@ qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int 
 			dv[e] = (double)val[e];
 		for (i = 0; i < (d.element == QAWS_MESH_FACE ? nto : 3 * nto); i++)
 		{
-			unsigned int cn = d.element == QAWS_MESH_FACE ? 3 * i : i, f = csrc[cn], pos[3];
-			double const* R = cR ? cR + 9 * (size_t)cn : NULL;
+			unsigned int cn = d.element == QAWS_MESH_FACE ? 3 * i : i, p0 = cpo ? cpo[cn] : cn, p1 = cpo ? cpo[cn + 1] : cn + 1, pp, comb = swp_combine_of(desc, d.name);
 			double y[16];
 			qaws_scalar* o2 = sv + (size_t)n * i;
 			qaws_attribute_track const* tr = ct ? swp_track(desc, d.name) : NULL;
-			if (d.element == QAWS_MESH_FACE)
+			if (comb == QAWS_SWEEP_COMBINE_FIRST)
+				p1 = p0 + 1;
+			else if (comb == QAWS_SWEEP_COMBINE_LAST)
+				p0 = p1 - 1;
+			for (pp = p0; pp < p1; pp++)
 			{
-				if (tr)
-					swp_track_value(tr, cnt, n, d.rule, tf[f], ct[cn], y);
-				else
-					for (k = 0; k < n; k++)
-						y[k] = dv[(size_t)n * tf[f] + k];
-			}
-			else
-			{
-				for (k = 0; k < 3; k++)
-					pos[k] = d.element == QAWS_MESH_VERTEX ? fv[tc[3 * (size_t)f + k]] : tc[3 * (size_t)f + k];
-				if (tr)
+				/* (this pass's value, in the world: directions turned, orientations composed) */
+				unsigned int f = csrc[pp], pos[3];
+				double const* R = cR ? cR + 9 * (size_t)pp : NULL;
+				double* yp = pv + (size_t)n * (pp - p0);
+				if (d.element == QAWS_MESH_FACE)
 				{
-					/* (the three elements' values at the corner's time, then blended over the triangle) */
-					double three[48];
-					unsigned int p3[3] = { 0, 1, 2 };
-					for (k = 0; k < 3; k++)
-						swp_track_value(tr, cnt, n, d.rule, pos[k], ct[cn], three + (size_t)n * k);
-					hm_blend(y, three, n, p3, cw + 3 * (size_t)cn, 3, n, d.rule);
+					if (tr)
+						swp_track_value(tr, cnt, n, d.rule, tf[f], ct[pp], yp);
+					else
+						for (k = 0; k < n; k++)
+							yp[k] = dv[(size_t)n * tf[f] + k];
 				}
 				else
-					hm_blend(y, dv, n, pos, cw + 3 * (size_t)cn, 3, n, d.rule);
+				{
+					for (k = 0; k < 3; k++)
+						pos[k] = d.element == QAWS_MESH_VERTEX ? fv[tc[3 * (size_t)f + k]] : tc[3 * (size_t)f + k];
+					if (tr)
+					{
+						/* (the three elements' values at the pass's time, then blended over the triangle) */
+						double three[48];
+						unsigned int p3[3] = { 0, 1, 2 };
+						for (k = 0; k < 3; k++)
+							swp_track_value(tr, cnt, n, d.rule, pos[k], ct[pp], three + (size_t)n * k);
+						hm_blend(yp, three, n, p3, cw + 3 * (size_t)pp, 3, n, d.rule);
+					}
+					else
+						hm_blend(yp, dv, n, pos, cw + 3 * (size_t)pp, 3, n, d.rule);
+				}
+				if (dir && R)
+				{
+					double z[3];
+					for (k = 0; k < 3; k++)
+						z[k] = R[3 * k] * yp[0] + R[3 * k + 1] * yp[1] + R[3 * k + 2] * yp[2];
+					memcpy(yp, z, sizeof z);
+				}
+				if (d.rule == QAWS_ATTRIBUTE_QUATERNION && R)
+				{
+					qaws_scalar x4[4], o4[4];
+					for (k = 0; k < 4; k++)
+						x4[k] = (qaws_scalar)yp[k];
+					swp_compose(o4, x4, R);
+					for (k = 0; k < 4; k++)
+						yp[k] = (double)o4[k];
+				}
 			}
+			swp_combine(y, pv, p1 - p0, n, (unsigned int)d.rule, comb);
 			for (k = 0; k < n; k++)
 				o2[k] = (qaws_scalar)y[k];
-			if (dir && R)
-				for (k = 0; k < 3; k++)
-					o2[k] = (qaws_scalar)(R[3 * k] * y[0] + R[3 * k + 1] * y[1] + R[3 * k + 2] * y[2]);
 			if (d.rule == QAWS_ATTRIBUTE_NORMAL)
 			{
 				/* a source on a crease (a corner or edge tracing the surface) has no normal of it: the face's own where the carried
@@ -1889,13 +1942,6 @@ qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int 
 					for (k = 0; k < 3; k++)
 						o2[k] = (qaws_scalar)(fn[k] / lf);
 			}
-			if (d.rule == QAWS_ATTRIBUTE_QUATERNION && R)
-			{
-				qaws_scalar x4[4];
-				for (k = 0; k < 4; k++)
-					x4[k] = (qaws_scalar)y[k];
-				swp_compose(o2, x4, R);
-			}
 		}
 		if (d.element == QAWS_MESH_VERTEX)
 			d.element = QAWS_MESH_CORNER;
@@ -1903,7 +1949,8 @@ qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int 
 	}
 done:
 	qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(tf); qaws_internal_free(tc); qaws_internal_free(tri); qaws_internal_free(xo);
-	qaws_internal_free(val); qaws_internal_free(dv); qaws_internal_free(sv);
+	qaws_internal_free(val); qaws_internal_free(dv); qaws_internal_free(sv); qaws_internal_free(pv); qaws_internal_free(fsrc); qaws_internal_free(fw);
+	qaws_internal_free(fR);
 	return st;
 }
 
@@ -2307,19 +2354,50 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 				for (k = 0; k < 3; k++)
 					cw[3 * (size_t)i + k] = wsrc[3 * (size_t)v + k];
 			}
-			/* (each corner's time: when the turn brought its source there, the angle behind it) */
-			double* ct = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nto + 1));
-			if (!ct)
+			/* each corner's passes: the first when the turn brought its source there (the angle behind it), then one each
+			   whole turn after while the motion turns; the same source and rotation each time */
+			int timed = generate || (rdesc && rdesc->track_count), many = swp_passes_wanted(rdesc);
+			double* tab = timed || many ? swp_angle_table(motion) : NULL;
+			double total = tab ? swp_table_total(tab) : 0;
+			unsigned int* cpo = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nto + 1) + sizeof(unsigned int));
+			unsigned int np = 0, kk;
+			if (!cpo || ((timed || many) && !tab))
 				st = QAWS_STATUS_ALLOCATION_FAILURE;
 			else
 			{
+				unsigned int *ps = NULL;
+				double *pw = NULL, *pR = NULL, *pt = NULL;
 				for (i = 0; i < 3 * nto; i++)
-					ct[i] = generate || (rdesc && rdesc->track_count) ? swp_time_at_angle(motion, alpha[tri[i]]) : 0;
-				st = swp_carry(*out, mesh, nt, cs, cw, cR, 1, ct, rdesc);
-				if (st == QAWS_STATUS_OK && generate)
-					st = swp_generate(*out, mesh, motion, generate, nt, cs, cw, ct);
+				{
+					double a0 = alpha[tri[i]];
+					cpo[i] = np;
+					np += many && total > a0 ? (unsigned int)floor((total - a0) / (2 * 3.14159265358979323846) + 1e-9) + 1 : 1;
+				}
+				cpo[3 * (size_t)nto] = np;
+				ps = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)np + 1));
+				pw = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)np + 1));
+				pR = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 9, (size_t)np + 1));
+				pt = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)np + 1));
+				if (!ps || !pw || !pR || !pt)
+					st = QAWS_STATUS_ALLOCATION_FAILURE;
+				else
+				{
+					for (i = 0; i < 3 * nto; i++)
+						for (kk = 0; kk < cpo[i + 1] - cpo[i]; kk++)
+						{
+							unsigned int qq = cpo[i] + kk;
+							ps[qq] = cs[i];
+							memcpy(pw + 3 * (size_t)qq, cw + 3 * (size_t)i, sizeof(double) * 3);
+							memcpy(pR + 9 * (size_t)qq, cR + 9 * (size_t)i, sizeof(double) * 9);
+							pt[qq] = tab ? swp_table_time(tab, alpha[tri[i]] + 2 * 3.14159265358979323846 * kk) : 0;
+						}
+					st = swp_carry(*out, mesh, nt, cpo, ps, pw, pR, 1, pt, rdesc);
+					if (st == QAWS_STATUS_OK && generate)
+						st = swp_generate(*out, mesh, motion, generate, nt, cpo, ps, pw, pt, NULL, rdesc);
+				}
+				qaws_internal_free(ps); qaws_internal_free(pw); qaws_internal_free(pR); qaws_internal_free(pt);
 			}
-			qaws_internal_free(ct);
+			qaws_internal_free(cpo); qaws_internal_free(tab);
 		}
 		qaws_internal_free(cs); qaws_internal_free(cw); qaws_internal_free(cR);
 	}

@@ -389,26 +389,320 @@ static qaws_status swi_sources(swi_ctx* c, double const* x, size_t n, unsigned i
 	return st;
 }
 
-/* the mesh's attributes onto the result: each vertex's source, the shape's closest point at its best time; each corner takes
-   it on the source's triangle or, when it lies on an edge or a corner of the shape (a wall an edge sweeps, a seam), on the
-   triangle there whose normal at that time is nearest its own triangle's: one face's values on each side of a seam, the
-   same point (so the same values) where they are continuous */
+/* a sample at which the shape comes within reach of an output vertex */
+typedef struct swi_near
+{
+	unsigned int v, j;
+	double d;
+} swi_near;
+
+static int swi_cmp_near(void const* a, void const* b)
+{
+	swi_near const *x = (swi_near const*)a, *y = (swi_near const*)b;
+	return x->v != y->v ? (x->v < y->v ? -1 : 1) : x->j < y->j ? -1 : x->j > y->j;
+}
+
+/* the shape's distance to x at time t (rigid) */
+static qaws_status swi_point_distance(swi_ctx* c, double const* x, double t, double* d)
+{
+	double R[12], y[3];
+	qaws_scalar q[3], s;
+	unsigned int a;
+	qaws_status st;
+	if ((st = swi_pose(c->m, t, R)) != QAWS_STATUS_OK)
+		return st;
+	for (a = 0; a < 3; a++)
+		y[a] = x[a] - R[9 + a];
+	for (a = 0; a < 3; a++)
+		q[a] = (qaws_scalar)(R[a] * y[0] + R[3 + a] * y[1] + R[6 + a] * y[2]);
+	if ((st = qaws_mesh_bvh_signed_distance(&s, NULL, c->b, q, 1, c->ex)) != QAWS_STATUS_OK)
+		return st;
+	*d = fabs((double)s);
+	return QAWS_STATUS_OK;
+}
+
+/* the shape's closest point to x at time t (rigid) or at sample j (a vertex motion): its triangle and weights */
+static qaws_status swi_point_source(swi_ctx* c, double const* x, double t, unsigned int j, unsigned int* tri, double* w)
+{
+	qaws_mesh_hit h;
+	qaws_scalar q[3];
+	qaws_status st;
+	unsigned int a;
+	if (c->pv)
+	{
+		if ((st = swi_refit(c, j)) != QAWS_STATUS_OK)
+			return st;
+		for (a = 0; a < 3; a++)
+			q[a] = (qaws_scalar)x[a];
+	}
+	else
+	{
+		double R[12], y[3];
+		if ((st = swi_pose(c->m, t, R)) != QAWS_STATUS_OK)
+			return st;
+		for (a = 0; a < 3; a++)
+			y[a] = x[a] - R[9 + a];
+		for (a = 0; a < 3; a++)
+			q[a] = (qaws_scalar)(R[a] * y[0] + R[3 + a] * y[1] + R[6 + a] * y[2]);
+	}
+	if ((st = qaws_mesh_bvh_closest(&h, c->b, q, 1, 0, c->ex)) != QAWS_STATUS_OK)
+		return st;
+	*tri = h.element;
+	for (a = 0; a < 3; a++)
+		w[a] = (double)h.weights[a];
+	return QAWS_STATUS_OK;
+}
+
+/* each output vertex's passes (vpo: nvo + 1 offsets into the pass arrays): the runs of time samples at which the shape comes
+   within 1.5 cells of it, each at its nearest sample (a parabola through it and its neighbours in the run), its dwell the
+   run's length in time, its source the shape's closest point then; the run holding the first touch keeps the first touch's
+   time and source (tb, src, w); a vertex without a run that alone */
+static qaws_status swi_passes(swi_ctx* c, double const* X, unsigned int nvo, double const* tb, unsigned int const* src, double const* w,
+	unsigned int** out_po, unsigned int** out_src, double** out_w, double** out_t, double** out_dw)
+{
+	double eps = 1.5 * c->cell, dt = c->ns > 1 ? 1.0 / (c->ns - 1) : 1;
+	swi_near* nr = NULL;
+	size_t ne = 0, cap = 0, i, r0;
+	unsigned int j, k, np = 0, *po = NULL, *ps = NULL, *idx = NULL;
+	double *pw = NULL, *pt = NULL, *pd = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	idx = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nvo + 1));
+	if (!idx)
+		goto done;
+	/* the samples one by one: the vertices their sphere may reach, their distances, those within reach kept */
+	for (j = 0; j < c->ns; j++)
+	{
+		double const* s = c->cen + 4 * (size_t)j;
+		unsigned int m = 0, b0;
+		for (k = 0; k < nvo; k++)
+		{
+			double const* x = X + 3 * (size_t)k;
+			if (sqrt((x[0] - s[0]) * (x[0] - s[0]) + (x[1] - s[1]) * (x[1] - s[1]) + (x[2] - s[2]) * (x[2] - s[2])) - s[3] <= eps)
+				idx[m++] = k;
+		}
+		if (!m)
+			continue;
+		if (c->pv && (st = swi_refit(c, j)) != QAWS_STATUS_OK)
+			goto done;
+		for (b0 = 0; b0 < m; b0 += SWI_CHUNK)
+		{
+			unsigned int bn = m - b0 < SWI_CHUNK ? m - b0 : SWI_CHUNK, q, a;
+			double const* R = c->pv ? NULL : c->pose + 12 * (size_t)j;
+			for (q = 0; q < bn; q++)
+			{
+				double const* x = X + 3 * (size_t)idx[b0 + q];
+				if (R)
+				{
+					double y[3] = { x[0] - R[9], x[1] - R[10], x[2] - R[11] };
+					for (a = 0; a < 3; a++)
+						c->q[3 * (size_t)q + a] = (qaws_scalar)(R[a] * y[0] + R[3 + a] * y[1] + R[6 + a] * y[2]);
+				}
+				else
+					for (a = 0; a < 3; a++)
+						c->q[3 * (size_t)q + a] = (qaws_scalar)x[a];
+			}
+			if ((st = qaws_mesh_bvh_signed_distance(c->d, NULL, c->b, c->q, bn, c->ex)) != QAWS_STATUS_OK)
+				goto done;
+			for (q = 0; q < bn; q++)
+				if (fabs((double)c->d[q]) <= eps)
+				{
+					if (ne + 1 > cap)
+					{
+						size_t c2 = cap ? 2 * cap : 4096;
+						swi_near* g = (swi_near*)(nr ? qaws_internal_realloc(nr, qaws_internal_mul2(sizeof(swi_near), c2))
+						                            : qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(swi_near), c2)));
+						if (!g)
+						{
+							st = QAWS_STATUS_ALLOCATION_FAILURE;
+							goto done;
+						}
+						nr = g;
+						cap = c2;
+					}
+					nr[ne].v = idx[b0 + q];
+					nr[ne].j = j;
+					nr[ne++].d = fabs((double)c->d[q]);
+				}
+		}
+	}
+	if (nr)
+		qsort(nr, ne, sizeof(swi_near), swi_cmp_near);
+	/* the passes: per vertex its runs (at least one); first counted, then filled */
+	po = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nvo + 1, sizeof(unsigned int));
+	if (!po)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (i = 0; i < ne; i = r0)
+	{
+		unsigned int runs = 0, v = nr[i].v;
+		for (r0 = i; r0 < ne && nr[r0].v == v; r0++)
+			runs += r0 == i || nr[r0].j != nr[r0 - 1].j + 1;
+		po[v + 1] = runs;
+	}
+	for (k = 0; k < nvo; k++)
+		po[k + 1] = (po[k + 1] ? po[k + 1] : 1) + po[k];
+	np = po[nvo];
+	ps = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)np + 1));
+	pw = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)np + 1));
+	pt = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)np + 1));
+	pd = (double*)qaws_internal_scratch_zalloc((size_t)np + 1, sizeof(double));
+	if (!ps || !pw || !pt || !pd)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (k = 0; k < nvo; k++)
+	{
+		/* (a vertex without a run: its first touch alone) */
+		ps[po[k]] = src[k];
+		memcpy(pw + 3 * (size_t)po[k], w + 3 * (size_t)k, sizeof(double) * 3);
+		pt[po[k]] = tb[k];
+	}
+	for (i = 0; i < ne; i = r0)
+	{
+		unsigned int v = nr[i].v, p = po[v], first = 1;
+		size_t a = i;
+		for (r0 = i; r0 < ne && nr[r0].v == v; r0++)
+			if (r0 + 1 == ne || nr[r0 + 1].v != v || nr[r0 + 1].j != nr[r0].j + 1)
+			{
+				/* the run [a, r0]: its nearest sample, refined by a parabola */
+				size_t b = a, q;
+				double t0, t1, tt;
+				for (q = a; q <= r0; q++)
+					if (nr[q].d < nr[b].d)
+						b = q;
+				tt = c->ts[nr[b].j];
+				if (!c->pv)
+				{
+					/* (a rigid motion: golden sections over the samples beside it, as the first touch) */
+					double lo = fmax(0, tt - dt), hi = fmin(1, tt + dt), g = 0.61803398874989484820, x1 = hi - g * (hi - lo), x2 = lo + g * (hi - lo), f1, f2;
+					unsigned int it;
+					if ((st = swi_point_distance(c, X + 3 * (size_t)v, x1, &f1)) != QAWS_STATUS_OK || (st = swi_point_distance(c, X + 3 * (size_t)v, x2, &f2)) != QAWS_STATUS_OK)
+						goto done;
+					for (it = 0; it < 20; it++)
+					{
+						if (f1 <= f2)
+						{
+							hi = x2; x2 = x1; f2 = f1;
+							x1 = hi - g * (hi - lo);
+							if ((st = swi_point_distance(c, X + 3 * (size_t)v, x1, &f1)) != QAWS_STATUS_OK)
+								goto done;
+						}
+						else
+						{
+							lo = x1; x1 = x2; f1 = f2;
+							x2 = lo + g * (hi - lo);
+							if ((st = swi_point_distance(c, X + 3 * (size_t)v, x2, &f2)) != QAWS_STATUS_OK)
+								goto done;
+						}
+					}
+					tt = 0.5 * (lo + hi);
+				}
+				t0 = c->ts[nr[a].j] - dt;
+				t1 = c->ts[nr[r0].j] + dt;
+				pd[p] = (double)(r0 - a + 1) * dt;
+				if (tb[v] >= t0 && tb[v] <= t1 && first)
+				{
+					/* (the first touch's run: its own time and source) */
+					ps[p] = src[v];
+					memcpy(pw + 3 * (size_t)p, w + 3 * (size_t)v, sizeof(double) * 3);
+					pt[p] = tb[v];
+					first = 0;
+				}
+				else if ((st = swi_point_source(c, X + 3 * (size_t)v, tt, nr[b].j, ps + p, pw + 3 * (size_t)p)) != QAWS_STATUS_OK)
+					goto done;
+				else
+					pt[p] = tt;
+				p++;
+				a = r0 + 1;
+			}
+	}
+	*out_po = po; *out_src = ps; *out_w = pw; *out_t = pt; *out_dw = pd;
+	po = ps = NULL;
+	pw = pt = pd = NULL;
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(idx); qaws_internal_free(nr); qaws_internal_free(po); qaws_internal_free(ps); qaws_internal_free(pw); qaws_internal_free(pt);
+	qaws_internal_free(pd);
+	return st;
+}
+
+/* a corner's source from its vertex's (triangle f, weights wv): on f, or, when the point lies on an edge or a corner of the
+   shape, on the triangle there whose normal (turned by R) is nearest the corner's own triangle's (no) */
+static void swi_corner_source(swi_ctx const* c, double const* tn, unsigned int const* vto, unsigned int const* vtl, unsigned int f, double const* wv,
+	double const* R, double const* no, unsigned int* out_f, double* out_w)
+{
+	unsigned int best = f, on = 0, lead = 0, j, k;
+	double bd = -2, u[3], q[3], l;
+	for (k = 0; k < 3; k++)
+		if (wv[k] < 1e-6)
+			on = 1;
+		else if (wv[k] > wv[lead])
+			lead = k;
+	if (on)
+	{
+		/* the triangles round the source's leading vertex holding every vertex the source weighs */
+		unsigned int g = c->t[3 * (size_t)f + lead];
+		for (j = vto[g]; j < vto[g + 1]; j++)
+		{
+			unsigned int t2 = vtl[j], m2, hold = 1;
+			double d;
+			for (k = 0; k < 3; k++)
+				if (wv[k] >= 1e-6)
+				{
+					unsigned int vk = c->t[3 * (size_t)f + k];
+					for (m2 = 0; m2 < 3 && c->t[3 * (size_t)t2 + m2] != vk; m2++)
+						;
+					hold &= m2 < 3;
+				}
+			if (!hold)
+				continue;
+			for (k = 0; k < 3; k++)
+				u[k] = R[3 * k] * tn[3 * (size_t)t2] + R[3 * k + 1] * tn[3 * (size_t)t2 + 1] + R[3 * k + 2] * tn[3 * (size_t)t2 + 2];
+			l = sqrt(no[0] * no[0] + no[1] * no[1] + no[2] * no[2]);
+			d = l > 0 ? (u[0] * no[0] + u[1] * no[1] + u[2] * no[2]) / l : 0;
+			if (d > bd)
+			{
+				bd = d;
+				best = t2;
+			}
+		}
+	}
+	*out_f = best;
+	if (best == f)
+		memcpy(out_w, wv, sizeof(double) * 3);
+	else
+	{
+		/* (the source point, at rest, onto that triangle) */
+		q[0] = q[1] = q[2] = 0;
+		for (j = 0; j < 3; j++)
+			for (k = 0; k < 3; k++)
+				q[k] += wv[j] * (double)c->x[3 * (size_t)c->t[3 * (size_t)f + j] + k];
+		swi_weights(c, best, q, out_w);
+	}
+}
+
+/* the mesh's attributes onto the result: each vertex's source, the shape's closest point at its best time (and with passes
+   wanted, at each later pass); each corner takes it through swi_corner_source: one face's values on each side of a seam,
+   the same point (so the same values) where they are continuous */
 static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_sweep_desc const* desc)
 {
 	unsigned int generate = desc ? desc->generate : 0;
-	double* ct = NULL;
-	unsigned int nvo = qaws_mesh_3d_get_vertex_count(out), nto = qaws_mesh_3d_get_triangle_count(out), i, k, j;
+	unsigned int nvo = qaws_mesh_3d_get_vertex_count(out), nto = qaws_mesh_3d_get_triangle_count(out), i, k;
 	qaws_scalar* xo = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nvo + 1));
 	unsigned int* tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nto + 1));
 	double* X = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nvo + 1));
-	unsigned int* src = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nvo + 3 * (size_t)nto + 1));
-	double* w = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nvo + 3 * (size_t)nto + 1));
+	unsigned int* src = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nvo + 1));
+	double* w = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nvo + 1));
 	double* tb = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)nvo + 1));
-	double* cR = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 27, (size_t)nto + 1));
 	double* tn = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)c->nt + 1));
 	unsigned int *vto = (unsigned int*)qaws_internal_scratch_zalloc((size_t)c->nv + 2, sizeof(unsigned int)), *vtl = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)c->nt + 1));
+	unsigned int *vpo = NULL, *vsrc = NULL, *cpo = NULL, *cs = NULL;
+	double *vw = NULL, *vt = NULL, *vdw = NULL, *cw = NULL, *cR = NULL, *ct = NULL, *cdw = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
-	if (!xo || !tri || !X || !src || !w || !tb || !cR || !tn || !vto || !vtl)
+	if (!xo || !tri || !X || !src || !w || !tb || !tn || !vto || !vtl)
 		goto done;
 	qaws_mesh_3d_get_positions(xo, out);
 	qaws_mesh_3d_get_triangles(tri, out);
@@ -440,20 +734,50 @@ static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d co
 	}
 	if ((st = swi_sources(c, X, nvo, src, w, tb)) != QAWS_STATUS_OK)
 		goto done;
+	/* each vertex's passes: all of them when wanted, else its first touch */
+	if (swp_passes_wanted(desc))
+	{
+		if ((st = swi_passes(c, X, nvo, tb, src, w, &vpo, &vsrc, &vw, &vt, &vdw)) != QAWS_STATUS_OK)
+			goto done;
+	}
+	else
+	{
+		vpo = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nvo + 1));
+		if (!vpo)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (i = 0; i <= nvo; i++)
+			vpo[i] = i;
+	}
+	/* the corners' passes: their vertex's, each source taken to the corner's side */
+	cpo = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nto + 1) + sizeof(unsigned int));
+	if (!cpo)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (i = 0, k = 0; i < 3 * nto; i++)
+	{
+		cpo[i] = k;
+		k += vpo[tri[i] + 1] - vpo[tri[i]];
+	}
+	cpo[3 * (size_t)nto] = k;
+	cs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)k + 1));
+	cw = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)k + 1));
+	cR = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 9, (size_t)k + 1));
+	ct = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)k + 1));
+	cdw = (double*)qaws_internal_scratch_zalloc((size_t)k + 1, sizeof(double));
+	if (!cs || !cw || !cR || !ct || !cdw)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
 	for (i = 0; i < 3 * nto; i++)
 	{
-		unsigned int v = tri[i], cc = nvo + i, f = src[v], best = f, on = 0, lead = 0;
-		double const* wv = w + 3 * (size_t)v;
-		double R[12], no[3], u[3], q[3], l, bd = -2;
-		if (c->pv)
-		{
-			for (k = 0; k < 9; k++)
-				R[k] = k % 4 == 0;
-		}
-		else if ((st = swi_pose(c->m, tb[v], R)) != QAWS_STATUS_OK)
-			goto done;
-		memcpy(cR + 9 * (size_t)i, R, sizeof(double) * 9);
-		/* (the corner's triangle's normal) */
+		unsigned int v = tri[i], pp;
+		double no[3];
 		{
 			unsigned int const* tv = tri + 3 * (size_t)(i / 3);
 			double a[3], b[3];
@@ -464,68 +788,30 @@ static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d co
 			}
 			no[0] = a[1] * b[2] - a[2] * b[1]; no[1] = a[2] * b[0] - a[0] * b[2]; no[2] = a[0] * b[1] - a[1] * b[0];
 		}
-		for (k = 0; k < 3; k++)
-			if (wv[k] < 1e-6)
-				on = 1;
-			else if (wv[k] > wv[lead])
-				lead = k;
-		if (on)
+		for (pp = vpo[v]; pp < vpo[v + 1]; pp++)
 		{
-			/* the triangles round the source's leading vertex holding every vertex the source weighs */
-			unsigned int g = c->t[3 * (size_t)f + lead];
-			for (j = vto[g]; j < vto[g + 1]; j++)
-			{
-				unsigned int t2 = vtl[j], m2, hold = 1;
-				double d;
-				for (k = 0; k < 3; k++)
-					if (wv[k] >= 1e-6)
-					{
-						unsigned int vk = c->t[3 * (size_t)f + k];
-						for (m2 = 0; m2 < 3 && c->t[3 * (size_t)t2 + m2] != vk; m2++)
-							;
-						hold &= m2 < 3;
-					}
-				if (!hold)
-					continue;
-				for (k = 0; k < 3; k++)
-					u[k] = R[3 * k] * tn[3 * (size_t)t2] + R[3 * k + 1] * tn[3 * (size_t)t2 + 1] + R[3 * k + 2] * tn[3 * (size_t)t2 + 2];
-				l = sqrt(no[0] * no[0] + no[1] * no[1] + no[2] * no[2]);
-				d = l > 0 ? (u[0] * no[0] + u[1] * no[1] + u[2] * no[2]) / l : 0;
-				if (d > bd)
-				{
-					bd = d;
-					best = t2;
-				}
-			}
-		}
-		src[cc] = best;
-		if (best == f)
-			memcpy(w + 3 * (size_t)cc, wv, sizeof(double) * 3);
-		else
-		{
-			/* (the source point, at rest, onto that triangle) */
-			q[0] = q[1] = q[2] = 0;
-			for (j = 0; j < 3; j++)
-				for (k = 0; k < 3; k++)
-					q[k] += wv[j] * (double)c->x[3 * (size_t)c->t[3 * (size_t)f + j] + k];
-			swi_weights(c, best, q, w + 3 * (size_t)cc);
+			unsigned int q = cpo[i] + (pp - vpo[v]), f = vsrc ? vsrc[pp] : src[v];
+			double const* wv = vw ? vw + 3 * (size_t)pp : w + 3 * (size_t)v;
+			double R[12], t = vt ? vt[pp] : tb[v];
+			if (c->pv)
+				for (k = 0; k < 9; k++)
+					R[k] = k % 4 == 0;
+			else if ((st = swi_pose(c->m, t, R)) != QAWS_STATUS_OK)
+				goto done;
+			memcpy(cR + 9 * (size_t)q, R, sizeof(double) * 9);
+			swi_corner_source(c, tn, vto, vtl, f, wv, R, no, cs + q, cw + 3 * (size_t)q);
+			ct[q] = t;
+			cdw[q] = vdw ? vdw[pp] : 0;
 		}
 	}
-	/* (each corner at its vertex's time) */
-	if ((ct = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nto + 1))) == NULL)
-	{
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
-		goto done;
-	}
-	for (i = 0; i < 3 * nto; i++)
-		ct[i] = tb[tri[i]];
-	st = swp_carry(out, mesh, c->nt, src + nvo, w + 3 * (size_t)nvo, c->pv ? NULL : cR, 0, ct, desc);
+	st = swp_carry(out, mesh, c->nt, cpo, cs, cw, c->pv ? NULL : cR, 0, ct, desc);
 	if (st == QAWS_STATUS_OK && generate)
-		st = swp_generate(out, mesh, c->m, generate, c->nt, src + nvo, w + 3 * (size_t)nvo, ct);
-	qaws_internal_free(ct);
+		st = swp_generate(out, mesh, c->m, generate, c->nt, cpo, cs, cw, ct, cdw, desc);
 done:
 	qaws_internal_free(xo); qaws_internal_free(tri); qaws_internal_free(X); qaws_internal_free(src); qaws_internal_free(w); qaws_internal_free(tb);
-	qaws_internal_free(cR); qaws_internal_free(tn); qaws_internal_free(vto); qaws_internal_free(vtl);
+	qaws_internal_free(tn); qaws_internal_free(vto); qaws_internal_free(vtl); qaws_internal_free(vpo); qaws_internal_free(vsrc); qaws_internal_free(vw);
+	qaws_internal_free(vt); qaws_internal_free(vdw); qaws_internal_free(cpo); qaws_internal_free(cs); qaws_internal_free(cw); qaws_internal_free(cR);
+	qaws_internal_free(ct); qaws_internal_free(cdw);
 	return st;
 }
 

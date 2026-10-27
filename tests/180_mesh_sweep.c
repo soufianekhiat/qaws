@@ -44,6 +44,8 @@
  *     interpolate between their layers);
  *   - attribute tracks: a vertex "heat" animated from 0 to 1 over the motion equals the generated time at every corner, by
  *     slabs (a box turned a quarter) and through a spin (revolved); a track naming no attribute refused;
+ *   - passes through a spin: the box beside z turning two turns: every corner 2 passes, its time combined LAST half the motion
+ *     after its first (the angle, left FIRST, over 4 pi: time = angle / 4 pi + 0.5 at an even rate);
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -791,6 +793,42 @@ static void test_tracks(void)
 	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(bs);
 }
 
+static void test_spin_passes(void)
+{
+	qaws_mesh_3d *b = sw_box(0.5, 1, -0.25, 0.25, 0, 0.5), *o = NULL;
+	qaws_motion* m = sw_spin(0.001);
+	qaws_sweep_desc d;
+	qaws_attribute_combine cb;
+	qaws_scalar *pv = NULL, *tv = NULL, *av = NULL;
+	unsigned int i, nc = 0, two = 0;
+	double wt = 0;
+	char msg[300];
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)0.002;
+	d.generate = QAWS_SWEEP_GENERATE_PASSES | QAWS_SWEEP_GENERATE_TIME | QAWS_SWEEP_GENERATE_ANGLE;
+	cb.name = "time";
+	cb.combine = QAWS_SWEEP_COMBINE_LAST;
+	d.combines = &cb;
+	d.combine_count = 1;
+	qaws_mesh_3d_sweep(&o, NULL, b, m, &d);
+	if (o)
+	{
+		nc = qaws_mesh_3d_get_corner_count(o);
+		pv = sw_corner_values(o, "passes", 1); tv = sw_corner_values(o, "time", 1); av = sw_corner_values(o, "angle", 1);
+	}
+	for (i = 0; pv && tv && av && i < nc; i++)
+	{
+		two += pv[i] == 2;
+		wt = fmax(wt, fabs((double)tv[i] - ((double)av[i] / (4 * SW_PI) + 0.5)));
+	}
+	sprintf(msg, "passes through a spin: %u of %u corners 2 passes, the last pass's time off its first's + 0.5 by %.1e", two, nc, wt);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && pv && tv && av && two == nc && wt < 2e-3, msg);
+	free(pv); free(tv); free(av);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *c = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -823,6 +861,7 @@ int test_180_mesh_sweep_main(void)
 	test_spin_generate();
 	test_slab_generate();
 	test_tracks();
+	test_spin_passes();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
