@@ -47,8 +47,13 @@
  *            them (on a sphere an edge's middle on it to leading order); C0
  *            across edges, normals interpolated linearly; a feature edge
  *            straight.
+ *   G1       Walton and Meek's patch (1996): PN's boundary curves, the cross
+ *            tangents made the same plane from both sides of an edge
+ *            (Chiyokura and Kimura), a quartic Gregory interior; the
+ *            normal the surface's own, continuous across edges (G1) but
+ *            for creases.
  *
- * G1, SUBDIVISION and MLS are reserved for further interpolants
+ * SUBDIVISION and MLS are reserved for further interpolants
  * (UNSUPPORTED_OPERATION today).
  *
  * Normals: given per vertex, or computed: the faces' normals round each

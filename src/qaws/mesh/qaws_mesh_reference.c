@@ -266,7 +266,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if ((unsigned int)kind > QAWS_INTERPOLANT_MLS)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (kind != QAWS_INTERPOLANT_PN && kind != QAWS_INTERPOLANT_LINEAR && kind != QAWS_INTERPOLANT_PHONG && kind != QAWS_INTERPOLANT_NAGATA)
+	if (kind != QAWS_INTERPOLANT_PN && kind != QAWS_INTERPOLANT_LINEAR && kind != QAWS_INTERPOLANT_PHONG && kind != QAWS_INTERPOLANT_NAGATA && kind != QAWS_INTERPOLANT_G1)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	r = (qaws_mesh_reference*)qaws_internal_zalloc(1, sizeof *r);
 	if (!r)
@@ -385,10 +385,10 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 			r->box[t].lo[k] = 1e300;
 			r->box[t].hi[k] = -1e300;
 		}
-		for (q = 0; q < 10; q++)
+		for (q = 0; q < (r->patch[t].gregory ? 16u : 10u); q++)
 			for (k = 0; k < 3; k++)
 			{
-				double v = r->patch[t].p[q][k];
+				double v = q < 10 ? r->patch[t].p[q][k] : r->patch[t].n[q - 10][k];
 				if (v < r->box[t].lo[k]) r->box[t].lo[k] = v;
 				if (v > r->box[t].hi[k]) r->box[t].hi[k] = v;
 				if (v < lo[k]) lo[k] = v;

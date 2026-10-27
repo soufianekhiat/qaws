@@ -1,9 +1,10 @@
 /*
  * The interpolants of mesh references as cubic Bezier triangles: PN
  * (Vlachos et al. 2001, creases by their tangents), PHONG (Boubekeur and
- * Alexa 2008) and NAGATA (Nagata 2005), quadratic and degree-elevated, and
- * LINEAR (the flat triangle degree-elevated), evaluated with their derivatives, and the curvature of a
- * normal field.
+ * Alexa 2008) and NAGATA (Nagata 2005), quadratic and degree-elevated,
+ * LINEAR (the flat triangle degree-elevated) and G1 (Walton and Meek 1996:
+ * PN's boundary curves, a quartic Gregory interior), evaluated with their
+ * derivatives, and the curvature of a normal field.
  */
 
 #include "qaws_mesh_internal.h"
@@ -190,17 +191,113 @@ static void mi_build_pn(mi_tri* t, qaws_interpolant kind, double const* const* P
 	}
 }
 
+static void mi_cross(double* o, double const* a, double const* b)
+{
+	o[0] = a[1] * b[2] - a[2] * b[1];
+	o[1] = a[2] * b[0] - a[0] * b[2];
+	o[2] = a[0] * b[1] - a[1] * b[0];
+}
+
+/* the cubic boundary's control point of exponents f */
+static double const* mi_c3p(mi_tri const* t, int const* f)
+{
+	int l;
+	for (l = 0; l < 9; l++)
+		if (mi_e3[l][0] == f[0] && mi_e3[l][1] == f[1] && mi_e3[l][2] == f[2])
+			break;
+	return t->p[l];
+}
+
+/* the quartic boundary point of exponents f (one of them 0): the cubic degree-elevated, sum_c f_c / 4 C_(f - e_c) */
+static void mi_q4(double* o, mi_tri const* t, int const* f)
+{
+	int c, k;
+	o[0] = o[1] = o[2] = 0;
+	for (c = 0; c < 3; c++)
+		if (f[c])
+		{
+			int g[3];
+			double const* C;
+			g[0] = f[0]; g[1] = f[1]; g[2] = f[2];
+			g[c]--;
+			C = mi_c3p(t, g);
+			for (k = 0; k < 3; k++)
+				o[k] += 0.25 * f[c] * C[k];
+		}
+}
+
+/* G1 (Walton and Meek 1996, the cross tangents of Chiyokura and Kimura): PN's cubic boundary curves c, degree-elevated to a
+   quartic triangle; along each edge the cross derivative D(t) = k(t) c'(t) + h(t) m(t), k and h linear, m(t) the linear blend
+   of N_i x c'(0) and N_j x c'(1), the same from both sides: the tangent planes span c' and m on both, G1. D's ends are the
+   corners' (the other edges' tangents), its two middle coefficients set the interior row: two candidates per interior point
+   (one per edge at its corner), blended rationally in the evaluation (Gregory). */
+static void mi_build_g1(mi_tri* t, double const* const* P, double const* const* N, double const* const* crease)
+{
+	int e, k, s;
+	mi_build_pn(t, QAWS_INTERPOLANT_PN, P, N, crease);
+	for (e = 0; e < 3; e++)
+	{
+		int i = e, j = (e + 1) % 3, o = (e + 2) % 3, f[3];
+		double E[4][3], C[4][3], R0[3], R3[3], d[3][3], m0[3], m1[3], D0[3], D3[3], k0, k1, h0, h1, l0, l1;
+		for (s = 0; s < 4; s++)
+		{
+			double const* c;
+			f[i] = 4 - s; f[j] = s; f[o] = 0;
+			mi_q4(E[s], t, f);
+			f[i] = 3 - s;
+			c = mi_c3p(t, f);
+			for (k = 0; k < 3; k++)
+				C[s][k] = c[k];
+		}
+		f[i] = 3; f[j] = 0; f[o] = 1;
+		mi_q4(R0, t, f);
+		f[i] = 0; f[j] = 3;
+		mi_q4(R3, t, f);
+		for (k = 0; k < 3; k++)
+		{
+			D0[k] = 4 * (R0[k] - E[0][k]);
+			D3[k] = 4 * (R3[k] - E[3][k]);
+			for (s = 0; s < 3; s++)
+				d[s][k] = 3 * (C[s + 1][k] - C[s][k]);
+		}
+		mi_cross(m0, N[i], d[0]);
+		mi_unit(m0);
+		mi_cross(m1, N[j], d[2]);
+		mi_unit(m1);
+		l0 = mi_dot(d[0], d[0]);
+		l1 = mi_dot(d[2], d[2]);
+		k0 = l0 > 0 ? mi_dot(D0, d[0]) / l0 : 0;
+		k1 = l1 > 0 ? mi_dot(D3, d[2]) / l1 : 0;
+		h0 = mi_dot(D0, m0);
+		h1 = mi_dot(D3, m1);
+		for (k = 0; k < 3; k++)
+		{
+			/* (k c' cubic from linear times quadratic, h m quadratic degree-elevated) */
+			double q0 = h0 * m0[k], q1 = 0.5 * (h0 * m1[k] + h1 * m0[k]), q2 = h1 * m1[k];
+			double D1 = (2 * k0 * d[1][k] + k1 * d[0][k]) / 3 + (q0 + 2 * q1) / 3, D2 = (k0 * d[2][k] + 2 * k1 * d[1][k]) / 3 + (2 * q1 + q2) / 3;
+			t->n[2 * i][k] = E[1][k] + 0.25 * D1;       /* near corner i, from the edge to i + 1 */
+			t->n[2 * j + 1][k] = E[2][k] + 0.25 * D2;   /* near corner j, from the edge to j + 2 */
+		}
+	}
+	for (k = 0; k < 3; k++)
+		t->p[9][k] = (t->n[0][k] + t->n[1][k] + t->n[2][k] + t->n[3][k] + t->n[4][k] + t->n[5][k]) / 6;
+	t->gregory = 1;
+}
+
 void mi_build(mi_tri* t, qaws_interpolant kind, double const* const* P, double const* const* N, double const* const* crease)
 {
+	t->gregory = 0;
 	if (kind == QAWS_INTERPOLANT_PHONG || kind == QAWS_INTERPOLANT_NAGATA)
 		mi_build_quadratic(t, kind, P, N, crease);
+	else if (kind == QAWS_INTERPOLANT_G1)
+		mi_build_g1(t, P, N, crease);
 	else
 		mi_build_pn(t, kind, P, N, crease);
 }
 
 static double mi_pow(double x, int e)
 {
-	return e < 0 ? 0 : e == 0 ? 1 : e == 1 ? x : e == 2 ? x * x : x * x * x;
+	return e < 0 ? 0 : e == 0 ? 1 : e == 1 ? x : e == 2 ? x * x : e == 3 ? x * x * x : x * x * x * x;
 }
 
 /* b0^i b1^j b2^k, 0 when a power is negative */
@@ -211,23 +308,126 @@ static double mi_mono(double const* b, int i, int j, int k)
 	return mi_pow(b[0], i) * mi_pow(b[1], j) * mi_pow(b[2], k);
 }
 
+/* the second derivatives of b0^i b1^j b2^q in (a, b) and its value and first ones: w[6] = (f, fa, fb, faa, fab, fbb) */
+static void mi_bern_derivatives(double* w, double const* bb, int i, int j, int q)
+{
+	w[0] = mi_mono(bb, i, j, q);
+	w[1] = -i * mi_mono(bb, i - 1, j, q) + j * mi_mono(bb, i, j - 1, q);
+	w[2] = -i * mi_mono(bb, i - 1, j, q) + q * mi_mono(bb, i, j, q - 1);
+	w[3] = i * (i - 1) * mi_mono(bb, i - 2, j, q) - 2 * i * j * mi_mono(bb, i - 1, j - 1, q) + j * (j - 1) * mi_mono(bb, i, j - 2, q);
+	w[4] = i * (i - 1) * mi_mono(bb, i - 2, j, q) - i * q * mi_mono(bb, i - 1, j, q - 1) - i * j * mi_mono(bb, i - 1, j - 1, q)
+		+ j * q * mi_mono(bb, i, j - 1, q - 1);
+	w[5] = i * (i - 1) * mi_mono(bb, i - 2, j, q) - 2 * i * q * mi_mono(bb, i - 1, j, q - 1) + q * (q - 1) * mi_mono(bb, i, j, q - 2);
+}
+
+static int const mi_e4[15][3] = { { 4, 0, 0 }, { 0, 4, 0 }, { 0, 0, 4 }, { 3, 1, 0 }, { 2, 2, 0 }, { 1, 3, 0 }, { 0, 3, 1 }, { 0, 2, 2 },
+	{ 0, 1, 3 }, { 1, 0, 3 }, { 2, 0, 2 }, { 3, 0, 1 }, { 2, 1, 1 }, { 1, 2, 1 }, { 1, 1, 2 } };
+static double const mi_c4[15] = { 1, 1, 1, 4, 6, 4, 4, 6, 4, 4, 6, 4, 12, 12, 12 };
+
+/* the quartic Gregory triangle (mi_build_g1): an interior point near corner v is (u G_2v + w G_2v+1) / (u + w), u = b_(v+1),
+   w = b_(v+2) (each candidate alone on its edge), differentiated with it; the normal the surface's, xa x xb */
+static void mi_eval_gregory(mi_tri const* t, double a, double b, double* x, double* xa, double* xb, double* xaa, double* xab, double* xbb,
+	double* n, double* na, double* nb)
+{
+	static int const db[3][2] = { { -1, -1 }, { 1, 0 }, { 0, 1 } };   /* the barycentrics' derivatives in (a, b) */
+	double bb[3] = { 1 - a - b, a, b }, v[6][3];
+	int l, k;
+	memset(v, 0, sizeof v);
+	for (l = 0; l < 15; l++)
+	{
+		int const* f = mi_e4[l];
+		double c = mi_c4[l], w[6], D[6][3];
+		memset(D, 0, sizeof D);
+		if (f[0] && f[1] && f[2])
+		{
+			int cv = f[0] == 2 ? 0 : f[1] == 2 ? 1 : 2, a1 = (cv + 1) % 3, a2 = (cv + 2) % 3;
+			double u = bb[a1], s = bb[a1] + bb[a2], r = 0.5, ra = 0, rb = 0, raa = 0, rab = 0, rbb = 0;
+			double ua = db[a1][0], ub = db[a1][1], sa = db[a1][0] + db[a2][0], sb = db[a1][1] + db[a2][1];
+			if (s > 1e-14)
+			{
+				r = u / s;
+				ra = ua / s - u * sa / (s * s);
+				rb = ub / s - u * sb / (s * s);
+				raa = -2 * ua * sa / (s * s) + 2 * u * sa * sa / (s * s * s);
+				rab = -(ua * sb + ub * sa) / (s * s) + 2 * u * sa * sb / (s * s * s);
+				rbb = -2 * ub * sb / (s * s) + 2 * u * sb * sb / (s * s * s);
+			}
+			for (k = 0; k < 3; k++)
+			{
+				double g = t->n[2 * cv][k] - t->n[2 * cv + 1][k];
+				D[0][k] = t->n[2 * cv + 1][k] + r * g;
+				D[1][k] = ra * g;
+				D[2][k] = rb * g;
+				D[3][k] = raa * g;
+				D[4][k] = rab * g;
+				D[5][k] = rbb * g;
+			}
+		}
+		else
+			mi_q4(D[0], t, f);
+		mi_bern_derivatives(w, bb, f[0], f[1], f[2]);
+		for (k = 0; k < 3; k++)
+		{
+			v[0][k] += c * w[0] * D[0][k];
+			v[1][k] += c * (w[1] * D[0][k] + w[0] * D[1][k]);
+			v[2][k] += c * (w[2] * D[0][k] + w[0] * D[2][k]);
+			v[3][k] += c * (w[3] * D[0][k] + 2 * w[1] * D[1][k] + w[0] * D[3][k]);
+			v[4][k] += c * (w[4] * D[0][k] + w[1] * D[2][k] + w[2] * D[1][k] + w[0] * D[4][k]);
+			v[5][k] += c * (w[5] * D[0][k] + 2 * w[2] * D[2][k] + w[0] * D[5][k]);
+		}
+	}
+	for (k = 0; k < 3; k++)
+	{
+		if (x) x[k] = v[0][k];
+		if (xa) xa[k] = v[1][k];
+		if (xb) xb[k] = v[2][k];
+		if (xaa) xaa[k] = v[3][k];
+		if (xab) xab[k] = v[4][k];
+		if (xbb) xbb[k] = v[5][k];
+	}
+	if (n || na || nb)
+	{
+		double m[3], ma[3], mb[3], p1[3], p2[3], u[3], len, ua, ub;
+		mi_cross(m, v[1], v[2]);
+		mi_cross(p1, v[3], v[2]);
+		mi_cross(p2, v[1], v[4]);
+		for (k = 0; k < 3; k++)
+			ma[k] = p1[k] + p2[k];
+		mi_cross(p1, v[4], v[2]);
+		mi_cross(p2, v[1], v[5]);
+		for (k = 0; k < 3; k++)
+		{
+			mb[k] = p1[k] + p2[k];
+			u[k] = m[k];
+		}
+		len = mi_unit(u);
+		ua = mi_dot(u, ma);
+		ub = mi_dot(u, mb);
+		for (k = 0; k < 3; k++)
+		{
+			if (n) n[k] = u[k];
+			if (na) na[k] = len > 0 ? (ma[k] - ua * u[k]) / len : 0;
+			if (nb) nb[k] = len > 0 ? (mb[k] - ub * u[k]) / len : 0;
+		}
+	}
+}
+
 void mi_eval(mi_tri const* t, double a, double b, double* x, double* xa, double* xb, double* xaa, double* xab, double* xbb,
 	double* n, double* na, double* nb)
 {
 	double bb[3] = { 1 - a - b, a, b }, v[6][3];
 	int l, k, o;
+	if (t->gregory)
+	{
+		mi_eval_gregory(t, a, b, x, xa, xb, xaa, xab, xbb, n, na, nb);
+		return;
+	}
 	memset(v, 0, sizeof v);
 	for (l = 0; l < 10; l++)
 	{
 		int i = mi_e3[l][0], j = mi_e3[l][1], q = mi_e3[l][2];
 		double c = mi_c3[l], w[6];
-		w[0] = mi_mono(bb, i, j, q);
-		w[1] = -i * mi_mono(bb, i - 1, j, q) + j * mi_mono(bb, i, j - 1, q);
-		w[2] = -i * mi_mono(bb, i - 1, j, q) + q * mi_mono(bb, i, j, q - 1);
-		w[3] = i * (i - 1) * mi_mono(bb, i - 2, j, q) - 2 * i * j * mi_mono(bb, i - 1, j - 1, q) + j * (j - 1) * mi_mono(bb, i, j - 2, q);
-		w[4] = i * (i - 1) * mi_mono(bb, i - 2, j, q) - i * q * mi_mono(bb, i - 1, j, q - 1) - i * j * mi_mono(bb, i - 1, j - 1, q)
-			+ j * q * mi_mono(bb, i, j - 1, q - 1);
-		w[5] = i * (i - 1) * mi_mono(bb, i - 2, j, q) - 2 * i * q * mi_mono(bb, i - 1, j, q - 1) + q * (q - 1) * mi_mono(bb, i, j, q - 2);
+		mi_bern_derivatives(w, bb, i, j, q);
 		for (o = 0; o < 6; o++)
 			for (k = 0; k < 3; k++)
 				v[o][k] += c * w[o] * t->p[l][k];

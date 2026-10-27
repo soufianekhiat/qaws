@@ -40,7 +40,8 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 typedef struct mi_tri
 {
 	double p[10][3];
-	double n[6][3];
+	double n[6][3];                 /* the quadratic normal field; G1: the six Gregory points (2 v + s: near corner v, from its edge to v + 1 + s) */
+	int gregory;                    /* G1: p[0..8] the cubic boundary, the interior a quartic Gregory triangle */
 } mi_tri;
 
 /* P: the corners; N: their unit normals; crease (per edge i, from corner i to
