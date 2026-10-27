@@ -36,14 +36,13 @@ typedef struct swi_ctx
 	double* cen;                    /* per sample the shape's bounding sphere: centre (3) and radius */
 	double band;                    /* points within it of the level have their time refined (rigid) */
 	double cell;
-	double tie;                     /* values within it equal: the hit more inside its triangle kept (a point on a face over a
-	                                   span of time touches its edges at the span's ends: that face, not its neighbour) */
+	double tie;                     /* values within it equal: the earlier time kept (a point a face touches over a span of time:
+	                                   the first touch stands) */
 	qaws_batch_executor const* ex;
 	/* per chunk */
 	qaws_scalar *q, *d;
 	qaws_mesh_hit* h;
 	double *best, *bt, *hp, *hw;    /* the least value, its time, the closest point (world), its weights on its triangle */
-	double* hin;                    /* its least weight */
 	unsigned int *bj, *idx, *htri;
 } swi_ctx;
 
@@ -97,10 +96,8 @@ static qaws_status swi_query(swi_ctx* c, double const* X, unsigned int k, double
 	for (i = 0; i < k; i++)
 	{
 		unsigned int p = c->idx[i];
-		double in = fmin((double)c->h[i].weights[0], fmin((double)c->h[i].weights[1], (double)c->h[i].weights[2]));
-		if (!((double)c->d[i] < c->best[p] - c->tie || ((double)c->d[i] <= c->best[p] + c->tie && in > c->hin[p])))
+		if (!((double)c->d[i] < c->best[p] - c->tie || ((double)c->d[i] <= c->best[p] + c->tie && tt[i] < c->bt[p])))
 			continue;
-		c->hin[p] = in;
 		c->best[p] = (double)c->d[i];
 		c->bt[p] = tt[i];
 		c->bj[p] = jj[i];
@@ -130,7 +127,7 @@ static qaws_status swi_samples(swi_ctx* c, double const* X, unsigned int m, doub
 	{
 		double bd = HUGE_VAL;
 		c->best[i] = HUGE_VAL;
-		c->hin[i] = -1;
+		c->bt[i] = HUGE_VAL;
 		c->bj[i] = 0;
 		for (j = 0; j < c->ns; j++)
 		{
@@ -321,7 +318,47 @@ static void swi_weights(swi_ctx const* c, unsigned int f, double const* q, doubl
 		w[k] = s > 0 ? w[k] / s : 1.0 / 3;
 }
 
-/* the sources of n points: per point its triangle, weights and best time (the field's evaluation, kept) */
+/* a rigid motion's ties pushed back to their first time: for the points within the band whose best is tied with an earlier
+   time than the sample before it (a face touching them over a span), bisected between that sample (not tied) and the best
+   time; the first touch stands */
+static qaws_status swi_first(swi_ctx* c, double const* X, unsigned int m, double* P, double* tt, unsigned int* jj, double* G)
+{
+	double *lo = G, *hi = G + m, *ref = G + 2 * (size_t)m;
+	unsigned int* sel = (unsigned int*)(G + 3 * (size_t)m);
+	unsigned int i, k, r, ns = 0;
+	qaws_status st = QAWS_STATUS_OK;
+	for (i = 0; i < m; i++)
+		if (fabs(c->best[i]) < c->band && c->bj[i] > 0 && c->bt[i] > c->ts[c->bj[i] - 1])
+		{
+			lo[ns] = c->ts[c->bj[i] - 1];
+			hi[ns] = c->bt[i];
+			ref[ns] = c->best[i];
+			sel[ns++] = i;
+		}
+	for (r = 0; ns && r < SWI_GOLDEN && st == QAWS_STATUS_OK; r++)
+	{
+		for (k = 0; k < ns && st == QAWS_STATUS_OK; k++)
+		{
+			c->idx[k] = sel[k];
+			tt[k] = 0.5 * (lo[k] + hi[k]);
+			jj[k] = c->bj[sel[k]];
+			st = swi_pose(c->m, tt[k], P + 12 * (size_t)k);
+		}
+		if (st == QAWS_STATUS_OK)
+			st = swi_query(c, X, ns, P, tt, jj);
+		for (k = 0; k < ns; k++)
+		{
+			if ((double)c->d[k] <= ref[k] + c->tie)
+				hi[k] = tt[k];
+			else
+				lo[k] = tt[k];
+		}
+	}
+	return st;
+}
+
+/* the sources of n points: per point its triangle, weights and best time (the field's evaluation, kept; ties at their
+   first time) */
 static qaws_status swi_sources(swi_ctx* c, double const* x, size_t n, unsigned int* tri, double* w, double* tb)
 {
 	size_t c0;
@@ -338,7 +375,7 @@ static qaws_status swi_sources(swi_ctx* c, double const* x, size_t n, unsigned i
 		unsigned int m = (unsigned int)(n - c0 < SWI_CHUNK ? n - c0 : SWI_CHUNK);
 		if ((st = swi_samples(c, x + 3 * c0, m, P, tt, jj)) != QAWS_STATUS_OK)
 			break;
-		if (!c->pv && (st = swi_refine(c, x + 3 * c0, m, P, tt, jj, G)) != QAWS_STATUS_OK)
+		if (!c->pv && ((st = swi_refine(c, x + 3 * c0, m, P, tt, jj, G)) != QAWS_STATUS_OK || (st = swi_first(c, x + 3 * c0, m, P, tt, jj, G)) != QAWS_STATUS_OK))
 			break;
 		for (i = 0; i < m; i++)
 		{
@@ -511,7 +548,7 @@ qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_repo
 	vel = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * (3 * (size_t)c.nv + 1));
 	c.q = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 4 * SWI_CHUNK);
 	c.h = (qaws_mesh_hit*)qaws_internal_malloc(sizeof(qaws_mesh_hit) * SWI_CHUNK);
-	c.best = (double*)qaws_internal_malloc(sizeof(double) * 9 * SWI_CHUNK);
+	c.best = (double*)qaws_internal_malloc(sizeof(double) * 8 * SWI_CHUNK);
 	c.bj = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * SWI_CHUNK);
 	if (!c.t || !c.x || !c.buf || !vel || !c.q || !c.h || !c.best || !c.bj)
 		goto done;
@@ -519,7 +556,6 @@ qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_repo
 	c.bt = c.best + SWI_CHUNK;
 	c.hp = c.best + 2 * SWI_CHUNK;
 	c.hw = c.best + 5 * SWI_CHUNK;
-	c.hin = c.best + 8 * SWI_CHUNK;
 	c.idx = c.bj + SWI_CHUNK;
 	c.htri = c.bj + 2 * SWI_CHUNK;
 	qaws_mesh_3d_get_triangles(c.t, mesh);

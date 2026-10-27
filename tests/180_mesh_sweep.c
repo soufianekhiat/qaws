@@ -27,7 +27,8 @@
  *     normal of it: the face's own); a 64-gon cylinder drifting 100
  *     tolerances a turn, symmetric about the axis, still its revolution along
  *     the drift (the disc swept along the segment); the cube drifting 10
- *     tolerances a turn with revolve_spins: revolved anyway, its turn's drift
+ *     tolerances a turn with revolve_spins: revolved anyway, without it swept
+ *     implicitly (report.implicit) within 3% of that volume; its turn's drift
  *     reported, its volume between the true sweep's and the cylinder's along
  *     the drift;
  *   - a vertex motion of another vertex count refused.
@@ -448,6 +449,21 @@ static void test_spin_more(void)
 		sprintf(m2s, "revolve_spins: %.2f turns, a turn drifts %.4f, volume %.5f (at most %.5f), closed %d", (double)r2.turns, (double)r2.spin_drift, v2, hi, r2.closed);
 		printf("  %s\n", m2s);
 		TEST_ASSERT(o2 && fabs((double)r2.turns - 2) < 1e-4 && fabs((double)r2.spin_drift - 0.02) < 1e-4 && v2 <= hi && v2 > hi - 2 * SW_PI * sqrt(0.5) * 2 * tol && r2.closed, m2s);
+	}
+	{
+		/* without revolve_spins: implicitly (a grid of 24), the true sweep within a cell of the revolution */
+		qaws_mesh_3d* o3 = NULL;
+		qaws_sweep_report r3;
+		double v3;
+		char m3s[200];
+		d.revolve_spins = 0;
+		d.resolution = 24;
+		qaws_mesh_3d_sweep(&o3, &r3, cube, m2, &d);
+		v3 = sw_volume(o3);
+		sprintf(m3s, "the same without revolve_spins: implicit %d, %.2f turns, volume %.5f (revolved %.5f), closed %d", r3.implicit, (double)r3.turns, v3, v2, r3.closed);
+		printf("  %s\n", m3s);
+		TEST_ASSERT(o3 && r3.implicit && fabs((double)r3.turns - 2) < 1e-4 && fabs(v3 - v2) < 0.03 * v2 && r3.closed, m3s);
+		qaws_mesh_3d_destroy(o3);
 	}
 	qaws_mesh_3d_destroy(o2);
 	qaws_motion_destroy(m2);

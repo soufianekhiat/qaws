@@ -2118,7 +2118,8 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	tol = desc && desc->tolerance > 0 ? (double)desc->tolerance : 1e-3 * diag;
 	{
 		/* a spin (a whole turn or more about one axis, drifting under tol a turn): its solid of revolution swept along the drift */
-		/* (drifting faster: only a body symmetric about the axis; UNSUPPORTED_OPERATION otherwise, and the slabs below) */
+		/* (drifting faster: only a body symmetric about the axis; UNSUPPORTED_OPERATION otherwise, then implicitly: the slabs'
+		   hulls would pile up turn after turn) */
 		int slow;
 		double ax[3], drift, turns = swp_spin(motion, tol, ax, &slow, &drift);
 		if (turns > 0)
@@ -2126,7 +2127,11 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			st = swp_spun(out, report, mesh, motion, Xa, nv, t, nt, ax, tol, desc, turns, slow, drift);
 			if (st != QAWS_STATUS_UNSUPPORTED_OPERATION)
 				goto done;
-			memset(report, 0, sizeof *report);
+			st = qaws_mesh_3d_sweep_implicit(out, report, mesh, motion, desc);
+			report->turns = (qaws_scalar)turns;
+			report->spin_drift = (qaws_scalar)drift;
+			report->implicit = 1;
+			goto done;
 		}
 	}
 	/* the slabs: [0, 1] halved until the chords' deviation (at the middle and quarters) is within tol */

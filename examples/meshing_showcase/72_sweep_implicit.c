@@ -9,11 +9,13 @@
  *   - the same coloured by the distance to its revolved sweep (revolve_spins,
  *     red at 0.03; a turn's drift is 0.05): the revolution passes the true sweep where
  *     the blade's next turn has not reached yet;
- *   - attributes: a cube with a colour per face (corner values, sharp at
- *     its edges) along a curve while turning a quarter, implicit: each
- *     corner the colour of the face that made it, the walls its edges sweep
- *     split between their two faces' colours; the same swept by slabs (its
- *     colours exact) to compare.
+ *   - attributes: a cube with a colour per side and a gradient over its top
+ *     (corner values, sharp at its edges) along a curve while turning a
+ *     quarter, implicit: each corner the colour of the face that made it,
+ *     the top the gradient's colours where the top face passed, the walls
+ *     its edges sweep split between their two faces' colours; the same swept
+ *     by slabs to compare (its top the side faces' hulls' tops, in that
+ *     plane, and the top face's last pose).
  * Printed: volumes, distances, samples, times.
  */
 
@@ -155,8 +157,15 @@ static void demo_sweep_implicit(void)
 		qaws_mesh_3d *cube = ms_sw_box(-0.2, 0.2, -0.2, 0.2, -0.2, 0.2), *im = NULL;
 		double col[108];
 		unsigned int i, el;
+		static double const top[8][3] = { { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }, { 0.95, 0.25, 0.25 }, { 0.25, 0.4, 0.95 }, { 0.3, 0.85, 0.4 }, { 0.98, 0.98, 0.95 } };
+		unsigned int tv[36];
+		qaws_mesh_3d_get_triangles(tv, cube);
 		for (i = 0; i < 108; i++)
 			col[i] = pal[i / 18][i % 3];
+		/* (the top face: a colour per corner, blended across it) */
+		for (i = 6; i < 12; i++)
+			for (el = 0; el < 3; el++)
+				col[3 * i + el] = top[tv[i]][el];
 		ms_at_add(cube, "color", QAWS_MESH_CORNER, 3, QAWS_ATTRIBUTE_OKLAB, col, 36);
 		memset(&s, 0, sizeof s);
 		memset(&e, 0, sizeof e);

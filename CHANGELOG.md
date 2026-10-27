@@ -33,8 +33,9 @@ All notable changes to Qaws are documented here.
   shape's signed distance, sampled in time (bounding spheres pruning, golden sections refining a rigid motion's time),
   dual contoured on a grid (`qaws_sweep_desc.resolution`); any motion, smooth, within a cell of the explicit sweep
   (test 184, figure 72). Attributes carried from each vertex's source point (the triangle at an edge of the shape chosen
-  by normal, so seams stay sharp); the contour's normals on the surface from differences of phi (no staircase on
-  diagonal walls).
+  by normal, so seams stay sharp; a face touching a place over a span of time: its first touch); the contour's normals on
+  the surface from differences of phi (no staircase on diagonal walls). An asymmetric spin drifting past the tolerance a
+  turn is swept implicitly by `qaws_mesh_3d_sweep` (`qaws_sweep_report.implicit`) where its slabs could not finish.
 - Continuous collision detection: `qaws_mesh_3d_first_contact`, the first time a moving mesh (rigid or vertex motion)
   meets a standing obstacle, by the sweep's slabs, each triangle's swept prism against the obstacle's triangles (BVH,
   exact predicates), the first touching slab halved to the tolerance; no tunnelling through thin walls at any speed

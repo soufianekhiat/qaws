@@ -67,8 +67,10 @@
  * edge of the body tracing the surface has no normal of it) the face's own;
  * edge values do not survive the revolution (zeros). The report's turns says
  * a spin was found. An asymmetric body spinning while it drifts past the
- * tolerance a turn is swept by slabs as any motion (its hulls overlap turn
- * after turn: slow), or with revolve_spins revolved anyway: the result then
+ * tolerance a turn is swept implicitly (qaws_mesh_3d_sweep_implicit, the
+ * report's implicit set: within a cell of desc.resolution's grid, its
+ * attributes carried; by slabs its hulls would pile up turn after turn), or
+ * with revolve_spins revolved anyway: the result then
  * passes the true sweep by up to the report's spin_drift (a CNC simulator's
  * spindle tool).
  *
@@ -115,6 +117,8 @@ typedef struct qaws_sweep_report
 	int closed;
 	qaws_scalar turns;                  /* a spin's turns, swept as its solid of revolution along its drift; 0 otherwise */
 	qaws_scalar spin_drift;             /* a spin's largest drift along one turn */
+	int implicit;                       /* swept on a grid (qaws_mesh_3d_sweep_implicit): an asymmetric spin drifting past the
+	                                       tolerance a turn without revolve_spins */
 } qaws_sweep_report;
 
 /* desc and report may be NULL. INVALID_ARGUMENT for a vertex motion of another vertex count. An empty result: OK and NULL. */
@@ -136,7 +140,8 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out_mesh, qaws_sweep_report* repor
  * the grid: detail below the cell is lost, edges between cells are bevelled.
  * For sculpting and as a cross-check of qaws_mesh_3d_sweep. Attributes:
  * each result vertex's source is the shape's closest point at its best time
- * (ties on a face over a span of time: the hit inside its triangle); a
+ * (a face touching it over a span of time: the first touch, as the spins'
+ * revolution; a rigid motion's bisected to it); a
  * corner takes it on that triangle or, where it lies on an edge or corner of
  * the shape (a wall an edge sweeps, a seam), on the triangle there whose
  * normal at that time is nearest the corner's own triangle's: values sharp
