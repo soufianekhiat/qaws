@@ -973,6 +973,7 @@
 #define qaws_mesh_3d_split_face QAWS_SFX(qaws_mesh_3d_split_face)
 #define qaws_mesh_3d_subdivide QAWS_SFX(qaws_mesh_3d_subdivide)
 #define qaws_mesh_3d_sweep QAWS_SFX(qaws_mesh_3d_sweep)
+#define qaws_mesh_3d_sweep_implicit QAWS_SFX(qaws_mesh_3d_sweep_implicit)
 #define qaws_mesh_3d_validate QAWS_SFX(qaws_mesh_3d_validate)
 #define qaws_mesh_boolean QAWS_SFX(qaws_mesh_boolean)
 #define qaws_mesh_bvh QAWS_SFX(qaws_mesh_bvh)

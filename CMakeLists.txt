@@ -136,6 +136,7 @@ src/qaws/mesh/qaws_mesh_connect.c
 src/qaws/mesh/qaws_mesh_offset.c
 src/qaws/mesh/qaws_mesh_sweep.c
 src/qaws/mesh/qaws_mesh_contact.c
+src/qaws/mesh/qaws_mesh_sweep_implicit.c
 src/qaws/mesh/qaws_mesh_carry.c
 src/qaws/mesh/qaws_mesh_subdivide.c
 src/qaws/mesh/qaws_volume_improve.c

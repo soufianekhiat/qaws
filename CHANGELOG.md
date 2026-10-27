@@ -29,6 +29,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Implicit sweeps: `qaws_mesh_3d_sweep_implicit`, the swept solid as the level set of the least over time of the moving
+  shape's signed distance, sampled in time (bounding spheres pruning, golden sections refining a rigid motion's time),
+  dual contoured on a grid (`qaws_sweep_desc.resolution`); any motion, smooth, within a cell of the explicit sweep
+  (test 184, figure 72).
 - Continuous collision detection: `qaws_mesh_3d_first_contact`, the first time a moving mesh (rigid or vertex motion)
   meets a standing obstacle, by the sweep's slabs, each triangle's swept prism against the obstacle's triangles (BVH,
   exact predicates), the first touching slab halved to the tolerance; no tunnelling through thin walls at any speed

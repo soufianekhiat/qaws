@@ -197,6 +197,7 @@ extern int test_180_mesh_sweep_main(void);
 extern int test_181_mesh_attribute_carry_main(void);
 extern int test_182_volume_attributes_main(void);
 extern int test_183_mesh_contact_main(void);
+extern int test_184_sweep_implicit_main(void);
 
 /* Test registry */
 typedef struct {
@@ -389,6 +390,7 @@ static test_suite const g_test_suites[] = {
 	{"181_mesh_attribute_carry", test_181_mesh_attribute_carry_main},
 	{"182_volume_attributes", test_182_volume_attributes_main},
 	{"183_mesh_contact", test_183_mesh_contact_main},
+	{"184_sweep_implicit", test_184_sweep_implicit_main},
 };
 
 int main(void) {

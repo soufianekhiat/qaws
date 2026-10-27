@@ -312,6 +312,11 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    bracketed by the slabs), contoured by the offsets' contouring (item 17 of the enrichments, adaptive blocks): smooth
    sweeps for sculpting, a cross-check of 2 and 4. Check: the implicit and the explicit sweeps within the tolerance of
    each other on the tube and the turned box.
+   Done (2026-10-27): `qaws_mesh_3d_sweep_implicit` (test 184, figure 72 key *): time samples no vertex moving past two
+   cells apart, pruned per point by bounding spheres, a rigid motion's time refined by golden sections; contoured by
+   wt_contour_field. Within a cell of the explicit sweep (the cube translated, the turned box), the cutter of figure 69
+   without revolution (its revolved sweep past it by 0.045 under the drift 0.05). The plan's 1D minimization is the
+   golden refinement; a tolerance-bounded result needs a finer grid (the cell is the error).
 
 Ideas noted (not ordered):
 

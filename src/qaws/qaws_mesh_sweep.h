@@ -103,6 +103,7 @@ typedef struct qaws_sweep_desc
 	int revolve_spins;                  /* nonzero: a spin drifting past the tolerance a turn is revolved even when the body is not
 	                                       symmetric about its axis (a one-flute cutter: the result may pass the true sweep by up
 	                                       to the report's spin_drift); 0: such a spin is swept by slabs (slow) */
+	unsigned int resolution;            /* qaws_mesh_3d_sweep_implicit: cells along the result's box's longest side; 0: 64 */
 } qaws_sweep_desc;
 
 typedef struct qaws_sweep_report
@@ -118,6 +119,28 @@ typedef struct qaws_sweep_report
 
 /* desc and report may be NULL. INVALID_ARGUMENT for a vertex motion of another vertex count. An empty result: OK and NULL. */
 qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out_mesh, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion,
+	qaws_sweep_desc const* desc);
+
+/*
+ * The implicit route: the swept solid as the level set phi = 0 of
+ * phi(x) = min over t of the moving shape's signed distance at x (the
+ * BVH's, negative inside by the winding number), contoured on a grid by dual
+ * contouring as qaws_mesh_3d_offset's CONTOUR (crossings by regula falsi,
+ * their normals the closest point's direction, sharp edges and corners kept
+ * where the cells resolve them). phi is sampled in time with no vertex moving
+ * more than two cells between samples (a vertex motion: a quarter of one), each
+ * point's samples pruned by their bounding spheres; a rigid motion's best
+ * time is refined by golden sections between the samples beside it (no
+ * staircase where a face slides along the sweep). Smooth, never inside out,
+ * any motion (spins, vertex motions, self-overlapping paths) at the cost of
+ * the grid: detail below the cell is lost, edges between cells are bevelled.
+ * For sculpting and as a cross-check of qaws_mesh_3d_sweep. No attributes
+ * or features are carried. desc: resolution, max_slabs (the most time
+ * samples; 0: 4096) and executor are read. The report: slabs the time
+ * samples, deviation half the most a vertex moves between two (the sampling's
+ * bound before refinement), closed.
+ */
+qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion,
 	qaws_sweep_desc const* desc);
 
 /*
