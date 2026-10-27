@@ -38,13 +38,25 @@ qaws_motion_destroy(m);
 - **Along a curve:** T(t) is the curve at its parameter mapped linearly
   from t, its velocity the curve's derivative times the range; R(t) is the
   given rotation.
+- **Many turns:** a quaternion says where the body ends, not how many
+  turns it took; the angular velocities say it. The total angle is the
+  relative rotation's plus the whole turns that bring it nearest the
+  angular velocities' mean along its axis (three turns about z: equal end
+  rotations, ω = 6π). Past a half turn the motion is cut into equal pieces
+  of an eighth of a turn at most, each a pose motion as above: the angle
+  along the axis a Hermite polynomial, the velocities' other parts blended
+  linearly, the translation's polynomial cut at the joints (exact), so
+  positions, orientations and their rates match where pieces meet.
 - **Vertex motions:** each vertex its own Hermite polynomial from its
   positions and velocities at both ends (accelerations with the flag).
 
 ## Limits
 
-- A relative rotation of a half turn or more has no Gibbs vector:
-  INVALID_ARGUMENT (cut the motion in two).
+- A half turn the angular velocities do not orient (either way round as
+  near): INVALID_ARGUMENT.
+- Past a half turn, the off-axis parts of the angular velocities are
+  blended linearly between the ends (a tumbling body given by its two end
+  poses alone is approximated at the joints).
 - Affine motions (scaling, shear) are not offered.
 - A curve motion borrows its curve: it must outlive the motion.
 
@@ -60,4 +72,6 @@ Test 179 (`tests/179_motion.c`, f64):
 | Quintic: the accelerations and angular accelerations at both ends (differences of h = 1e-4) | 6e-6 |
 | A cubic path from its ends' values and derivatives, at 17 times | exact |
 | Three vertices' cubics; a Bezier curve's points and derivatives | exact |
-| A half turn, a zero quaternion | INVALID_ARGUMENT |
+| Three turns about z moving along x (equal end rotations, ω = 6π): against the uniform spin at 601 times | 1.2e-3 |
+| A half turn with ω = −π: turns that way (R at t = 1/2) | exact |
+| A half turn its velocities do not orient, a zero quaternion | INVALID_ARGUMENT |

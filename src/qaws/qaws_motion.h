@@ -35,9 +35,19 @@
  *     rotation's, the ends' derivatives from the angular velocities (world
  *     frame) by the Gibbs vector's kinematics,
  *         omega = R0 (2 / (1 + c . c)) (c' + c x c'),
- *     and its derivative for the accelerations. A relative rotation of a
- *     half turn or more has no Gibbs vector: INVALID_ARGUMENT (cut the
- *     motion in two).
+ *     and its derivative for the accelerations.
+ *     Turning a half turn or more: a quaternion says where the body ends, not
+ *     how many turns it took; the angular velocities say it. The total angle
+ *     is the relative rotation's (about its axis) plus the whole turns that
+ *     bring it nearest the angular velocities' mean along that axis (a spin
+ *     of three turns ends where it started, its velocities 6 pi). Past a
+ *     half turn the motion is cut into equal pieces of an eighth of a turn at
+ *     most, each as above: the angle along the axis a Hermite polynomial
+ *     (its rates the angular velocities' along the axis), their other parts
+ *     blended linearly, the translation's polynomial cut at the joints
+ *     (exact), so positions, orientations and their rates match where the
+ *     pieces meet. A half turn the velocities do not orient (either way
+ *     round as near) is refused.
  *   - Along a curve (3D): T(t) the curve at the parameter mapped from t
  *     (its range's start at 0, end at 1), R(t) a given constant rotation.
  *
@@ -72,7 +82,7 @@ typedef struct qaws_motion_state
 	qaws_vec3 angular_velocity;
 } qaws_motion_state;
 
-/* INVALID_ARGUMENT for a value not finite, a zero quaternion, a relative rotation of a half turn or more */
+/* INVALID_ARGUMENT for a value not finite, a zero quaternion, a half turn its angular velocities do not orient */
 qaws_status qaws_motion_create_poses(qaws_motion** out_motion, qaws_motion_pose const* start, qaws_motion_pose const* end, unsigned int flags);
 
 /* rotation: a quaternion (w, x, y, z), NULL the identity. The curve is borrowed: keep it until the motion is destroyed.

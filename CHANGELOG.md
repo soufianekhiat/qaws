@@ -29,6 +29,11 @@ All notable changes to Qaws are documented here.
 
 ### Changed
 
+- Motions from two poses turn any number of turns: the angular velocities say how many (a quaternion only says where the
+  body ends), and past a half turn the motion is cut into pieces of an eighth of a turn at most, joined with matching
+  positions, orientations and rates (three turns about z within 1.2e-3 of the uniform spin). Only a half turn the
+  velocities do not orient is refused (it was any half turn or more).
+
 - Self-intersections and Booleans on heavily overlapping input (a spinning torus's sweep: hulls lying almost on one
   another): a face's points and pieces are met along its longest axis (sorted spans, only overlapping ones tested), and
   its cuts are recovered by a Sloan walk (the crossed edges found by walking the cut, each point's triangle kept) instead

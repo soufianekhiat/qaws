@@ -14,14 +14,23 @@
 #define MO_POSES 0
 #define MO_CURVE 1
 #define MO_VERTICES 2
+#define MO_PI 3.14159265358979323846
+
+/* one piece of a pose motion over its own t in [0, 1] */
+typedef struct mo_seg
+{
+	double R0[9];              /* the start's rotation */
+	double T[6][3];            /* the translation's p0, v0, a0, p1, v1, a1 */
+	double C[6][3];            /* the Gibbs vector's c0 (0), c0', c0'', c1, c1', c1'' */
+} mo_seg;
 
 struct qaws_motion
 {
 	int kind;
 	int quintic;
-	double R0[9];              /* POSES: the start's rotation; CURVE: the constant one */
-	double T[6][3];            /* POSES: the translation's p0, v0, a0, p1, v1, a1 */
-	double C[6][3];            /* POSES: the Gibbs vector's c0 (0), c0', c0'', c1, c1', c1'' */
+	double R0[9];              /* CURVE: the constant rotation */
+	mo_seg* seg;               /* POSES: its pieces, each over an equal share of t (one unless it turns past a half turn) */
+	unsigned int nseg;
 	qaws_curve const* curve;   /* CURVE: borrowed */
 	double u0, u1;             /* CURVE: its parameter range */
 	unsigned int n;            /* VERTICES: their count */
@@ -49,6 +58,28 @@ static void mo_basis(double t, int quintic, double* h, double* dh)
 	h[3] = 10 * t3 - 15 * t4 + 6 * t5;                        dh[3] = 30 * t2 - 60 * t3 + 30 * t4;
 	h[4] = -4 * t3 + 7 * t4 - 3 * t5;                         dh[4] = -12 * t2 + 28 * t3 - 15 * t4;
 	h[5] = 0.5 * t3 - t4 + 0.5 * t5;                          dh[5] = 1.5 * t2 - 4 * t3 + 2.5 * t4;
+}
+
+/* the Hermite basis' second derivatives at t (slots as mo_basis) */
+static void mo_basis2(double t, int quintic, double* d2)
+{
+	double t2 = t * t, t3 = t2 * t;
+	if (!quintic)
+	{
+		d2[0] = 12 * t - 6;
+		d2[1] = 6 * t - 4;
+		d2[2] = 0;
+		d2[3] = -12 * t + 6;
+		d2[4] = 6 * t - 2;
+		d2[5] = 0;
+		return;
+	}
+	d2[0] = -60 * t + 180 * t2 - 120 * t3;
+	d2[1] = -36 * t + 96 * t2 - 60 * t3;
+	d2[2] = 1 - 9 * t + 18 * t2 - 10 * t3;
+	d2[3] = 60 * t - 180 * t2 + 120 * t3;
+	d2[4] = -24 * t + 84 * t2 - 60 * t3;
+	d2[5] = 3 * t - 12 * t2 + 10 * t3;
 }
 
 /* the Hermite polynomial of the six data (p0, v0, a0, p1, v1, a1, 3 each) at t, and its derivative */
@@ -141,12 +172,54 @@ static void mo_tmul(double const* R, double const* v, double* o)
 	for (k = 0; k < 3; k++) o[k] = R[k] * v[0] + R[3 + k] * v[1] + R[6 + k] * v[2];
 }
 
+/* q a b (Hamilton) */
+static void mo_qmul(double const* a, double const* b, double* o)
+{
+	o[0] = a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3];
+	o[1] = a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2];
+	o[2] = a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1];
+	o[3] = a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0];
+}
+
+/* one piece from its ends (q unit, the relative rotation under a half turn; T the translation's six data, w and a the
+   angular velocities and accelerations, world frame, per unit of the piece's t); 0 for a half turn */
+static int mo_piece(mo_seg* g, double const* q0, double const* q1, double const (*T)[3], double const* w0, double const* w1, double const* a0,
+	double const* a1, int quintic)
+{
+	double qc[4], qr[4], wc[3], ac[3], zero[3] = { 0, 0, 0 };
+	unsigned int k;
+	/* the relative rotation q0^-1 q1, the shorter way round */
+	qc[0] = q0[0];
+	qc[1] = -q0[1];
+	qc[2] = -q0[2];
+	qc[3] = -q0[3];
+	mo_qmul(qc, q1, qr);
+	if (qr[0] < 0)
+		for (k = 0; k < 4; k++) qr[k] = -qr[k];
+	if (!(qr[0] > 1e-9))
+		return 0;   /* (a half turn: no Gibbs vector) */
+	mo_quat_matrix(q0, g->R0);
+	memcpy(g->T, T, sizeof g->T);
+	/* the Gibbs vector's ends: 0 and the relative rotation's; their rates from the angular velocities in pose 0's frame */
+	memset(g->C, 0, sizeof g->C);
+	for (k = 0; k < 3; k++) g->C[3][k] = qr[1 + k] / qr[0];
+	mo_tmul(g->R0, w0, wc);
+	mo_tmul(g->R0, a0, ac);
+	mo_gibbs_rates(zero, wc, ac, g->C[1], g->C[2]);
+	mo_tmul(g->R0, w1, wc);
+	mo_tmul(g->R0, a1, ac);
+	mo_gibbs_rates(g->C[3], wc, ac, g->C[4], g->C[5]);
+	if (!quintic)
+		for (k = 0; k < 3; k++) g->C[2][k] = g->C[5][k] = 0;   /* (the cubic uses neither acceleration) */
+	return 1;
+}
+
 qaws_status qaws_motion_create_poses(qaws_motion** out, qaws_motion_pose const* s, qaws_motion_pose const* e, unsigned int flags)
 {
 	qaws_motion* m;
-	double q0[4], q1[4], qr[4], w0[3], w1[3], a0[3] = { 0, 0, 0 }, a1[3] = { 0, 0, 0 }, wc[3], ac[3], zero[3] = { 0, 0, 0 };
+	double q0[4], q1[4], qc[4], qr[4], T[6][3], w0[3], w1[3], a0[3] = { 0, 0, 0 }, a1[3] = { 0, 0, 0 }, u[3], wm[3], lu, th, total, phi;
 	int quintic = (flags & QAWS_MOTION_QUINTIC) != 0;
-	unsigned int k;
+	unsigned int k, i, n = 1;
 	if (!out)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out = NULL;
@@ -155,46 +228,133 @@ qaws_status qaws_motion_create_poses(qaws_motion** out, qaws_motion_pose const* 
 		(quintic && (!mo_finite3(s->acceleration) || !mo_finite3(e->acceleration) || !mo_finite3(s->angular_acceleration) ||
 		!mo_finite3(e->angular_acceleration))))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	/* the relative rotation q0^-1 q1, the shorter way round */
-	qr[0] = q0[0] * q1[0] + q0[1] * q1[1] + q0[2] * q1[2] + q0[3] * q1[3];
-	qr[1] = q0[0] * q1[1] - q0[1] * q1[0] - q0[2] * q1[3] + q0[3] * q1[2];
-	qr[2] = q0[0] * q1[2] + q0[1] * q1[3] - q0[2] * q1[0] - q0[3] * q1[1];
-	qr[3] = q0[0] * q1[3] - q0[1] * q1[2] + q0[2] * q1[1] - q0[3] * q1[0];
-	if (qr[0] < 0)
-		for (k = 0; k < 4; k++) qr[k] = -qr[k];
-	if (!(qr[0] > 1e-9))
-		return QAWS_STATUS_INVALID_ARGUMENT;   /* (a half turn: no Gibbs vector) */
-	m = (qaws_motion*)qaws_internal_zalloc(1, sizeof *m);
-	if (!m)
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	m->kind = MO_POSES;
-	m->quintic = quintic;
-	mo_quat_matrix(q0, m->R0);
-	mo_vec(s->position, m->T[0]);
-	mo_vec(s->velocity, m->T[1]);
-	mo_vec(e->position, m->T[3]);
-	mo_vec(e->velocity, m->T[4]);
+	memset(T, 0, sizeof T);
+	mo_vec(s->position, T[0]);
+	mo_vec(s->velocity, T[1]);
+	mo_vec(e->position, T[3]);
+	mo_vec(e->velocity, T[4]);
 	if (quintic)
 	{
-		mo_vec(s->acceleration, m->T[2]);
-		mo_vec(e->acceleration, m->T[5]);
+		mo_vec(s->acceleration, T[2]);
+		mo_vec(e->acceleration, T[5]);
 		mo_vec(s->angular_acceleration, a0);
 		mo_vec(e->angular_acceleration, a1);
 	}
 	mo_vec(s->angular_velocity, w0);
 	mo_vec(e->angular_velocity, w1);
-	/* the Gibbs vector's ends: 0 and the relative rotation's; their rates from the angular velocities in pose 0's frame */
-	for (k = 0; k < 3; k++) m->C[3][k] = qr[1 + k] / qr[0];
-	mo_tmul(m->R0, w0, wc);
-	mo_tmul(m->R0, a0, ac);
-	mo_gibbs_rates(zero, wc, ac, m->C[1], m->C[2]);
-	mo_tmul(m->R0, w1, wc);
-	mo_tmul(m->R0, a1, ac);
-	mo_gibbs_rates(m->C[3], wc, ac, m->C[4], m->C[5]);
-	if (!quintic)
+	/* how far it turns: the relative rotation (angle th in [0, pi] about u, world frame) plus whole turns, the total nearest
+	   the angular velocities' mean along u (a spin of three turns ends where it started: its velocities say so) */
+	qc[0] = q0[0];
+	qc[1] = -q0[1];
+	qc[2] = -q0[2];
+	qc[3] = -q0[3];
+	mo_qmul(q1, qc, qr);   /* (q1 q0^-1: the rotation in the world frame) */
+	if (qr[0] < 0)
+		for (k = 0; k < 4; k++) qr[k] = -qr[k];
+	lu = sqrt(qr[1] * qr[1] + qr[2] * qr[2] + qr[3] * qr[3]);
+	th = 2 * atan2(lu, qr[0]);
+	for (k = 0; k < 3; k++) wm[k] = 0.5 * (w0[k] + w1[k]);
+	if (lu > 1e-12)
+		for (k = 0; k < 3; k++) u[k] = qr[1 + k] / lu;
+	else
 	{
-		/* (the cubic uses neither acceleration) */
-		for (k = 0; k < 3; k++) m->C[2][k] = m->C[5][k] = 0;
+		double l = sqrt(mo_dot(wm, wm));
+		for (k = 0; k < 3; k++) u[k] = l > 0 ? wm[k] / l : (k == 2);
+		th = 0;
+	}
+	phi = mo_dot(wm, u);
+	total = th + 2 * MO_PI * floor((phi - th) / (2 * MO_PI) + 0.5);
+	if (fabs(fabs(phi - th) - MO_PI) < 1e-9 * (1 + fabs(phi)) && th > MO_PI - 1e-6)
+		return QAWS_STATUS_INVALID_ARGUMENT;   /* (a half turn the velocities do not orient: either way round) */
+	if (fabs(total - th) > 1e-12 || !(cos(0.5 * th) > 1e-9))
+		n = (unsigned int)ceil(fabs(total) / (0.25 * MO_PI));   /* (past a half turn: pieces of an eighth of a turn at most; under one, as given) */
+	if (n > 1u << 20)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	m = (qaws_motion*)qaws_internal_zalloc(1, sizeof *m);
+	if (!m)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	m->seg = (mo_seg*)qaws_internal_zalloc(n, sizeof(mo_seg));
+	if (!m->seg)
+	{
+		qaws_internal_free(m);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	m->kind = MO_POSES;
+	m->quintic = quintic;
+	m->nseg = n;
+	if (n == 1)
+	{
+		if (!mo_piece(m->seg, q0, q1, (double const(*)[3])T, w0, w1, a0, a1, quintic))
+		{
+			qaws_motion_destroy(m);
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		}
+		*out = m;
+		return QAWS_STATUS_OK;
+	}
+	{
+		/* pieces: the turn's angle along u a Hermite polynomial (0 to total, its rates the angular velocities' along u), the
+		   angular velocities' other parts blended linearly; the translation the same polynomial cut at the joints (exact) */
+		double F[6][3], qa[4], wa[3], aa[3], Ta[6][3];
+		memset(F, 0, sizeof F);
+		F[1][0] = mo_dot(w0, u);
+		F[3][0] = total;
+		F[4][0] = mo_dot(w1, u);
+		F[2][0] = mo_dot(a0, u);
+		F[5][0] = mo_dot(a1, u);
+		for (i = 0; i <= n; i++)
+		{
+			double t = (double)i / n, f[3], df[3], ddf, x[3], dx[3], ddx[3], ddh[6], qb[4], qz[4], wb[3], ab[3], Tb[6][3];
+			mo_hermite((double const(*)[3])F, t, quintic, f, df);
+			mo_hermite((double const(*)[3])T, t, quintic, x, dx);
+			/* second derivatives by the basis' (quintic: matched at the joints) */
+			mo_basis2(t, quintic, ddh);
+			ddf = 0;
+			for (k = 0; k < 3; k++) ddx[k] = 0;
+			for (k = 0; k < 6; k++)
+			{
+				unsigned int z;
+				ddf += ddh[k] * F[k][0];
+				for (z = 0; z < 3; z++) ddx[z] += ddh[k] * T[k][z];
+			}
+			/* the orientation: q0 turned by f about u */
+			qz[0] = cos(0.5 * f[0]);
+			for (k = 0; k < 3; k++) qz[1 + k] = sin(0.5 * f[0]) * u[k];
+			mo_qmul(qz, q0, qb);
+			if (i == n)
+				memcpy(qb, q1, sizeof qb);   /* (the end exactly as given) */
+			for (k = 0; k < 3; k++)
+			{
+				double wl = (1 - t) * w0[k] + t * w1[k], al = (1 - t) * a0[k] + t * a1[k];
+				wb[k] = (wl - u[k] * ((1 - t) * mo_dot(w0, u) + t * mo_dot(w1, u)) + u[k] * df[0]) / n;
+				ab[k] = (al - u[k] * ((1 - t) * mo_dot(a0, u) + t * mo_dot(a1, u)) + u[k] * ddf) / ((double)n * n);
+				Tb[0][k] = x[k];
+				Tb[1][k] = dx[k] / n;
+				Tb[2][k] = ddx[k] / ((double)n * n);
+			}
+			if (i > 0)
+			{
+				double TT[6][3];
+				for (k = 0; k < 3; k++)
+				{
+					unsigned int z;
+					for (z = 0; z < 3; z++)
+					{
+						TT[z][k] = Ta[z][k];
+						TT[3 + z][k] = Tb[z][k];
+					}
+				}
+				if (!mo_piece(m->seg + i - 1, qa, qb, (double const(*)[3])TT, wa, wb, aa, ab, quintic))
+				{
+					qaws_motion_destroy(m);
+					return QAWS_STATUS_INVALID_ARGUMENT;
+				}
+			}
+			memcpy(qa, qb, sizeof qa);
+			memcpy(wa, wb, sizeof wa);
+			memcpy(aa, ab, sizeof aa);
+			memcpy(Ta, Tb, sizeof Ta);
+		}
 	}
 	*out = m;
 	return QAWS_STATUS_OK;
@@ -270,6 +430,7 @@ void qaws_motion_destroy(qaws_motion* m)
 	if (!m)
 		return;
 	qaws_internal_free(m->V);
+	qaws_internal_free(m->seg);
 	qaws_internal_free(m);
 }
 
@@ -304,9 +465,20 @@ static qaws_status mo_rigid(qaws_motion const* m, double t, double* R, double* T
 		return QAWS_STATUS_OK;
 	}
 	{
-		double c[3], dc[3], cc, A[9], K[9], K2[9], cxdc[3], wc[3];
-		mo_hermite((double const(*)[3])m->T, t, m->quintic, T, dT);
-		mo_hermite((double const(*)[3])m->C, t, m->quintic, c, dc);
+		double c[3], dc[3], cc, A[9], K[9], K2[9], cxdc[3], wc[3], sc = m->nseg;
+		unsigned int i = t <= 0 ? 0 : t >= 1 ? m->nseg - 1 : (unsigned int)(t * m->nseg);
+		mo_seg const* g;
+		if (i >= m->nseg)
+			i = m->nseg - 1;
+		g = m->seg + i;
+		t = t * sc - i;   /* (the piece's own t; t outside [0, 1] extends the end pieces) */
+		mo_hermite((double const(*)[3])g->T, t, m->quintic, T, dT);
+		mo_hermite((double const(*)[3])g->C, t, m->quintic, c, dc);
+		for (k = 0; k < 3; k++)
+		{
+			dT[k] *= sc;
+			dc[k] *= sc;
+		}
 		/* Cay(c) = I + 2 ([c]x + [c]x^2) / (1 + c . c), R = R0 Cay(c) */
 		cc = mo_dot(c, c);
 		K[0] = 0;     K[1] = -c[2]; K[2] = c[1];
@@ -318,11 +490,11 @@ static qaws_status mo_rigid(qaws_motion const* m, double t, double* R, double* T
 		for (k = 0; k < 9; k++) A[k] = (k % 4 == 0 ? 1 : 0) + 2 * (K[k] + K2[k]) / (1 + cc);
 		for (k = 0; k < 3; k++)
 			for (j = 0; j < 3; j++)
-				R[3 * k + j] = m->R0[3 * k] * A[j] + m->R0[3 * k + 1] * A[3 + j] + m->R0[3 * k + 2] * A[6 + j];
+				R[3 * k + j] = g->R0[3 * k] * A[j] + g->R0[3 * k + 1] * A[3 + j] + g->R0[3 * k + 2] * A[6 + j];
 		/* the angular velocity: R0 (2 / (1 + c . c)) (c' + c x c') */
 		mo_cross(c, dc, cxdc);
 		for (k = 0; k < 3; k++) wc[k] = 2 * (dc[k] + cxdc[k]) / (1 + cc);
-		for (k = 0; k < 3; k++) w[k] = m->R0[3 * k] * wc[0] + m->R0[3 * k + 1] * wc[1] + m->R0[3 * k + 2] * wc[2];
+		for (k = 0; k < 3; k++) w[k] = g->R0[3 * k] * wc[0] + g->R0[3 * k + 1] * wc[1] + g->R0[3 * k + 2] * wc[2];
 	}
 	return QAWS_STATUS_OK;
 }

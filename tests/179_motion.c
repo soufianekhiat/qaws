@@ -8,7 +8,11 @@
  *   - a cubic path given by its ends' values and derivatives reproduced;
  *   - along a curve: its points and derivatives; per vertex: each vertex's
  *     cubic reproduced;
- *   - a half turn refused.
+ *   - many turns: three turns about z (the ends' rotations equal, the
+ *     angular velocities 6 pi) moving along x: within 2e-3 of the uniform
+ *     spin and the segment throughout, continuous where its pieces meet; a
+ *     half turn the velocities orient (w -pi) turns their way;
+ *   - a half turn its velocities do not orient refused.
  */
 
 #include "test_common.h"
@@ -227,6 +231,51 @@ static void test_reproduction(void)
 	qaws_curve_destroy(cv);
 }
 
+static void test_turns(void)
+{
+	qaws_motion_pose s, e;
+	qaws_motion* m = NULL;
+	qaws_status st;
+	double worst = 0, jump = 0, prev[9], half = 0;
+	int i, k;
+	char msg[300];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(6 * 3.14159265358979323846);
+	e.position.x = 1;
+	s.velocity.x = e.velocity.x = 1;
+	st = qaws_motion_create_poses(&m, &s, &e, 0);
+	for (i = 0; i <= 600 && m; i++)
+	{
+		qaws_motion_state r;
+		double t = i / 600.0, a = 6 * 3.14159265358979323846 * t, c = cos(a), sn = sin(a);
+		qaws_motion_evaluate(&r, m, (qaws_scalar)t);
+		worst = fmax(worst, fabs(r.rotation[0] - c) + fabs(r.rotation[1] + sn) + fabs(r.rotation[3] - sn) + fabs(r.rotation[4] - c) + fabs(r.rotation[8] - 1) +
+			fabs(r.position.x - t));
+		if (i)
+			for (k = 0; k < 9; k++) jump = fmax(jump, fabs(r.rotation[k] - prev[k]));
+		for (k = 0; k < 9; k++) prev[k] = r.rotation[k];
+	}
+	qaws_motion_destroy(m);
+	m = NULL;
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	mt_quat(e.rotation, 0, 0, 1, 3.14159265358979323846);
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)-3.14159265358979323846;
+	if (qaws_motion_create_poses(&m, &s, &e, 0) == QAWS_STATUS_OK && m)
+	{
+		qaws_motion_state r;
+		qaws_motion_evaluate(&r, m, (qaws_scalar)0.5);
+		half = (double)r.rotation[1];   /* (a quarter turn back: R = [0 1; -1 0], its entry 1 is +1) */
+	}
+	sprintf(msg, "three turns (%d): within %.1e of the uniform spin, largest step between 600 samples %.4f; a half turn with w -pi turns that way (%.6f)", (int)st, worst, jump, half);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && worst < 2e-3 && jump < 0.04 && fabs(half - 1) < 1e-9, msg);
+	qaws_motion_destroy(m);
+}
+
 static void test_refusals(void)
 {
 	qaws_motion_pose s, e;
@@ -240,7 +289,7 @@ static void test_refusals(void)
 	a = qaws_motion_create_poses(&m, &s, &e, 0);
 	e.rotation[0] = e.rotation[1] = e.rotation[2] = e.rotation[3] = 0;
 	b = qaws_motion_create_poses(&m, &s, &e, 0);
-	sprintf(msg, "refused: a half turn (%d), a zero quaternion (%d)", (int)a, (int)b);
+	sprintf(msg, "refused: a half turn its velocities do not orient (%d), a zero quaternion (%d)", (int)a, (int)b);
 	printf("  %s\n", msg);
 	TEST_ASSERT(a == QAWS_STATUS_INVALID_ARGUMENT && b == QAWS_STATUS_INVALID_ARGUMENT && !m, msg);
 }
@@ -252,6 +301,7 @@ int test_179_motion_main(void)
 	printf("Test 179: motions\n");
 	test_poses();
 	test_reproduction();
+	test_turns();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
