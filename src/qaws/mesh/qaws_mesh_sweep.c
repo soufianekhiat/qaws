@@ -358,6 +358,105 @@ static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* 
 	return n;
 }
 
+/* walls lying in the plane of a face beside the edge that swept them (a face sliding along itself: a cube's top moved
+   sideways, a disc turned in its plane) take that face's values at the edge rather than the front face's: the surface there
+   is that face's, carried along (its leading edge as it passed, as the implicit sweep's first touch). sof, soc: per soup
+   triangle its source triangle (bit 30 a wall) and corners, sf its soup vertices (layer * nv + vertex), x the soup's
+   positions; t the mesh's nt triangles */
+static qaws_status swp_wall_sources(unsigned int* sof, unsigned int* soc, unsigned int const* sf, unsigned int snf, qaws_scalar const* x,
+	unsigned int const* t, unsigned int nt, unsigned int nv, double eps)
+{
+	unsigned int *vto = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 2, sizeof(unsigned int));
+	unsigned int *vtl = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + 1));
+	unsigned int i, j, k;
+	if (!vto || !vtl)
+	{
+		qaws_internal_free(vto);
+		qaws_internal_free(vtl);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	/* (the triangles round each vertex) */
+	for (i = 0; i < 3 * nt; i++)
+		vto[t[i] + 1]++;
+	for (i = 0; i < nv; i++)
+		vto[i + 1] += vto[i];
+	for (i = 0; i < 3 * nt; i++)
+		vtl[vto[t[i]]++] = i / 3;
+	for (i = nv; i > 0; i--)
+		vto[i] = vto[i - 1];
+	vto[0] = 0;
+	for (i = 0; i < snf; i++)
+	{
+		unsigned int f = sof[i] & 0x3FFFFFFFu, a = QAWS_MESH_NONE, b = QAWS_MESH_NONE, layer = ~0u;
+		double P[3][3], u[3], w[3], nw[3], lw;
+		if (!(sof[i] & 0x40000000u) || (sof[i] & 0x80000000u))
+			continue;
+		/* the edge that swept it: its two mesh vertices; its lowest layer */
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int v = sf[3 * (size_t)i + k] % nv, l = sf[3 * (size_t)i + k] / nv;
+			if (a == QAWS_MESH_NONE || a == v)
+				a = v;
+			else
+				b = v;
+			layer = l < layer ? l : layer;
+			for (j = 0; j < 3; j++)
+				P[k][j] = (double)x[3 * (size_t)sf[3 * (size_t)i + k] + j];
+		}
+		if (b == QAWS_MESH_NONE)
+			continue;
+		for (j = 0; j < 3; j++)
+		{
+			u[j] = P[1][j] - P[0][j];
+			w[j] = P[2][j] - P[0][j];
+		}
+		nw[0] = u[1] * w[2] - u[2] * w[1]; nw[1] = u[2] * w[0] - u[0] * w[2]; nw[2] = u[0] * w[1] - u[1] * w[0];
+		lw = sqrt(nw[0] * nw[0] + nw[1] * nw[1] + nw[2] * nw[2]);
+		if (!(lw > 0))
+			continue;
+		for (j = vto[a]; j < vto[a + 1]; j++)
+		{
+			unsigned int g = vtl[j], q, ca = 3, cb = 3;
+			double G[3][3], ng[3], lg, dot, off = 0;
+			if (g == f)
+				continue;
+			for (q = 0; q < 3; q++)
+			{
+				if (t[3 * (size_t)g + q] == a)
+					ca = q;
+				if (t[3 * (size_t)g + q] == b)
+					cb = q;
+				for (k = 0; k < 3; k++)
+					G[q][k] = (double)x[3 * ((size_t)layer * nv + t[3 * (size_t)g + q]) + k];
+			}
+			if (ca == 3 || cb == 3)
+				continue;
+			for (k = 0; k < 3; k++)
+			{
+				u[k] = G[1][k] - G[0][k];
+				w[k] = G[2][k] - G[0][k];
+			}
+			ng[0] = u[1] * w[2] - u[2] * w[1]; ng[1] = u[2] * w[0] - u[0] * w[2]; ng[2] = u[0] * w[1] - u[1] * w[0];
+			lg = sqrt(ng[0] * ng[0] + ng[1] * ng[1] + ng[2] * ng[2]);
+			if (!(lg > 0))
+				continue;
+			dot = (nw[0] * ng[0] + nw[1] * ng[1] + nw[2] * ng[2]) / (lw * lg);
+			for (q = 0; q < 3; q++)
+				off = fmax(off, fabs(((P[q][0] - G[0][0]) * ng[0] + (P[q][1] - G[0][1]) * ng[1] + (P[q][2] - G[0][2]) * ng[2]) / lg));
+			if (dot < 1 - 1e-9 || off > eps)
+				continue;
+			/* (in g's plane, facing as it does: g's values at a and b) */
+			sof[i] = g | 0x40000000u;
+			for (k = 0; k < 3; k++)
+				soc[3 * (size_t)i + k] = 3 * g + (sf[3 * (size_t)i + k] % nv == a ? ca : cb);
+			break;
+		}
+	}
+	qaws_internal_free(vto);
+	qaws_internal_free(vtl);
+	return QAWS_STATUS_OK;
+}
+
 /* a soup triangle's key: its vertices from the lowest, in turn */
 typedef struct swp_tkey
 {
@@ -2279,6 +2378,8 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 		}
 	}
 	if ((st = swp_cancel(sf, sof, soc, &snf)) != QAWS_STATUS_OK)
+		goto done;
+	if ((st = swp_wall_sources(sof, soc, sf, snf, sx, t, nt, nv, 1e-9 * diag)) != QAWS_STATUS_OK)
 		goto done;
 	{
 		qaws_mesh_3d_desc md;

@@ -102,6 +102,9 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Sweeps: a face sliding along itself (a cube's top moved sideways or turned in its plane) lost its values on the
+  sweep's top: the side faces' hulls' top walls lying in that plane carried theirs. Such walls now take the values of the
+  face whose plane they lie in, at the edge that swept them (test 181, figure 72).
 - Sweeps: a mesh without feature edges leaked a block per sweep (`swp_crease_features` returned before freeing it); found by
   the scratch arena of the test runner.
 - Booleans: a patch's two samples (just in front of and behind it) are brought within 0.4 of the first other surface

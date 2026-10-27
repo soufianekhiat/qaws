@@ -14,8 +14,8 @@
  *     quarter, implicit: each corner the colour of the face that made it,
  *     the top the gradient's colours where the top face passed, the walls
  *     its edges sweep split between their two faces' colours; the same swept
- *     by slabs to compare (its top the side faces' hulls' tops, in that
- *     plane, and the top face's last pose).
+ *     by slabs to compare (its top the same streaks: the side faces' hulls'
+ *     top walls lie in the top's plane and take its values).
  * Printed: volumes, distances, samples, times.
  */
 

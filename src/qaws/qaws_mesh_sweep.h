@@ -84,7 +84,9 @@
  *
  * The mesh's attributes are carried as qaws_mesh_3d_boolean carries them
  * (vertex ones come out per corner): each layer repeats the mesh's values, a
- * wall along its edge the front face's corners' there; directions (NORMAL,
+ * wall along its edge the front face's corners' there (a wall lying in the
+ * plane of the face across that edge, a face sliding along itself: that
+ * face's); directions (NORMAL,
  * TANGENT, VECTOR, and NORMALIZED of 3 components) turn with a rigid
  * motion's rotation, a QUATERNION is composed with it, and a NORMAL face
  * attribute on a wall is the wall's own normal. Features: the mesh's copies,

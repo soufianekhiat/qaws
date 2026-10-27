@@ -56,6 +56,10 @@
  *     lengths and the features as the plain sweep's (the collapses keep
  *     each wedge's values, the lines carrying values and the features), on
  *     far fewer faces;
+ *   - a face sliding along itself: a cube with its face's number on each face's corners, along a curve while turning a
+ *     quarter about z: every upward face of the sweep (its top, which the cube's top face sweeps in its own plane) carries
+ *     the top's number, none a side's (the side faces' hulls' top walls lie in that plane: they take the top face's values
+ *     at the edge that swept them);
  *   - edge values through the connector: two tubes joined, each tube's edges
  *     their values (a's 1 + i, b's 100 + i), the bridge's 0;
  *   - refused: one name of two elements, a NORMAL of 2 components.
@@ -1243,6 +1247,65 @@ static void test_refusals(void)
 	qaws_mesh_3d_destroy(a); qaws_mesh_3d_destroy(b);
 }
 
+static void test_sweep_top(void)
+{
+	qaws_mesh_3d *c = ac_box(-0.2, 0.2, -0.2, 0.2, -0.2, 0.2), *o = NULL;
+	qaws_motion* m = NULL;
+	qaws_motion_pose s, e;
+	qaws_sweep_desc d;
+	qaws_attribute_desc ad;
+	qaws_scalar side[36], *v = NULL;
+	qaws_mesh_element el;
+	unsigned int i, k, id, n, nf, nc, *fv = NULL, *fs = NULL, up = 0, top = 0;
+	char msg[300];
+	for (i = 0; i < 36; i++)
+		side[i] = (qaws_scalar)(i / 6);
+	memset(&ad, 0, sizeof ad);
+	ad.name = "side"; ad.element = QAWS_MESH_CORNER; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(&id, c, side, &ad);
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	e.rotation[0] = (qaws_scalar)cos(3.14159265358979323846 / 4);
+	e.rotation[3] = (qaws_scalar)sin(3.14159265358979323846 / 4);
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(3.14159265358979323846 / 2);
+	e.position.x = 2;
+	s.velocity.x = 1; s.velocity.y = 2;
+	e.velocity.x = 1; e.velocity.y = -2;
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)0.01;
+	qaws_mesh_3d_sweep(&o, NULL, c, m, &d);
+	if (o && (v = ac_get(o, "side", &el, &n)) != NULL && el == QAWS_MESH_CORNER)
+	{
+		nf = qaws_mesh_3d_get_face_count(o);
+		nc = qaws_mesh_3d_get_corner_count(o);
+		fv = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1));
+		fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+		qaws_mesh_3d_get_faces(fv, fs, o);
+		for (i = 0, k = 0; i < nf; k += fs[i++])
+		{
+			qaws_vec3 a = qaws_mesh_3d_get_vertex(o, fv[k]), b = qaws_mesh_3d_get_vertex(o, fv[k + 1]), q = qaws_mesh_3d_get_vertex(o, fv[k + 2]);
+			double u[3] = { b.x - a.x, b.y - a.y, b.z - a.z }, w[3] = { q.x - a.x, q.y - a.y, q.z - a.z }, nz, l;
+			unsigned int j, all = 1;
+			nz = u[0] * w[1] - u[1] * w[0];
+			l = sqrt(pow(u[1] * w[2] - u[2] * w[1], 2) + pow(u[2] * w[0] - u[0] * w[2], 2) + nz * nz);
+			if (!(l > 0) || nz < 0.999 * l)
+				continue;
+			up++;
+			for (j = 0; j < fs[i]; j++)
+				all &= fabs((double)v[k + j] - 1) < 1e-9;
+			top += all;
+		}
+	}
+	sprintf(msg, "a face sliding along itself: %u upward faces of the sweep, %u of them the top's number at every corner", up, top);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && up > 0 && top == up, msg);
+	free(v); free(fv); free(fs);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o);
+}
+
 int test_181_mesh_attribute_carry_main(void)
 {
 	g_pass = 0;
@@ -1258,6 +1321,7 @@ int test_181_mesh_attribute_carry_main(void)
 	test_subdivision_rules();
 	test_sweep_features();
 	test_sweep_simplify();
+	test_sweep_top();
 	test_connect_edges();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
