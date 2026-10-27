@@ -399,7 +399,8 @@ static void test_seams(void)
 	qaws_attribute_desc ad;
 	qaws_remesh_desc rd;
 	double wu = -1, lin[8] = { 0 }, lout[8] = { 0 }, wl = 0;
-	unsigned int across = 1000;
+	unsigned int across = 1000, pass;
+	qaws_mesh_reference* ref = NULL;
 	char msg[300];
 	for (i = 0; i < 8; i++)
 	{
@@ -445,8 +446,26 @@ static void test_seams(void)
 	}
 	ad.name = "e"; ad.element = QAWS_MESH_EDGE; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
 	qaws_mesh_3d_add_attribute(&id, m, e, &ad);
+	/* the remesh's own reference, then one the caller made from the mesh */
+	for (pass = 0; pass < 2; pass++)
+	{
 	memset(&rd, 0, sizeof rd);
 	rd.target_length = (qaws_scalar)0.2;
+	if (pass)
+	{
+		qaws_mesh_reference_desc rdesc;
+		memset(&rdesc, 0, sizeof rdesc);
+		rdesc.seams = 1;
+		qaws_mesh_reference_create(&ref, m, &rdesc);
+		rd.reference = ref;
+	}
+	nt = 0;
+	onfe = 0;
+	wu = -1;
+	wl = 0;
+	across = 1000;
+	memset(lout, 0, sizeof lout);
+	o = NULL;
 	if (qaws_mesh_remesh(&o, NULL, m, &rd) == QAWS_STATUS_OK && o)
 	{
 		unsigned int c[3], iu, it, ie, ne2 = qaws_mesh_3d_get_edge_count(o), *ev2 = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (ne2 + 1)), *fe;
@@ -503,13 +522,16 @@ static void test_seams(void)
 		}
 		free(fe); free(ev2); free(oe); free(ouv); free(ot);
 	}
-	sprintf(msg, "a cube's attributes remeshed: %u faces, UVs off their side's chart by %.1e, %u faces across a seam, edge values' lengths off by %.1e, %u features on the cube's edges (input %u)",
-		nt, wu, across, wl, onfe, nfe);
+	sprintf(msg, "a cube's attributes remeshed (%s): %u faces, UVs off their side's chart by %.1e, %u faces across a seam, edge values' lengths off by %.1e, %u features on the cube's edges (input %u)",
+		pass ? "the caller's reference" : "its own reference", nt, wu, across, wl, onfe, nfe);
 	printf("  %s\n", msg);
 	TEST_ASSERT(o && wu >= 0 && wu < 1e-9 && across == 0 && wl < 1e-9 && onfe >= nfe, msg);
+	qaws_mesh_3d_destroy(o);
+	qaws_mesh_reference_destroy(ref);
+	ref = NULL;
+	}
 	free(e);
 	qaws_mesh_3d_destroy(m);
-	qaws_mesh_3d_destroy(o);
 }
 
 int test_168_remesh_attributes_main(void)

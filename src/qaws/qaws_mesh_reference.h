@@ -82,6 +82,10 @@ typedef struct qaws_mesh_reference_desc
 {
 	qaws_interpolant interpolant;
 	qaws_scalar const* normals;          /* 3 per vertex; NULL: computed, split at the mesh's feature edges */
+	int seams;                          /* nonzero: the mesh's attribute seams (values jumping across an edge: corner or face
+	                                       values, nonzero edge values) are creases of the reference (its regions split there,
+	                                       computed normals too) and remembered as seams: a remesh on it keeps them as lines
+	                                       that are no features of its result (qaws_mesh_remesh's own reference does this) */
 } qaws_mesh_reference_desc;
 
 typedef struct qaws_mesh_reference qaws_mesh_reference;

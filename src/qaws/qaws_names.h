@@ -100,6 +100,7 @@
 #define mr_project_region QAWS_SFX(mr_project_region)
 #define mr_scratch_free QAWS_SFX(mr_scratch_free)
 #define mr_scratch_init QAWS_SFX(mr_scratch_init)
+#define mr_seam QAWS_SFX(mr_seam)
 #define mr_walk QAWS_SFX(mr_walk)
 #define mx_transfer QAWS_SFX(mx_transfer)
 #define qaws_arc_desc QAWS_SFX(qaws_arc_desc)

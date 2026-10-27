@@ -174,7 +174,80 @@ void qaws_mesh_reference_destroy(qaws_mesh_reference* r)
 	qaws_internal_free(r->tv); qaws_internal_free(r->tc); qaws_internal_free(r->tf); qaws_internal_free(r->ta); qaws_internal_free(r->tcrease); qaws_internal_free(r->treg);
 	qaws_internal_free(r->patch); qaws_internal_free(r->box); qaws_internal_free(r->vloc);
 	qaws_internal_grid_destroy(r->grid);
+	qaws_internal_free(r->seamk);
 	qaws_internal_free(r);
+}
+
+int mr_seam(qaws_hm const* h, unsigned int c, unsigned int o)
+{
+	unsigned int a, k;
+	for (a = 0; a < h->na; a++)
+	{
+		hm_attr const* at = &h->attr[a];
+		if (at->element == QAWS_MESH_CORNER)
+		{
+			double const *p0 = hm_attr_at(h, a, c), *p1 = hm_attr_at(h, a, hm_next(h, o)), *q0 = hm_attr_at(h, a, hm_next(h, c)), *q1 = hm_attr_at(h, a, o);
+			for (k = 0; k < at->n; k++)
+				if (fabs(p0[k] - p1[k]) > 1e-12 * (1 + fabs(p0[k])) || fabs(q0[k] - q1[k]) > 1e-12 * (1 + fabs(q0[k])))
+					return 1;
+		}
+		else if (at->element == QAWS_MESH_FACE)
+		{
+			double const *p0 = hm_attr_at(h, a, h->cf[c]), *p1 = hm_attr_at(h, a, h->cf[o]);
+			for (k = 0; k < at->n; k++)
+				if (fabs(p0[k] - p1[k]) > 1e-12 * (1 + fabs(p0[k])))
+					return 1;
+		}
+		else if (at->element == QAWS_MESH_EDGE)
+			for (k = 0; k < at->n; k++)
+				if (hm_attr_at(h, a, c)[k] != 0)
+					return 1;
+	}
+	return 0;
+}
+
+static int mr_key_cmp(void const* p, void const* q)
+{
+	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
+	return a < b ? -1 : a > b;
+}
+
+/* the copy's seams made features (creases), their edges remembered */
+static qaws_status mr_seams(qaws_mesh_reference* r)
+{
+	qaws_hm const* h = &r->mesh->hm;
+	unsigned int c, n = 0, nfe = qaws_mesh_3d_get_feature_edge_count(r->mesh);
+	unsigned int* fe;
+	qaws_status st;
+	for (c = 0; c < h->nc; c++)
+		n += h->cf[c] != HM_NONE && h->co[c] != HM_NONE && c < h->co[c] && !(h->cflag[c] & HM_FEATURE) && mr_seam(h, c, h->co[c]);
+	if (!n)
+		return QAWS_STATUS_OK;
+	fe = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nfe + n + 1));
+	r->seamk = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned long long), (size_t)n + 1));
+	if (!fe || !r->seamk)
+	{
+		qaws_internal_free(fe);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	qaws_mesh_3d_get_feature_edges(fe, r->mesh);
+	for (c = 0; c < h->nc; c++)
+	{
+		unsigned int o = h->co[c];
+		unsigned long long a, b;
+		if (h->cf[c] == HM_NONE || o == HM_NONE || o < c || (h->cflag[c] & HM_FEATURE) || !mr_seam(h, c, o))
+			continue;
+		fe[2 * (size_t)nfe] = h->cv[c];
+		fe[2 * (size_t)nfe + 1] = h->cv[o];
+		nfe++;
+		a = h->cv[c];
+		b = h->cv[o];
+		r->seamk[r->nseam++] = a < b ? (a << 32 | b) : (b << 32 | a);
+	}
+	qsort(r->seamk, r->nseam, sizeof(unsigned long long), mr_key_cmp);
+	st = qaws_mesh_3d_set_feature_edges(r->mesh, fe, nfe);
+	qaws_internal_free(fe);
+	return st;
 }
 
 qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d const* mesh, qaws_mesh_reference_desc const* desc)
@@ -203,6 +276,11 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_internal_free(r);
+		return st;
+	}
+	if (desc && desc->seams && (st = mr_seams(r)) != QAWS_STATUS_OK)
+	{
+		qaws_mesh_reference_destroy(r);
 		return st;
 	}
 	m = &r->mesh->hm;

@@ -47,8 +47,6 @@ typedef struct rmsh
 	double M[6];                    /* with a metric: the one the current operation measures in (rm_use) */
 	int ready, failed;
 	int own;                        /* the reference the input's own: its attributes' seams kept as lines */
-	unsigned long long* seamk;      /* the input's edges made lines for their seams alone (vertex pairs, sorted) */
-	unsigned int nseam;
 } rmsh;
 
 static double rm_d2(double const* a, double const* b)
@@ -1892,34 +1890,6 @@ static void rm_post(rmsh* w, qaws_remesh_desc const* desc)
 
 /* the input's edge of corner c (o its twin) a seam of its attributes: corner values differing at either end, face values
    differing, an edge value */
-static int rm_seam(qaws_hm const* h, unsigned int c, unsigned int o)
-{
-	unsigned int a, k;
-	for (a = 0; a < h->na; a++)
-	{
-		hm_attr const* at = &h->attr[a];
-		if (at->element == QAWS_MESH_CORNER)
-		{
-			double const *p0 = hm_attr_at(h, a, c), *p1 = hm_attr_at(h, a, hm_next(h, o)), *q0 = hm_attr_at(h, a, hm_next(h, c)), *q1 = hm_attr_at(h, a, o);
-			for (k = 0; k < at->n; k++)
-				if (fabs(p0[k] - p1[k]) > 1e-12 * (1 + fabs(p0[k])) || fabs(q0[k] - q1[k]) > 1e-12 * (1 + fabs(q0[k])))
-					return 1;
-		}
-		else if (at->element == QAWS_MESH_FACE)
-		{
-			double const *p0 = hm_attr_at(h, a, h->cf[c]), *p1 = hm_attr_at(h, a, h->cf[o]);
-			for (k = 0; k < at->n; k++)
-				if (fabs(p0[k] - p1[k]) > 1e-12 * (1 + fabs(p0[k])))
-					return 1;
-		}
-		else if (at->element == QAWS_MESH_EDGE)
-			for (k = 0; k < at->n; k++)
-				if (hm_attr_at(h, a, c)[k] != 0)
-					return 1;
-	}
-	return 0;
-}
-
 static int rm_key_cmp(void const* p, void const* q)
 {
 	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
@@ -1990,41 +1960,34 @@ static unsigned int mx_edge_on(qaws_mesh_reference const* r, qaws_mesh_location 
 }
 
 /* a copy of the input with its attributes' seams as features too (the remesh keeps them as lines, the reference splits its
-   regions there: values never run across them), the seam edges that were no features into w (to be none at the end) */
-static qaws_status rm_seamed(rmsh* w, qaws_mesh_3d const* in, qaws_mesh_3d** out)
+   regions there: values never run across them; the reference remembers them, to be no features at the end) */
+static qaws_status rm_seamed(qaws_mesh_3d const* in, qaws_mesh_3d** out)
 {
 	qaws_hm const* h = &in->hm;
-	unsigned int c, nfe = qaws_mesh_3d_get_feature_edge_count(in), n, cap = 0;
+	unsigned int c, nfe = qaws_mesh_3d_get_feature_edge_count(in), n;
 	unsigned int* fe;
 	qaws_status st;
 	*out = NULL;
 	for (c = 0, n = 0; c < h->nc; c++)
-		n += h->cf[c] != HM_NONE && h->co[c] != HM_NONE && c < h->co[c] && !(h->cflag[c] & HM_FEATURE) && rm_seam(h, c, h->co[c]);
+		n += h->cf[c] != HM_NONE && h->co[c] != HM_NONE && c < h->co[c] && !(h->cflag[c] & HM_FEATURE) && mr_seam(h, c, h->co[c]);
 	if (!n)
 		return QAWS_STATUS_OK;   /* (none: the input as it is) */
 	fe = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 2 * ((size_t)nfe + n + 1));
-	w->seamk = (unsigned long long*)qaws_internal_malloc(sizeof(unsigned long long) * ((size_t)n + 1));
-	if (!fe || !w->seamk)
+	if (!fe)
 	{
 		qaws_internal_free(fe);
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
-	(void)cap;
 	qaws_mesh_3d_get_feature_edges(fe, in);
 	for (c = 0; c < h->nc; c++)
 	{
 		unsigned int o = h->co[c];
-		unsigned long long a, b;
-		if (h->cf[c] == HM_NONE || o == HM_NONE || o < c || (h->cflag[c] & HM_FEATURE) || !rm_seam(h, c, o))
+		if (h->cf[c] == HM_NONE || o == HM_NONE || o < c || (h->cflag[c] & HM_FEATURE) || !mr_seam(h, c, o))
 			continue;
 		fe[2 * (size_t)nfe] = h->cv[c];
 		fe[2 * (size_t)nfe + 1] = h->cv[o];
 		nfe++;
-		a = h->cv[c];
-		b = h->cv[o];
-		w->seamk[w->nseam++] = a < b ? (a << 32 | b) : (b << 32 | a);
 	}
-	qsort(w->seamk, w->nseam, sizeof(unsigned long long), rm_key_cmp);
 	st = qaws_mesh_3d_clone(out, in);
 	if (st == QAWS_STATUS_OK)
 		st = qaws_mesh_3d_set_feature_edges(*out, fe, nfe);
@@ -2364,7 +2327,7 @@ static qaws_status rm_end(rmsh* w, int report)
 	{
 		qaws_status st = mx_transfer(m, w->r, fl);
 		qaws_internal_free(fl);
-		for (c = 0; st == QAWS_STATUS_OK && w->nseam && c < m->nc; c++)
+		for (c = 0; st == QAWS_STATUS_OK && w->r->nseam && c < m->nc; c++)
 		{
 			/* (a line kept for a seam alone: no feature of the result) */
 			unsigned int e;
@@ -2374,7 +2337,7 @@ static qaws_status rm_end(rmsh* w, int report)
 			a2 = w->r->mesh->hm.cv[e];
 			b2 = hm_to(&w->r->mesh->hm, e);
 			key = a2 < b2 ? (a2 << 32 | b2) : (b2 << 32 | a2);
-			if (bsearch(&key, w->seamk, w->nseam, sizeof key, rm_key_cmp))
+			if (bsearch(&key, w->r->seamk, w->r->nseam, sizeof key, rm_key_cmp))
 			{
 				m->cflag[c] = (unsigned char)(m->cflag[c] & ~HM_FEATURE);
 				if (m->co[c] != HM_NONE)
@@ -2412,38 +2375,41 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 	w.tol = desc->tolerance > 0 ? (double)desc->tolerance : 0;
 	if (!w.r)
 	{
-		/* (the input's own reference: from a copy whose attributes' seams are features) */
-		if ((st = rm_seamed(&w, mesh, &seamed)) != QAWS_STATUS_OK)
-		{
-			qaws_internal_free(w.seamk);
-			return st;
-		}
-		if (seamed)
-			mesh = seamed;
-		st = qaws_mesh_reference_create(&own, mesh, NULL);
+		/* (the input's own reference, its attributes' seams creases) */
+		qaws_mesh_reference_desc rdesc;
+		memset(&rdesc, 0, sizeof rdesc);
+		rdesc.seams = 1;
+		st = qaws_mesh_reference_create(&own, mesh, &rdesc);
 		if (st != QAWS_STATUS_OK)
 		{
 			qaws_mesh_3d_destroy(seamed);
-			qaws_internal_free(w.seamk);
-			return st;
+					return st;
 		}
 		w.r = own;
 		w.own = 1;
 	}
+	/* (remeshed from a copy whose attributes' seams are features: kept as lines) */
+	if ((st = rm_seamed(mesh, &seamed)) != QAWS_STATUS_OK)
+	{
+		qaws_mesh_reference_destroy(own);
+			return st;
+	}
+	if (seamed)
+		mesh = seamed;
 	if (desc->size && qaws_size_field_get_reference(desc->size) && qaws_size_field_get_reference(desc->size) != w.r)
 	{
-		qaws_mesh_reference_destroy(own); qaws_mesh_3d_destroy(seamed); qaws_internal_free(w.seamk);
+		qaws_mesh_reference_destroy(own); qaws_mesh_3d_destroy(seamed);
 		return QAWS_STATUS_INVALID_ARGUMENT;   /* (a field sampled on another reference) */
 	}
 	if (desc->metric && desc->metric->ref != w.r)
 	{
-		qaws_mesh_reference_destroy(own); qaws_mesh_3d_destroy(seamed); qaws_internal_free(w.seamk);
+		qaws_mesh_reference_destroy(own); qaws_mesh_3d_destroy(seamed);
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	}
 	w.metric = desc->metric;
 	if (!w.r->nt)
 	{
-		qaws_mesh_reference_destroy(own); qaws_mesh_3d_destroy(seamed); qaws_internal_free(w.seamk);
+		qaws_mesh_reference_destroy(own); qaws_mesh_3d_destroy(seamed);
 		return qaws_mesh_3d_clone(out_mesh, orig);
 	}
 	w.size = desc->size;
@@ -2464,7 +2430,7 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 		st = qaws_size_field_create_curvature(&w.tsize, w.r, &cd);
 		if (st != QAWS_STATUS_OK)
 		{
-			qaws_mesh_reference_destroy(own); qaws_mesh_3d_destroy(seamed); qaws_internal_free(w.seamk);
+			qaws_mesh_reference_destroy(own); qaws_mesh_3d_destroy(seamed);
 			return st;
 		}
 	}
@@ -2509,7 +2475,6 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 		st = rm_end(&w, out_report != NULL);
 	mr_scratch_free(&w.s);
 	qaws_internal_free(w.ep);
-	qaws_internal_free(w.seamk);
 	qaws_internal_free(w.chg);
 	qaws_size_field_destroy(w.tsize);
 	qaws_mesh_reference_destroy(own);

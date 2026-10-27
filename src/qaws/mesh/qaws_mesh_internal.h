@@ -75,7 +75,12 @@ struct qaws_mesh_reference
 	qaws_bp_grid* grid;
 	unsigned int* vloc;             /* per vertex: triangle * 3 + corner */
 	double extent;                  /* the mesh's size */
+	unsigned long long* seamk;      /* desc.seams: the seam edges made creases (vertex pairs, sorted) */
+	unsigned int nseam;
 };
+
+/* an attribute seam across the edge of corners c and o (twins): corner or face values differing, edge values nonzero */
+int mr_seam(qaws_hm const* h, unsigned int c, unsigned int o);
 
 /* the closest point of patch t to p: its location (a, b) and squared distance */
 double mr_closest_on_patch(qaws_mesh_reference const* r, unsigned int t, double const* p, double* out_a, double* out_b);

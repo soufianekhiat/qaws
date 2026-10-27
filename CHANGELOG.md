@@ -102,6 +102,9 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Remeshing on a caller's reference keeps attribute seams as lines too: `qaws_mesh_reference_desc.seams` makes the
+  reference's seams creases and remembers them (the remesh's own reference uses it); test 168 runs both references, the
+  same result (no face across a seam).
 - Sweeps of spins carry edge values (they came out zeros): an edge of the revolution from points of one body edge, or a
   ring a body vertex traces along one of its edges, takes that edge's values (test 180).
 - Sweeps: a face sliding along itself (a cube's top moved sideways or turned in its plane) lost its values on the
