@@ -42,8 +42,13 @@
  *            patch (cheaper to read than PN, rounder than flat: on a sphere
  *            past it by half the flat sag at an edge's middle); C0 across
  *            edges, normals interpolated linearly; a feature edge straight.
+ *   NAGATA   Nagata's patch (2005): each edge the quadratic leaving both
+ *            ends in their tangent planes, the patch the quadratic through
+ *            them (on a sphere an edge's middle on it to leading order); C0
+ *            across edges, normals interpolated linearly; a feature edge
+ *            straight.
  *
- * NAGATA, G1, SUBDIVISION and MLS are reserved for further interpolants
+ * G1, SUBDIVISION and MLS are reserved for further interpolants
  * (UNSUPPORTED_OPERATION today).
  *
  * Normals: given per vertex, or computed: the faces' normals round each

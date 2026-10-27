@@ -1,8 +1,8 @@
 /*
  * The interpolants of mesh references as cubic Bezier triangles: PN
  * (Vlachos et al. 2001, creases by their tangents), PHONG (Boubekeur and
- * Alexa 2008: quadratic, degree-elevated) and LINEAR (the flat triangle
- * degree-elevated), evaluated with their derivatives, and the curvature of a
+ * Alexa 2008) and NAGATA (Nagata 2005), quadratic and degree-elevated, and
+ * LINEAR (the flat triangle degree-elevated), evaluated with their derivatives, and the curvature of a
  * normal field.
  */
 
@@ -61,11 +61,39 @@ static void mi_edge_point(double* out, double const* Pi, double const* Pj, doubl
 
 #define MI_PHONG_ALPHA 0.75   /* Boubekeur and Alexa's shape factor: the blend of the projections against the flat triangle */
 
-/* Phong tessellation: p*(w) = (1 - a) p(w) + a sum_i w_i pi_i(p(w)), pi_i the projection on corner i's tangent plane, is the
-   quadratic Bezier triangle of corners P_i and edge points (1 - a) (P_i + P_j) / 2 + a (pi_i(P_j) + pi_j(P_i)) / 2, here
-   degree-elevated to the cubic net; an edge along a crease (tangents given) stays straight (Phong has no creases). Normals:
-   the corners' interpolated linearly (Phong shading). */
-static void mi_build_phong(mi_tri* t, double const* const* P, double const* const* N, double const* const* crease)
+/* Nagata's curvature coefficient of the edge from x0 (normal n0) to x1 (n1): the quadratic x0 + (d - c) t + c t^2 (d = x1 - x0)
+   leaves each end in its tangent plane, (d - c) . n0 = 0 and (d + c) . n1 = 0, c taken in the span of n0 and n1; parallel
+   normals (no turn to follow) give 0 */
+static void mi_nagata_c(double* c, double const* x0, double const* x1, double const* n0, double const* n1)
+{
+	double d[3], dn0 = 0, dn1 = 0, cs = 0, det, al, be;
+	int k;
+	for (k = 0; k < 3; k++)
+	{
+		d[k] = x1[k] - x0[k];
+		dn0 += d[k] * n0[k];
+		dn1 += d[k] * n1[k];
+		cs += n0[k] * n1[k];
+	}
+	det = 1 - cs * cs;
+	if (det < 1e-12)
+	{
+		c[0] = c[1] = c[2] = 0;
+		return;
+	}
+	/* (al + be cs = d . n0, al cs + be = -d . n1) */
+	al = (dn0 + cs * dn1) / det;
+	be = (-dn1 - cs * dn0) / det;
+	for (k = 0; k < 3; k++)
+		c[k] = al * n0[k] + be * n1[k];
+}
+
+/* The quadratic interpolants as quadratic Bezier triangles of corners P_i and an edge point Q_ij each, degree-elevated to the
+   cubic net. PHONG: p*(w) = (1 - a) p(w) + a sum_i w_i pi_i(p(w)), pi_i the projection on corner i's tangent plane, whose
+   edge points are (1 - a) (P_i + P_j) / 2 + a (pi_i(P_j) + pi_j(P_i)) / 2. NAGATA: the edge curve x0 + (d - c) t + c t^2
+   (mi_nagata_c), its point (P_i + P_j) / 2 - c / 2. An edge along a crease (tangents given) stays straight. Normals: the
+   corners' interpolated linearly. */
+static void mi_build_quadratic(mi_tri* t, qaws_interpolant kind, double const* const* P, double const* const* N, double const* const* crease)
 {
 	static int const near_i[6] = { 0, 1, 1, 2, 2, 0 }, edge_of[6] = { 0, 0, 1, 1, 2, 2 };
 	double Q[3][3];
@@ -79,12 +107,15 @@ static void mi_build_phong(mi_tri* t, double const* const* P, double const* cons
 			di += (P[j][k] - P[i][k]) * N[i][k];
 			dj += (P[i][k] - P[j][k]) * N[j][k];
 		}
+		double cc[3];
+		mi_nagata_c(cc, P[i], P[j], N[i], N[j]);
 		for (k = 0; k < 3; k++)
 		{
 			pij[k] = P[j][k] - di * N[i][k];
 			pji[k] = P[i][k] - dj * N[j][k];
 			Q[e][k] = crease && crease[e] ? 0.5 * (P[i][k] + P[j][k])
-			                               : (1 - MI_PHONG_ALPHA) * 0.5 * (P[i][k] + P[j][k]) + MI_PHONG_ALPHA * 0.5 * (pij[k] + pji[k]);
+			        : kind == QAWS_INTERPOLANT_NAGATA ? 0.5 * (P[i][k] + P[j][k]) - 0.5 * cc[k]
+			                                          : (1 - MI_PHONG_ALPHA) * 0.5 * (P[i][k] + P[j][k]) + MI_PHONG_ALPHA * 0.5 * (pij[k] + pji[k]);
 		}
 	}
 	for (k = 0; k < 3; k++)
@@ -161,8 +192,8 @@ static void mi_build_pn(mi_tri* t, qaws_interpolant kind, double const* const* P
 
 void mi_build(mi_tri* t, qaws_interpolant kind, double const* const* P, double const* const* N, double const* const* crease)
 {
-	if (kind == QAWS_INTERPOLANT_PHONG)
-		mi_build_phong(t, P, N, crease);
+	if (kind == QAWS_INTERPOLANT_PHONG || kind == QAWS_INTERPOLANT_NAGATA)
+		mi_build_quadratic(t, kind, P, N, crease);
 	else
 		mi_build_pn(t, kind, P, N, crease);
 }

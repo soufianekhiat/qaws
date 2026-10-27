@@ -6,7 +6,9 @@
  *   - a coarse can (8 sides) whose rims are not features: PN rounds it all;
  *   - the same can with its creases detected: rims sharp, sides round,
  *     caps flat, no cracks;
- *   - mean curvature read from the reference of a finer blob.
+ *   - mean curvature read from the reference of a finer blob;
+ *   - below, one coarse sphere (80 triangles) four ways: flat, PN, PHONG and
+ *     NAGATA, each with its farthest point off the sphere.
  */
 
 /* the reference sampled n x n per triangle: smooth shaded by its normal
@@ -149,10 +151,73 @@ static qaws_mesh_3d* ms_can(unsigned int n, double r, double h)
 	return m;
 }
 
+/* the farthest distance off the unit sphere of r sampled n x n per triangle */
+static double ms_off_sphere(qaws_mesh_reference const* r, unsigned int n)
+{
+	unsigned int nt = qaws_mesh_reference_get_triangle_count(r), t, i, j;
+	double e = 0;
+	for (t = 0; t < nt; t++)
+		for (j = 0; j <= n; j++)
+			for (i = 0; i + j <= n; i++)
+			{
+				qaws_mesh_location l;
+				qaws_scalar x[3];
+				l.patch = t;
+				l.a = (qaws_scalar)((double)i / n);
+				l.b = (qaws_scalar)((double)j / n);
+				qaws_mesh_reference_evaluate(x, NULL, NULL, r, &l, 1);
+				e = fmax(e, fabs(sqrt((double)(x[0] * x[0] + x[1] * x[1] + x[2] * x[2])) - 1));
+			}
+	return e;
+}
+
+/* the interpolants side by side on a coarse unit sphere */
+static void ms_reference_row(er_canvas* c, int y0)
+{
+	static double const curve[3] = { 70, 60, 50 }, tint[3] = { 178, 192, 212 };
+	static qaws_interpolant const kinds[4] = { QAWS_INTERPOLANT_LINEAR, QAWS_INTERPOLANT_PN, QAWS_INTERPOLANT_PHONG, QAWS_INTERPOLANT_NAGATA };
+	static char const* const names[4] = { "flat", "PN (Vlachos)", "PHONG (Boubekeur, Alexa)", "NAGATA" };
+	qaws_mesh_3d* s = ms_blob(1);
+	unsigned int i, n;
+	double* p;
+	qaws_scalar* ps;
+	char sub[200];
+	if (!s)
+		return;
+	n = qaws_mesh_3d_get_vertex_count(s);
+	p = ms_positions(s);
+	ps = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	for (i = 0; i < n; i++)
+	{
+		double l = sqrt(p[3 * i] * p[3 * i] + p[3 * i + 1] * p[3 * i + 1] + p[3 * i + 2] * p[3 * i + 2]);
+		ps[3 * i] = (qaws_scalar)(p[3 * i] / l);
+		ps[3 * i + 1] = (qaws_scalar)(p[3 * i + 1] / l);
+		ps[3 * i + 2] = (qaws_scalar)(p[3 * i + 2] / l);
+	}
+	qaws_mesh_3d_set_positions(s, ps);
+	for (i = 0; i < 4; i++)
+	{
+		qaws_mesh_reference* r = NULL;
+		qaws_mesh_reference_desc d;
+		memset(&d, 0, sizeof d);
+		d.interpolant = kinds[i];
+		if (qaws_mesh_reference_create(&r, s, &d) != QAWS_STATUS_OK)
+			continue;
+		sprintf(sub, "%u triangles: %.4f off the sphere at most", qaws_mesh_3d_get_face_count(s), ms_off_sphere(r, 12));
+		ms_panel(c, 687 * (int)i, y0, 687, 640, s, 0.6, 0.5, names[i], sub);
+		ms_draw_reference(c, r, 12, tint, 0, 0, 0, curve, 1.4);
+		printf("  sphere %s: %s\n", names[i], sub);
+		qaws_mesh_reference_destroy(r);
+	}
+	free(p);
+	free(ps);
+	qaws_mesh_3d_destroy(s);
+}
+
 static void demo_reference(void)
 {
 	static double const wire[3] = { 40, 45, 60 }, tint[3] = { 178, 192, 212 }, warm[3] = { 226, 200, 160 }, curve[3] = { 70, 60, 50 };
-	er_canvas* c = er_create(2750, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(2750, 1280, 3, 252, 252, 250);
 	qaws_mesh_3d *blob = ms_blob(1), *fine = ms_blob(3), *can = ms_can(8, 1, 1.6), *can2 = NULL;
 	qaws_mesh_reference *rb = NULL, *rc = NULL, *rc2 = NULL, *rl = NULL, *rf = NULL;
 	qaws_mesh_reference_desc d;
@@ -203,6 +268,7 @@ static void demo_reference(void)
 		ms_panel(c, 2200, 0, 550, 640, fine, 0.6, 0.5, "mean curvature", sub);
 		ms_draw_reference(c, rf, 4, NULL, 1, klo, khi, NULL, 0);
 	}
+	ms_reference_row(c, 640);
 	er_save(c, "showcase/mesh2_reference.png");
 	printf("mesh2_reference.png: blob %u triangles, can %u triangles, %u creases; mean curvature %.3f to %.3f\n", qaws_mesh_3d_get_face_count(blob),
 		qaws_mesh_3d_get_face_count(can), qaws_mesh_3d_get_feature_edge_count(can2), klo, khi);
