@@ -15,7 +15,9 @@
  *     vertex, on the torus exactly); with a chord tolerance, every cell's
  *     centre within it of its corners' mean; the box shell in quads, its
  *     faces' grids meeting (closed, genus 0, the 8 corners its only irregular
- *     vertices); the patch in triangles;
+ *     vertices); the patch in triangles; the patch to a chord of 0.002, its
+ *     lines placed by need: few triangles, every one's centre within the
+ *     chord of the patch;
  *   - PARAMETRIC (triangles meshed in (u, v) in the surface's metric): the
  *     torus and the box shell closed, every vertex on its face exactly, the
  *     edges near the target in space, angles fair; the patch to a chord
@@ -468,6 +470,35 @@ static void test_structured(void)
 	printf("  %s\n", msg);
 	TEST_ASSERT(m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.q.irregular == 8 && t.top.closed && t.top.genus == 0
 		&& err < TEST_BOUND(1e-9, 32) && t.q.max_edge <= 0.25 + 1e-9, msg);
+	if (m)
+		tg_free(&t);
+	qaws_mesh_3d_destroy(m);
+	/* the patch to a chord of 0.002: lines by need */
+	m = tg_structured(patch, NULL, QAWS_ELEMENTS_TRIANGLES, 0, 0.002, &t);
+	{
+		double worst = 0;
+		unsigned int c0 = 0, z;
+		for (i = 0; m && i < t.nf; c0 += t.fs[i], i++)
+		{
+			double u = 0, v = 0, c[3] = { 0, 0, 0 }, dd = 0;
+			qaws_surface_eval_result e;
+			for (z = 0; z < 3; z++)
+			{
+				unsigned int q = t.fv[c0 + z];
+				u += (double)t.foot[q].a / 3;
+				v += (double)t.foot[q].b / 3;
+				c[0] += t.x[3 * q] / 3; c[1] += t.x[3 * q + 1] / 3; c[2] += t.x[3 * q + 2] / 3;
+			}
+			memset(&e, 0, sizeof e);
+			qaws_surface_evaluate(&e, patch, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION);
+			dd = ((double)e.position.x - c[0]) * ((double)e.position.x - c[0]) + ((double)e.position.y - c[1]) * ((double)e.position.y - c[1])
+				+ ((double)e.position.z - c[2]) * ((double)e.position.z - c[2]);
+			worst = fmax(worst, sqrt(dd));
+		}
+		sprintf(msg, "STRUCTURED patch to a chord of 0.002: %u triangles, the centres off the patch by %.4f at most", t.nf, worst);
+		printf("  %s\n", msg);
+		TEST_ASSERT(m && t.q.triangles == t.nf && t.nf < 8000 && worst <= 0.002, msg);
+	}
 	if (m)
 		tg_free(&t);
 	qaws_mesh_3d_destroy(m);

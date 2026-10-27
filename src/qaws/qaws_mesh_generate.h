@@ -33,10 +33,13 @@
  *           equal lengths in space (so a shared edge is split alike from
  *           both faces), the nodes inside blending opposite sides' (u, v);
  *           the counts made the same across shared edges and opposite sides,
- *           each its sides' longest length over the target; with chord or
- *           angle tolerances (no target) the counts doubled, per direction,
- *           until every cell's sides and centre meet them (min_length
- *           bounding it): uniform, so the worst cell sets the spacing.
+ *           each its sides' longest length over the target. With chord or
+ *           angle tolerances (no target): one surface's iso-lines placed by
+ *           need (each u-line where the integral of the largest |S_u| over
+ *           the size along it, the size from the larger principal curvature,
+ *           reaches the next whole number; the v-lines alike); a shell's
+ *           counts doubled, per direction, until every cell's sides and
+ *           centre meet them (uniform: the worst cell sets the spacing).
  *           Quads (QUADS and QUAD_DOMINANT; a cell at a pole a triangle) or
  *           triangles by the shorter diagonal; nodes welded where faces,
  *           seams and poles meet; every vertex exactly on its face, edges

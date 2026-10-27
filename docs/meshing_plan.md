@@ -340,7 +340,8 @@ cheapest and most reused first:
    triangles off the lattice steps (votes, each directed edge once, small holes fanned; line clusters from both sides
    merged, edges skipping a line cluster or crossing a crease dropped), 3 LOCAL passes to finish.
 3. **Generation:** STRUCTURED done 2026-10-27 (mg_structured: grids per untrimmed face, sides by arc length, counts by
-   classes across shared edges, per-direction doubling to the tolerances; test 126, figure 78); PARAMETRIC done 2026-10-27 (mg_parametric: sides
+   classes across shared edges, per-direction doubling to the tolerances; one surface's lines placed by need since
+   2026-10-28; test 126, figure 78); PARAMETRIC done 2026-10-27 (mg_parametric: sides
    by their own curvature, a fan start remeshed by LOCAL in (u, v) with the first fundamental form as a metric sampled
    on a 64 x 64 reference grid, boundary pinned; figure 78 second row); RESTRICTED_DELAUNAY done 2026-10-27 (mg_delaunay: Lawson
    flips, Chew/Ruppert circumcentre insertion snapped on the faces, encroached feature edges split on their curves; 30

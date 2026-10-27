@@ -1,8 +1,8 @@
 /*
  * Figure 78: the generation methods beside REMESH.
  *   STRUCTURED, iso-parametric grids: the wavy patch in quads, the same to a
- *   chord tolerance (the grid's counts doubled until every cell's centre is
- *   within it), the NURBS torus (no irregular vertex), the box shell (each
+ *   chord tolerance (its iso-lines placed by need: each where the curvature
+ *   across it asks), the NURBS torus (no irregular vertex), the box shell (each
  *   face a grid, the counts matched across its edges).
  *   PARAMETRIC, below: each face's grid remeshed in (u, v) in the surface's
  *   metric (its first fundamental form over the size squared), lifted: the
@@ -53,9 +53,9 @@ static void demo_generate_methods(void)
 		printf("  structured patch: %u quads, edges %.3f..%.3f\n", rep.quality.quads, (double)rep.quality.min_edge, (double)rep.quality.max_edge);
 	}
 	qaws_mesh_3d_destroy(g);
-	if ((g = ms_gm_make(wavy, NULL, QAWS_GENERATE_STRUCTURED, QAWS_ELEMENTS_TRIANGLES, 0, 0.01, &rep)) != NULL)
+	if ((g = ms_gm_make(wavy, NULL, QAWS_GENERATE_STRUCTURED, QAWS_ELEMENTS_TRIANGLES, 0, 0.003, &rep)) != NULL)
 	{
-		sprintf(sub, "chord 0.01: %u triangles", qaws_mesh_3d_get_face_count(g));
+		sprintf(sub, "chord 0.003: %u triangles", qaws_mesh_3d_get_face_count(g));
 		ms_panel(c, 550, 0, 550, 640, g, 0.6, 0.65, "to a chord tolerance", sub);
 		ms_draw(c, g, gold, NULL, 1, wire, 0.7);
 		printf("  structured patch by chord: %u triangles, edges %.3f..%.3f\n", qaws_mesh_3d_get_face_count(g), (double)rep.quality.min_edge,

@@ -1515,6 +1515,84 @@ done:
 	return st;
 }
 
+/* the size the tolerances ask at (u, v): the chord's 0.85 sqrt(8 chord / k) and the angle's angle / k at the larger principal
+   curvature k, within [min_length (a thousandth of L), L] */
+static double mg_size_at(qaws_surface const* s, double u, double v, qaws_generate_desc const* desc, double L, double* su, double* sv)
+{
+	qaws_surface_eval_result e;
+	double du[3], dv[3], n[3], uu[3], uw[3], ww[3], E, F, G, l2, m2, n2, det, H, K, km, hh = L;
+	memset(&e, 0, sizeof e);
+	qaws_surface_evaluate(&e, s, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL
+		| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
+	mg_v3(e.du, du); mg_v3(e.dv, dv); mg_v3(e.normal, n); mg_v3(e.duu, uu); mg_v3(e.duv, uw); mg_v3(e.dvv, ww);
+	E = mg_dot(du, du); F = mg_dot(du, dv); G = mg_dot(dv, dv);
+	*su = sqrt(E);
+	*sv = sqrt(G);
+	l2 = mg_dot(uu, n); m2 = mg_dot(uw, n); n2 = mg_dot(ww, n);
+	det = E * G - F * F;
+	H = det > 0 ? (l2 * G + n2 * E - 2 * m2 * F) / (2 * det) : 0;
+	K = det > 0 ? (l2 * n2 - m2 * m2) / det : 0;
+	km = fabs(H) + sqrt(fmax(0, H * H - K));
+	if (km > 0 && desc->chord_tolerance > 0)
+		hh = fmin(hh, 0.85 * sqrt(8 * (double)desc->chord_tolerance / km));   /* (0.85: a triangle's centre sags past its edges' middles) */
+	if (km > 0 && desc->angle_tolerance > 0)
+		hh = fmin(hh, (double)desc->angle_tolerance / km);
+	return fmax(hh, desc->min_length > 0 ? (double)desc->min_length : 1e-3 * L);
+}
+
+/* STRUCTURED on one surface with tolerances: its iso-lines placed by need, each u-line where the integral of the largest
+   |S_u| / size along it reaches the next whole number (64 x 64 samples), the v-lines alike; out: the lines' parameters
+   (n + 1 each, malloc'ed) */
+static int mg_adaptive_lines(qaws_surface const* s, double const* D, qaws_generate_desc const* desc, double L, double** ou, unsigned int* nu,
+	double** ov, unsigned int* nw)
+{
+	enum { M = 64 };
+	double du[M + 1], dv[M + 1], cu[M + 1], cv[M + 1];
+	unsigned int i, j, k;
+	for (i = 0; i <= M; i++)
+		du[i] = dv[i] = 0;
+	for (i = 0; i <= M; i++)
+		for (j = 0; j <= M; j++)
+		{
+			double su, sv, hh = mg_size_at(s, D[0] + (D[1] - D[0]) * i / M, D[2] + (D[3] - D[2]) * j / M, desc, L, &su, &sv);
+			du[i] = fmax(du[i], su * (D[1] - D[0]) / hh);
+			dv[j] = fmax(dv[j], sv * (D[3] - D[2]) / hh);
+		}
+	cu[0] = cv[0] = 0;
+	for (i = 1; i <= M; i++)
+	{
+		cu[i] = cu[i - 1] + 0.5 * (du[i - 1] + du[i]) / M;
+		cv[i] = cv[i - 1] + 0.5 * (dv[i - 1] + dv[i]) / M;
+	}
+	for (k = 0; k < 2; k++)
+	{
+		double const* c = k ? cv : cu;
+		unsigned int n = (unsigned int)fmin(4096, fmax(1, ceil(c[M] - 1e-9))), q, z = 0;
+		double* out = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)n + 1));
+		if (!out)
+			return 0;
+		for (q = 0; q <= n; q++)
+		{
+			double target = c[M] * q / n, t;
+			while (z < M && c[z + 1] < target)
+				z++;
+			t = q == 0 ? 0 : q == n ? 1 : (z + (c[z + 1] > c[z] ? (target - c[z]) / (c[z + 1] - c[z]) : 0)) / M;
+			out[q] = k ? D[2] + (D[3] - D[2]) * t : D[0] + (D[1] - D[0]) * t;
+		}
+		if (k)
+		{
+			*ov = out;
+			*nw = n;
+		}
+		else
+		{
+			*ou = out;
+			*nu = n;
+		}
+	}
+	return 1;
+}
+
 /* STRUCTURED: per face an iso-parametric grid, its counts made the same across shared sides and opposite sides (classes of
    face directions joined), each class's count its sides' longest length over L; with tolerances (no target) the classes
    of faces whose cells miss them (the surface at a cell's centre off its corners' mean by more than the chord tolerance,
@@ -1526,6 +1604,7 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 {
 	unsigned int *uf = NULL, *cnt = NULL, f, k, round, *fv = NULL, *fs = NULL, *map = NULL, *slot = NULL, nv = 0, nface = 0, nc = 0, mask;
 	unsigned int *fface = NULL, total = 0, maxn = 0;
+	double *alu = NULL, *alv = NULL;
 	double *dom = NULL, *len = NULL, *x = NULL, *uvbuf = NULL, *par = NULL, ext = 0, cell, lo[3] = { 1e300, 1e300, 1e300 }, hi[3] = { -1e300, -1e300, -1e300 };
 	qaws_mesh_location* foot = NULL;
 	int adaptive = desc->target_length == 0 && (desc->chord_tolerance > 0 || desc->angle_tolerance > 0);
@@ -1579,7 +1658,14 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 			unsigned int r = mg_root(uf, 2 * f + (k & 1)), n = (unsigned int)fmin(4096, fmax(1, ceil(len[4 * (size_t)f + k] / L - 1e-9)));
 			cnt[r] = n > cnt[r] ? n : cnt[r];
 		}
-	/* tolerances: classes of faces missing them doubled */
+	/* one surface with tolerances: its lines placed by need (mg_adaptive_lines) */
+	if (adaptive && !src->shell && nf == 1)
+	{
+		if (!mg_adaptive_lines(mg_face(src, 0), dom, desc, L, &alu, &cnt[mg_root(uf, 0)], &alv, &cnt[mg_root(uf, 1)]))
+			goto done;
+		adaptive = 0;
+	}
+	/* tolerances (a shell): classes of faces missing them doubled */
 	for (round = 0; adaptive && round < 8; round++)
 	{
 		unsigned int grow = 0;
@@ -1706,6 +1792,13 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 		if (!uv)
 			goto done;
 		mg_grid_uv(s, dom + 4 * (size_t)f, nu, nw, par, par + nu + 1, par + 2 * (nu + 1), par + 2 * (nu + 1) + nw + 1, uv);
+		if (alu)
+			for (j = 0; j <= nw; j++)
+				for (i = 0; i <= nu; i++)
+				{
+					uv[2 * (i + (size_t)(nu + 1) * j)] = alu[i];
+					uv[2 * (i + (size_t)(nu + 1) * j) + 1] = alv[j];
+				}
 		for (j = 0; j <= nw; j++)
 			for (i = 0; i <= nu; i++)
 			{
@@ -1764,7 +1857,7 @@ done:
 	qaws_mesh_3d_destroy(out);
 	qaws_internal_free(uf); qaws_internal_free(cnt); qaws_internal_free(dom); qaws_internal_free(len); qaws_internal_free(x); qaws_internal_free(foot);
 	qaws_internal_free(map); qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(fface); qaws_internal_free(par); qaws_internal_free(uvbuf);
-	qaws_internal_free(slot);
+	qaws_internal_free(slot); qaws_internal_free(alu); qaws_internal_free(alv);
 	return st;
 }
 
