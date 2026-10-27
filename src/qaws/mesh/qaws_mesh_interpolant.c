@@ -2,12 +2,14 @@
  * The interpolants of mesh references as cubic Bezier triangles: PN
  * (Vlachos et al. 2001, creases by their tangents), PHONG (Boubekeur and
  * Alexa 2008) and NAGATA (Nagata 2005), quadratic and degree-elevated,
- * LINEAR (the flat triangle degree-elevated) and G1 (Walton and Meek 1996:
- * PN's boundary curves, a quartic Gregory interior), evaluated with their
+ * LINEAR (the flat triangle degree-elevated), G1 (Walton and Meek 1996:
+ * PN's boundary curves, a quartic Gregory interior) and SUBDIVISION (the
+ * Loop limit surface, creases by Hoppe et al.'s rules), evaluated with their
  * derivatives, and the curvature of a normal field.
  */
 
 #include "qaws_mesh_internal.h"
+#include "../internal/qaws_internal_memory.h"
 #include <math.h>
 #include <string.h>
 
@@ -284,10 +286,14 @@ static void mi_build_g1(mi_tri* t, double const* const* P, double const* const* 
 	t->gregory = 1;
 }
 
+static void mi_build_loop(mi_tri* t);
+
 void mi_build(mi_tri* t, qaws_interpolant kind, double const* const* P, double const* const* N, double const* const* crease)
 {
 	t->gregory = 0;
-	if (kind == QAWS_INTERPOLANT_PHONG || kind == QAWS_INTERPOLANT_NAGATA)
+	if (kind == QAWS_INTERPOLANT_SUBDIVISION)
+		mi_build_loop(t);
+	else if (kind == QAWS_INTERPOLANT_PHONG || kind == QAWS_INTERPOLANT_NAGATA)
 		mi_build_quadratic(t, kind, P, N, crease);
 	else if (kind == QAWS_INTERPOLANT_G1)
 		mi_build_g1(t, P, N, crease);
@@ -323,6 +329,8 @@ static void mi_bern_derivatives(double* w, double const* bb, int i, int j, int q
 static int const mi_e4[15][3] = { { 4, 0, 0 }, { 0, 4, 0 }, { 0, 0, 4 }, { 3, 1, 0 }, { 2, 2, 0 }, { 1, 3, 0 }, { 0, 3, 1 }, { 0, 2, 2 },
 	{ 0, 1, 3 }, { 1, 0, 3 }, { 2, 0, 2 }, { 3, 0, 1 }, { 2, 1, 1 }, { 1, 2, 1 }, { 1, 1, 2 } };
 static double const mi_c4[15] = { 1, 1, 1, 4, 6, 4, 4, 6, 4, 4, 6, 4, 12, 12, 12 };
+
+static void mi_surface_normal(double v[6][3], double* n, double* na, double* nb);
 
 /* the quartic Gregory triangle (mi_build_g1): an interior point near corner v is (u G_2v + w G_2v+1) / (u + w), u = b_(v+1),
    w = b_(v+2) (each candidate alone on its edge), differentiated with it; the normal the surface's, xa x xb */
@@ -385,6 +393,13 @@ static void mi_eval_gregory(mi_tri const* t, double a, double b, double* x, doub
 		if (xab) xab[k] = v[4][k];
 		if (xbb) xbb[k] = v[5][k];
 	}
+	mi_surface_normal(v, n, na, nb);
+}
+
+/* the unit normal xa x xb and its derivatives from v = (x, xa, xb, xaa, xab, xbb); outputs may be NULL */
+static void mi_surface_normal(double v[6][3], double* n, double* na, double* nb)
+{
+	int k;
 	if (n || na || nb)
 	{
 		double m[3], ma[3], mb[3], p1[3], p2[3], u[3], len, ua, ub;
@@ -412,11 +427,499 @@ static void mi_eval_gregory(mi_tri const* t, double a, double b, double* x, doub
 	}
 }
 
+/* ---- SUBDIVISION: the Loop limit surface ----------------------------------
+   A triangle whose corners are regular (valence 6, no crease edge at them) is a quartic box spline over its 12 neighbours
+   (Stam 1998: mi_box, monomials u^i v^j w^k times 12, in mi_e4's order). Elsewhere the neighbourhood is subdivided, only the
+   child holding the point kept with the triangles touching its corners, until that child is regular; at an extraordinary
+   vertex or a crease the limit points of a child 2^-52 small, interpolated. Rules: Loop's smooth masks (also at a dart, one
+   crease edge), the B-spline's on a crease or the border (edge midpoint, vertex 1/8 3/4 1/8, limit 1/6 4/6 1/6), a corner
+   (three or more crease edges, a feature corner on one, a vertex of one face) fixed (Hoppe et al. 1994): those of
+   qaws_mesh_3d_subdivide. */
+
+static int const mi_box[12][15] = { { 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0 },
+	{ 1, 1, 0, 6, 12, 6, 2, 0, 0, 0, 0, 2, 6, 6, 0 }, { 6, 1, 1, 24, 24, 8, 6, 12, 6, 8, 24, 24, 60, 36, 36 },
+	{ 1, 0, 1, 2, 0, 0, 0, 0, 2, 6, 12, 6, 6, 0, 6 }, { 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+	{ 1, 6, 1, 8, 24, 24, 24, 24, 8, 6, 12, 6, 36, 60, 36 }, { 1, 1, 6, 6, 12, 6, 8, 24, 24, 24, 24, 8, 36, 36, 60 },
+	{ 0, 0, 1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0 }, { 0, 1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0 },
+	{ 0, 1, 1, 0, 0, 2, 6, 12, 6, 2, 0, 0, 0, 6, 6 }, { 0, 0, 1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0 } };
+
+typedef struct ml_net
+{
+	int nv, nt, nc;
+	double x[MI_LOOP_MAX][3];
+	int t[MI_LOOP_MAX][3];
+	int c[MI_LOOP_MAX][2];
+	int kp[MI_LOOP_MAX], kq[MI_LOOP_MAX];   /* (while subdividing: each vertex's parent key, a vertex (p, p) or an edge (p < q)) */
+	int fx[MI_LOOP_MAX];                    /* 1 a feature corner, 2 in one face only (a vertex's children keep them) */
+} ml_net;
+
+static int ml_crease(ml_net const* n, int a, int b)
+{
+	int i;
+	for (i = 0; i < n->nc; i++)
+		if ((n->c[i][0] == a && n->c[i][1] == b) || (n->c[i][0] == b && n->c[i][1] == a))
+			return 1;
+	return 0;
+}
+
+/* v's neighbours (nb, nn), the triangles round it, its crease neighbours (cr, ncr) */
+static void ml_star(ml_net const* n, int v, int* nb, int* nn, int* ntri, int* cr, int* ncr)
+{
+	int i, k, q;
+	*nn = *ntri = *ncr = 0;
+	for (i = 0; i < n->nt; i++)
+		if (n->t[i][0] == v || n->t[i][1] == v || n->t[i][2] == v)
+		{
+			(*ntri)++;
+			for (k = 0; k < 3; k++)
+			{
+				int w = n->t[i][k];
+				if (w == v)
+					continue;
+				for (q = 0; q < *nn && nb[q] != w; q++)
+					;
+				if (q == *nn && *nn < MI_LOOP_MAX)
+					nb[(*nn)++] = w;
+			}
+		}
+	for (i = 0; i < n->nc; i++)
+		if ((n->c[i][0] == v || n->c[i][1] == v) && *ncr < MI_LOOP_MAX)
+			cr[(*ncr)++] = n->c[i][0] == v ? n->c[i][1] : n->c[i][0];
+}
+
+/* v's next position (lim 0) or its limit point (lim 1) */
+static void ml_vertex(ml_net const* n, int v, int lim, double* out)
+{
+	int nb[MI_LOOP_MAX], cr[MI_LOOP_MAX], nn, ntri, ncr, i, k;
+	ml_star(n, v, nb, &nn, &ntri, cr, &ncr);
+	if (ncr >= 3 || (n->fx[v] & 2) || ((n->fx[v] & 1) && ncr >= 1))
+		for (k = 0; k < 3; k++)
+			out[k] = n->x[v][k];
+	else if (ncr == 2)
+		for (k = 0; k < 3; k++)
+			out[k] = lim ? (n->x[cr[0]][k] + 4 * n->x[v][k] + n->x[cr[1]][k]) / 6 : 0.125 * (n->x[cr[0]][k] + n->x[cr[1]][k]) + 0.75 * n->x[v][k];
+	else
+	{
+		double c = 0.375 + 0.25 * cos(2 * 3.14159265358979323846 / nn), be = (0.625 - c * c) / nn, w = lim ? 1 / (0.375 / be + nn) : be;
+		for (k = 0; k < 3; k++)
+		{
+			double s = 0;
+			for (i = 0; i < nn; i++)
+				s += n->x[nb[i]][k];
+			out[k] = (1 - nn * w) * n->x[v][k] + w * s;
+		}
+	}
+}
+
+/* the edge (a, b)'s new point: a crease's midpoint, else 3/8 3/8 and 1/8 for each opposite vertex */
+static void ml_edge(ml_net const* n, int a, int b, double* out)
+{
+	int o[2], no = 0, i, k;
+	if (!ml_crease(n, a, b))
+		for (i = 0; i < n->nt && no < 2; i++)
+		{
+			int const* t = n->t[i];
+			if ((t[0] == a || t[1] == a || t[2] == a) && (t[0] == b || t[1] == b || t[2] == b))
+				o[no++] = t[0] != a && t[0] != b ? t[0] : t[1] != a && t[1] != b ? t[1] : t[2];
+		}
+	for (k = 0; k < 3; k++)
+		out[k] = no == 2 ? 0.375 * (n->x[a][k] + n->x[b][k]) + 0.125 * (n->x[o[0]][k] + n->x[o[1]][k]) : 0.5 * (n->x[a][k] + n->x[b][k]);
+}
+
+/* the third vertex of a triangle holding a and b but not c, or -1 */
+static int ml_opp(ml_net const* n, int a, int b, int c)
+{
+	int i;
+	for (i = 0; i < n->nt; i++)
+	{
+		int const* t = n->t[i];
+		if ((t[0] == a || t[1] == a || t[2] == a) && (t[0] == b || t[1] == b || t[2] == b) && t[0] != c && t[1] != c && t[2] != c)
+			return t[0] != a && t[0] != b ? t[0] : t[1] != a && t[1] != b ? t[1] : t[2];
+	}
+	return -1;
+}
+
+/* the key (p, q)'s vertex in m, added (its position from n) when new; -1 when full */
+static int ml_key(ml_net* m, ml_net const* n, int p, int q)
+{
+	int i;
+	if (p > q)
+	{
+		i = p; p = q; q = i;
+	}
+	for (i = 0; i < m->nv; i++)
+		if (m->kp[i] == p && m->kq[i] == q)
+			return i;
+	if (m->nv == MI_LOOP_MAX)
+		return -1;
+	m->kp[m->nv] = p;
+	m->kq[m->nv] = q;
+	m->fx[m->nv] = p == q ? n->fx[p] : 0;
+	if (p == q)
+		ml_vertex(n, p, 0, m->x[m->nv]);
+	else
+		ml_edge(n, p, q, m->x[m->nv]);
+	return m->nv++;
+}
+
+/* a smooth vertex's limit normal from Loop's tangent masks, sum cos (2 pi i / N) p_i and sum sin (2 pi i / N) p_i round its
+   ring; 0 for a vertex on a crease, the border or a corner */
+static int ml_vertex_normal(ml_net const* n, int v, double* nrm)
+{
+	int nb[MI_LOOP_MAX], cr[MI_LOOP_MAX], ring[MI_LOOP_MAX], nn, ntri, ncr, i, k, prev, w;
+	double t1[3] = { 0, 0, 0 }, t2[3] = { 0, 0, 0 };
+	ml_star(n, v, nb, &nn, &ntri, cr, &ncr);
+	if (ncr || n->fx[v] || ntri != nn || nn < 3)
+		return 0;
+	/* (the ring in order: from one neighbour across the triangles round v) */
+	prev = -1;
+	w = nb[0];
+	for (i = 0; i < nn; i++)
+	{
+		ring[i] = w;
+		k = ml_opp(n, v, w, prev < 0 ? -2 : prev);
+		if (prev < 0)
+		{
+			/* (the first step: either way round) */
+			int j;
+			for (j = 0; j < n->nt; j++)
+			{
+				int const* t = n->t[j];
+				int at = t[0] == v ? 0 : t[1] == v ? 1 : t[2] == v ? 2 : -1;
+				if (at >= 0 && t[(at + 1) % 3] == w)
+				{
+					k = t[(at + 2) % 3];
+					break;
+				}
+			}
+		}
+		prev = w;
+		w = k;
+		if (w < 0)
+			return 0;
+	}
+	for (i = 0; i < nn; i++)
+		for (k = 0; k < 3; k++)
+		{
+			t1[k] += cos(2 * 3.14159265358979323846 * i / nn) * n->x[ring[i]][k];
+			t2[k] += sin(2 * 3.14159265358979323846 * i / nn) * n->x[ring[i]][k];
+		}
+	mi_cross(nrm, t1, t2);
+	return mi_unit(nrm) > 0;
+}
+
+/* the limit point at barycentrics u of n's triangle cur and, regular, its derivatives in (a, b) (J: u's derivatives in them);
+   0 when the derivatives are not known (at an extraordinary vertex or a crease), 2 when then the normal is (nrm: at a smooth
+   extraordinary vertex) */
+static int ml_point(ml_net* n, ml_net* m, int* cur, double* u, double J[3][2], double v[6][3], double* nrm)
+{
+	int depth, k, l;
+	memset(v, 0, sizeof(double) * 18);
+	for (depth = 0;; depth++)
+	{
+		int nb[MI_LOOP_MAX], cr[MI_LOOP_MAX], nn, ntri, ncr, reg = 1, i, j, ch, key[3][2], id[12];
+		double u2[3], J2[3][2];
+		ml_net* s;
+		for (i = 0; i < 3 && reg; i++)
+		{
+			ml_star(n, cur[i], nb, &nn, &ntri, cr, &ncr);
+			reg = ncr == 0 && nn == 6 && ntri == 6;
+		}
+		if (reg)
+		{
+			/* the box spline: 4, 7, 8 the corners (u, v, w), the others across the edges */
+			id[3] = cur[0]; id[6] = cur[1]; id[7] = cur[2];
+			id[2] = ml_opp(n, cur[0], cur[1], cur[2]);
+			id[4] = ml_opp(n, cur[0], cur[2], cur[1]);
+			id[10] = ml_opp(n, cur[1], cur[2], cur[0]);
+			id[0] = id[2] < 0 ? -1 : ml_opp(n, cur[0], id[2], cur[1]);
+			id[1] = id[4] < 0 ? -1 : ml_opp(n, cur[0], id[4], cur[2]);
+			id[5] = id[2] < 0 ? -1 : ml_opp(n, cur[1], id[2], cur[0]);
+			id[9] = id[10] < 0 ? -1 : ml_opp(n, cur[1], id[10], cur[2]);
+			id[8] = id[4] < 0 ? -1 : ml_opp(n, cur[2], id[4], cur[0]);
+			id[11] = id[10] < 0 ? -1 : ml_opp(n, cur[2], id[10], cur[1]);
+			for (i = 0; i < 12 && reg; i++)
+				reg = id[i] >= 0;
+		}
+		if (reg)
+		{
+			double loc[6][3], aa = J[1][0], ab = J[1][1], ba = J[2][0], bb2 = J[2][1];
+			memset(loc, 0, sizeof loc);
+			for (l = 0; l < 15; l++)
+			{
+				double w[6];
+				mi_bern_derivatives(w, u, mi_e4[l][0], mi_e4[l][1], mi_e4[l][2]);
+				for (i = 0; i < 12; i++)
+					if (mi_box[i][l])
+						for (j = 0; j < 6; j++)
+							for (k = 0; k < 3; k++)
+								loc[j][k] += mi_box[i][l] / 12.0 * w[j] * n->x[id[i]][k];
+			}
+			/* (local (al, be) = (u1, u2), linear in (a, b)) */
+			for (k = 0; k < 3; k++)
+			{
+				v[0][k] = loc[0][k];
+				v[1][k] = loc[1][k] * aa + loc[2][k] * ba;
+				v[2][k] = loc[1][k] * ab + loc[2][k] * bb2;
+				v[3][k] = loc[3][k] * aa * aa + 2 * loc[4][k] * aa * ba + loc[5][k] * ba * ba;
+				v[4][k] = loc[3][k] * aa * ab + loc[4][k] * (aa * bb2 + ab * ba) + loc[5][k] * ba * bb2;
+				v[5][k] = loc[3][k] * ab * ab + 2 * loc[4][k] * ab * bb2 + loc[5][k] * bb2 * bb2;
+			}
+			return 1;
+		}
+		if (depth >= 52 || u[0] > 1 - 1e-15 || u[1] > 1 - 1e-15 || u[2] > 1 - 1e-15)
+		{
+			for (i = 0; i < 3; i++)
+			{
+				double y[3];
+				ml_vertex(n, cur[i], 1, y);
+				for (k = 0; k < 3; k++)
+					v[0][k] += u[i] * y[k];
+			}
+			for (i = 0; i < 3; i++)
+				if (u[i] > 1 - 1e-15 && ml_vertex_normal(n, cur[i], nrm))
+					return 2;
+			return 0;
+		}
+		/* the child holding the point: a corner's (ci, e(ci, ci+1), e(ci, ci+2)) or the middle (e12, e20, e01) */
+		ch = u[0] >= 0.5 ? 0 : u[1] >= 0.5 ? 1 : u[2] >= 0.5 ? 2 : 3;
+		for (i = 0; i < 3; i++)
+			if (ch < 3)
+			{
+				int c = cur[ch], o = cur[(ch + i) % 3];
+				key[i][0] = c;
+				key[i][1] = o;
+				u2[i] = i ? 2 * u[(ch + i) % 3] : 2 * u[ch] - 1;
+				for (k = 0; k < 2; k++)
+					J2[i][k] = 2 * J[(ch + i) % 3][k];
+			}
+			else
+			{
+				key[i][0] = cur[(i + 1) % 3];
+				key[i][1] = cur[(i + 2) % 3];
+				u2[i] = 1 - 2 * u[i];
+				for (k = 0; k < 2; k++)
+					J2[i][k] = -2 * J[i][k];
+			}
+		for (i = 0; i < 3; i++)
+		{
+			if (key[i][0] > key[i][1])
+			{
+				int w = key[i][0];
+				key[i][0] = key[i][1];
+				key[i][1] = w;
+			}
+			u2[i] = u2[i] < 0 ? 0 : u2[i] > 1 ? 1 : u2[i];
+		}
+		/* the children touching the new triangle's corners */
+		m->nv = m->nt = m->nc = 0;
+		for (i = 0; i < n->nt; i++)
+		{
+			int const* t = n->t[i];
+			int c4[4][3][2], q;
+			for (q = 0; q < 3; q++)
+			{
+				int p0 = t[q], p1 = t[(q + 1) % 3], p2 = t[(q + 2) % 3];
+				c4[q][0][0] = p0; c4[q][0][1] = p0;
+				c4[q][1][0] = p0; c4[q][1][1] = p1;
+				c4[q][2][0] = p2; c4[q][2][1] = p0;
+				c4[3][q][0] = p0; c4[3][q][1] = p1;
+			}
+			for (q = 0; q < 4; q++)
+			{
+				int hit = 0, r, z, ids[3];
+				for (r = 0; r < 3; r++)
+				{
+					int a = c4[q][r][0] < c4[q][r][1] ? c4[q][r][0] : c4[q][r][1], b = c4[q][r][0] ^ c4[q][r][1] ^ a;
+					c4[q][r][0] = a;
+					c4[q][r][1] = b;
+					for (z = 0; z < 3; z++)
+						hit |= key[z][0] == a && key[z][1] == b;
+				}
+				if (!hit)
+					continue;
+				/* (a vertex key is the current triangle's corner: its whole star is here) */
+				for (r = 0; r < 3; r++)
+					if (c4[q][r][0] == c4[q][r][1] && c4[q][r][0] != cur[0] && c4[q][r][0] != cur[1] && c4[q][r][0] != cur[2])
+						hit = 0;
+				if (!hit || m->nt == MI_LOOP_MAX)
+					return 0;
+				for (r = 0; r < 3; r++)
+					if ((ids[r] = ml_key(m, n, c4[q][r][0], c4[q][r][1])) < 0)
+						return 0;
+				for (r = 0; r < 3; r++)
+					m->t[m->nt][r] = ids[r];
+				m->nt++;
+			}
+		}
+		/* creases: both halves of a crease edge */
+		for (i = 0; i < n->nc; i++)
+		{
+			int h, e[2], a, b, q;
+			a = n->c[i][0] < n->c[i][1] ? n->c[i][0] : n->c[i][1];
+			b = n->c[i][0] ^ n->c[i][1] ^ a;
+			for (h = 0; h < 2; h++)
+			{
+				int vtx = h ? b : a;
+				e[0] = e[1] = -1;
+				for (q = 0; q < m->nv; q++)
+				{
+					if (m->kp[q] == vtx && m->kq[q] == vtx)
+						e[0] = q;
+					if (m->kp[q] == a && m->kq[q] == b)
+						e[1] = q;
+				}
+				if (e[0] >= 0 && e[1] >= 0 && m->nc < MI_LOOP_MAX)
+				{
+					m->c[m->nc][0] = e[0];
+					m->c[m->nc][1] = e[1];
+					m->nc++;
+				}
+			}
+		}
+		for (i = 0; i < 3; i++)
+		{
+			for (j = 0; j < m->nv && !(m->kp[j] == key[i][0] && m->kq[j] == key[i][1]); j++)
+				;
+			cur[i] = j;
+			u[i] = u2[i];
+			J[i][0] = J2[i][0];
+			J[i][1] = J2[i][1];
+		}
+		{
+			double su = u[0] + u[1] + u[2];
+			for (i = 0; i < 3; i++)
+				u[i] /= su;
+		}
+		s = n; n = m; m = s;
+	}
+}
+
+static int ml_init(ml_net* n, mi_loop const* L)
+{
+	unsigned int i, k;
+	if (L->nv > MI_LOOP_MAX || L->nt > MI_LOOP_MAX || L->nc > MI_LOOP_MAX)
+		return 0;
+	n->nv = (int)L->nv;
+	n->nt = (int)L->nt;
+	n->nc = (int)L->nc;
+	for (i = 0; i < L->nv; i++)
+	{
+		for (k = 0; k < 3; k++)
+			n->x[i][k] = L->x[3 * (size_t)L->v[i] + k];
+		n->fx[i] = i < 3 ? (int)((L->fixed >> i & 1) | (L->fixed >> (3 + i) & 1) << 1) : 0;
+	}
+	for (i = 0; i < L->nt; i++)
+		for (k = 0; k < 3; k++)
+			n->t[i][k] = (int)L->t[3 * i + k];
+	for (i = 0; i < L->nc; i++)
+	{
+		n->c[i][0] = (int)L->c[2 * i];
+		n->c[i][1] = (int)L->c[2 * i + 1];
+	}
+	return 1;
+}
+
+/* the limit point at (a, b) and its derivatives; where they are not known (an extraordinary vertex, a crease) they are taken
+   a hair inside (barycentrics 1e-7 towards the middle), and at a smooth extraordinary vertex its exact normal is nrm (*has) */
+static void ml_eval(mi_loop const* L, double a, double b, double v[6][3], double* nrm, int* has)
+{
+	ml_net *n = (ml_net*)qaws_internal_scratch_malloc(2 * sizeof(ml_net)), *m;
+	int pass, k, got;
+	memset(v, 0, sizeof(double) * 18);
+	*has = 0;
+	if (!n)
+		return;
+	m = n + 1;
+	for (pass = 0; pass < 2; pass++)
+	{
+		double u[3], J[3][2] = { { -1, -1 }, { 1, 0 }, { 0, 1 } }, w[6][3], h = pass ? 1e-7 : 0;
+		int cur[3] = { 0, 1, 2 };
+		u[0] = (1 - a - b) * (1 - h) + h / 3;
+		u[1] = a * (1 - h) + h / 3;
+		u[2] = b * (1 - h) + h / 3;
+		if (!ml_init(n, L))
+			break;
+		got = ml_point(n, m, cur, u, J, w, nrm);
+		if (!pass && got == 2)
+			*has = 1;
+		if (got == 1)
+		{
+			for (k = 0; k < 3; k++)
+			{
+				int j;
+				for (j = pass ? 1 : 0; j < 6; j++)
+					v[j][k] = w[j][k];
+			}
+			break;
+		}
+		if (!pass)
+			for (k = 0; k < 3; k++)
+				v[0][k] = w[0][k];
+	}
+	qaws_internal_free(n);
+}
+
+static void mi_eval_loop(mi_tri const* t, double a, double b, double* x, double* xa, double* xb, double* xaa, double* xab, double* xbb,
+	double* n, double* na, double* nb)
+{
+	double v[6][3], nv[3], nn[3];
+	int k, has;
+	ml_eval(t->loop, a, b, v, nv, &has);
+	for (k = 0; k < 3; k++)
+	{
+		if (x) x[k] = v[0][k];
+		if (xa) xa[k] = v[1][k];
+		if (xb) xb[k] = v[2][k];
+		if (xaa) xaa[k] = v[3][k];
+		if (xab) xab[k] = v[4][k];
+		if (xbb) xbb[k] = v[5][k];
+	}
+	mi_surface_normal(v, nn, na, nb);
+	/* (the tangent masks' normal, turned to the side of the one a hair inside) */
+	if (has && mi_dot(nv, nn) < 0)
+		for (k = 0; k < 3; k++)
+			nv[k] = -nv[k];
+	if (n)
+		for (k = 0; k < 3; k++)
+			n[k] = has ? nv[k] : nn[k];
+}
+
+/* the corners' limit points as p[0..2] (the flat triangle between them in the other slots: starting points, not a net) */
+static void mi_build_loop(mi_tri* t)
+{
+	static double const at[3][2] = { { 0, 0 }, { 1, 0 }, { 0, 1 } };
+	int c, k, q;
+	for (c = 0; c < 3; c++)
+	{
+		double v[6][3], nv[3];
+		int has;
+		ml_eval(t->loop, at[c][0], at[c][1], v, nv, &has);
+		for (k = 0; k < 3; k++)
+			t->p[c][k] = v[0][k];
+	}
+	for (q = 3; q < 10; q++)
+	{
+		double w[3];
+		w[0] = mi_e3[q][0] / 3.0;
+		w[1] = mi_e3[q][1] / 3.0;
+		w[2] = mi_e3[q][2] / 3.0;
+		for (k = 0; k < 3; k++)
+			t->p[q][k] = w[0] * t->p[0][k] + w[1] * t->p[1][k] + w[2] * t->p[2][k];
+	}
+	memset(t->n, 0, sizeof t->n);
+}
+
 void mi_eval(mi_tri const* t, double a, double b, double* x, double* xa, double* xb, double* xaa, double* xab, double* xbb,
 	double* n, double* na, double* nb)
 {
 	double bb[3] = { 1 - a - b, a, b }, v[6][3];
 	int l, k, o;
+	if (t->loop)
+	{
+		mi_eval_loop(t, a, b, x, xa, xb, xaa, xab, xbb, n, na, nb);
+		return;
+	}
 	if (t->gregory)
 	{
 		mi_eval_gregory(t, a, b, x, xa, xb, xaa, xab, xbb, n, na, nb);

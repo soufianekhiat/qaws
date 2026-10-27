@@ -13,6 +13,10 @@
  *     flat sag);
  *   - a cylinder: curvatures 1 / r and 0, the first direction round it;
  *   - a cube with its creases detected: every PN point on the cube;
+ *   - SUBDIVISION against qaws_mesh_3d_subdivide (Loop, 2 levels, limit):
+ *     on an icosahedron, an icosphere, a cube and the cube with its creases,
+ *     each vertex's location the same limit point, every limit point on the
+ *     reference (projected), its limit normal the reference's (smooth ones);
  *   - projection against brute force (LINEAR and PN), and with a hint the
  *     sheet the hint is on, not a nearer one;
  *   - walking: straight on a plane across triangles, and round a prism
@@ -22,6 +26,7 @@
 
 #include "test_common.h"
 #include "qaws_mesh_reference.h"
+#include "qaws_mesh_subdivide.h"
 #include "mesh/qaws_mesh_internal.h"
 #include "reference/122_pn_triangle.h"
 #include <math.h>
@@ -620,6 +625,97 @@ static void test_attributes_and_refusals(void)
 	ts_free(&t);
 }
 
+/* SUBDIVISION: the reference's vertices against the Loop limit points (vertex i stays vertex i), every limit point projected
+   on it, the limit normals (no creases) against its normals there */
+static void ts_subdivision_case(qaws_mesh_3d const* m, char const* name, int smooth)
+{
+	qaws_mesh_reference* r = ts_ref(m, QAWS_INTERPOLANT_SUBDIVISION, NULL);
+	qaws_mesh_3d* L = NULL;
+	qaws_mesh_subdivide_desc sd;
+	unsigned int i, nv = qaws_mesh_3d_get_vertex_count(m), nl, id;
+	double ev = 0, ep = 0, en = 0;
+	qaws_scalar* ln = NULL;
+	char msg[300];
+	memset(&sd, 0, sizeof sd);
+	sd.scheme = QAWS_MESH_SUBDIVIDE_LOOP;
+	sd.levels = 2;
+	sd.limit = 1;
+	sd.limit_normals = smooth;
+	qaws_mesh_3d_subdivide(&L, m, &sd);
+	if (!r || !L)
+	{
+		TEST_ASSERT(0, name);
+		goto done;
+	}
+	nl = qaws_mesh_3d_get_vertex_count(L);
+	if (smooth)
+	{
+		ln = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nl);
+		qaws_mesh_3d_find_attribute(&id, L, "limit_normal");
+		qaws_mesh_3d_get_attribute(ln, L, id);
+	}
+	for (i = 0; i < nv; i++)
+	{
+		qaws_mesh_location l;
+		qaws_scalar x[3];
+		qaws_vec3 y = qaws_mesh_3d_get_vertex(L, i);
+		qaws_mesh_reference_get_vertex_location(&l, r, i);
+		qaws_mesh_reference_evaluate(x, NULL, NULL, r, &l, 1);
+		ev = fmax(ev, fabs(x[0] - y.x) + fabs(x[1] - y.y) + fabs(x[2] - y.z));
+	}
+	for (i = 0; i < nl; i++)
+	{
+		qaws_vec3 y = qaws_mesh_3d_get_vertex(L, i);
+		qaws_scalar q[3], d, n[3];
+		qaws_mesh_location l;
+		q[0] = y.x; q[1] = y.y; q[2] = y.z;
+		qaws_mesh_reference_project(&l, &d, r, q, NULL, 1);
+		ep = fmax(ep, (double)d);
+		if (smooth)
+		{
+			qaws_mesh_reference_evaluate(NULL, n, NULL, r, &l, 1);
+			en = fmax(en, fabs(n[0] - ln[3 * i]) + fabs(n[1] - ln[3 * i + 1]) + fabs(n[2] - ln[3 * i + 2]));
+		}
+	}
+	sprintf(msg, "SUBDIVISION, %s: vertices at their limit points %.2g, %u limit points off the reference %.2g, limit normals %.2g", name, ev, nl,
+		ep, en);
+	printf("  %s\n", msg);
+	TEST_ASSERT(ev < TEST_BOUND(1e-12, 32) && ep < TEST_BOUND(1e-9, 32) && en < TEST_BOUND(1e-12, 32), msg);
+done:
+	free(ln);
+	qaws_mesh_reference_destroy(r);
+	qaws_mesh_3d_destroy(L);
+}
+
+static void test_subdivision(void)
+{
+	static qaws_scalar const x[24] = { -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 };
+	static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
+	static unsigned int const fs[6] = { 4, 4, 4, 4, 4, 4 };
+	ts_mesh t;
+	qaws_mesh_3d *m, *cube = NULL;
+	qaws_mesh_3d_desc d;
+	unsigned int i, lv;
+	for (lv = 0; lv < 2; lv++)
+	{
+		ts_icosphere(&t, lv);
+		m = ts_make(&t);
+		ts_subdivision_case(m, lv ? "icosphere" : "icosahedron", 1);
+		qaws_mesh_3d_destroy(m);
+		ts_free(&t);
+	}
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 8; d.face_vertices = f; d.face_sizes = fs; d.face_count = 6;
+	qaws_mesh_3d_create(&cube, &d);
+	for (i = 0; cube && i < 6; i++)
+		qaws_mesh_3d_split_face(NULL, cube, NULL, NULL, i);
+	ts_subdivision_case(cube, "cube", 1);
+	if (cube)
+		qaws_mesh_3d_detect_features(cube, (qaws_scalar)(M_PI / 6), 0, 0);
+	ts_subdivision_case(cube, "cube with creases", 0);
+	qaws_mesh_3d_destroy(cube);
+}
+
 int test_122_mesh_reference_main(void)
 {
 	g_pass = 0;
@@ -628,6 +724,7 @@ int test_122_mesh_reference_main(void)
 	test_pn_against_mathematica();
 	test_sphere();
 	test_cylinder_and_cube();
+	test_subdivision();
 	test_projection();
 	test_walk();
 	test_attributes_and_refusals();

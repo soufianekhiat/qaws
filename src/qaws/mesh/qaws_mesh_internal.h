@@ -37,11 +37,26 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
  * one evaluation serves both. A location (a, b) is b1 = a, b2 = b.
  */
 
+/* SUBDIVISION: a triangle's neighbourhood, every triangle touching its corners, in local vertices (the triangle the first, its
+   corners the local vertices 0, 1, 2), with the crease and border edges among them */
+#define MI_LOOP_MAX 160
+typedef struct mi_loop
+{
+	double const* x;                /* the mesh's positions, 3 per vertex */
+	unsigned int const* v;          /* per local vertex: the mesh vertex */
+	unsigned int const* t;          /* 3 local vertices per triangle */
+	unsigned int const* c;          /* 2 local vertices per crease or border edge */
+	unsigned int nv, nt, nc;
+	unsigned int fixed;             /* per corner c: bit c a feature corner (fixed on a crease), bit 3 + c in one face only (fixed) */
+} mi_loop;
+
 typedef struct mi_tri
 {
 	double p[10][3];
 	double n[6][3];                 /* the quadratic normal field; G1: the six Gregory points (2 v + s: near corner v, from its edge to v + 1 + s) */
 	int gregory;                    /* G1: p[0..8] the cubic boundary, the interior a quartic Gregory triangle */
+	mi_loop const* loop;            /* SUBDIVISION (set before mi_build): the Loop limit over the neighbourhood; p[0..2] the
+	                                   corners' limit points */
 } mi_tri;
 
 /* P: the corners; N: their unit normals; crease (per edge i, from corner i to
@@ -80,6 +95,8 @@ struct qaws_mesh_reference
 	double extent;                  /* the mesh's size */
 	unsigned long long* seamk;      /* desc.seams: the seam edges made creases (vertex pairs, sorted) */
 	unsigned int nseam;
+	mi_loop* loop;                  /* SUBDIVISION: per triangle its neighbourhood, in loopi */
+	unsigned int* loopi;
 };
 
 /* an attribute seam across the edge of corners c and o (twins): corner or face values differing, edge values nonzero */

@@ -53,7 +53,14 @@
  *            normal the surface's own, continuous across edges (G1) but
  *            for creases.
  *
- * SUBDIVISION and MLS are reserved for further interpolants
+ *   SUBDIVISION  the Loop limit surface of the mesh as its control net (Stam's
+ *            box splines where regular, local subdivision elsewhere; creases
+ *            and the border by Hoppe et al.'s rules): smooth (C2, C1 at
+ *            extraordinary vertices), not through the vertices (it shrinks:
+ *            a vertex's location is its limit point). UNSUPPORTED_OPERATION
+ *            past about 50 triangles round a vertex.
+ *
+ * MLS is reserved for a further interpolant
  * (UNSUPPORTED_OPERATION today).
  *
  * Normals: given per vertex, or computed: the faces' normals round each

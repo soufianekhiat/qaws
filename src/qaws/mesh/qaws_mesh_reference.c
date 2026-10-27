@@ -175,7 +175,147 @@ void qaws_mesh_reference_destroy(qaws_mesh_reference* r)
 	qaws_internal_free(r->patch); qaws_internal_free(r->box); qaws_internal_free(r->vloc);
 	qaws_internal_grid_destroy(r->grid);
 	qaws_internal_free(r->seamk);
+	qaws_internal_free(r->loop);
+	qaws_internal_free(r->loopi);
 	qaws_internal_free(r);
+}
+
+/* SUBDIVISION: triangle t's neighbourhood, every triangle round its corners (each corner's fan walked both ways across ta):
+   triangles tl, local vertices vl (t's corners first), local triangles lt, crease and border edges cl; 0 past MI_LOOP_MAX */
+static int mr_loop_gather(qaws_mesh_reference const* r, unsigned int t, unsigned int* tl, unsigned int* vl, unsigned int* lt, unsigned int* cl,
+	unsigned int* cnt)
+{
+	unsigned int ntl = 1, nvl = 0, ncl = 0, k, d, i, j, q;
+	tl[0] = t;
+	for (k = 0; k < 3; k++)
+	{
+		unsigned int v = r->tv[3 * t + k];
+		for (d = 0; d < 2; d++)
+		{
+			unsigned int u = t, e = d ? (k + 2) % 3 : k, steps = 0, closed = 0;
+			for (;;)
+			{
+				unsigned int nb = r->ta[3 * u + e], u2, ue, kk;
+				if (nb == HM_NONE)
+					break;
+				u2 = nb / 3;
+				ue = nb % 3;
+				if (u2 == t)
+				{
+					closed = 1;
+					break;
+				}
+				for (i = 0; i < ntl && tl[i] != u2; i++)
+					;
+				if (i == ntl)
+				{
+					if (ntl == MI_LOOP_MAX)
+						return 0;
+					tl[ntl++] = u2;
+				}
+				for (kk = 0; kk < 3 && r->tv[3 * u2 + kk] != v; kk++)
+					;
+				if (kk == 3 || ++steps > MI_LOOP_MAX)
+					break;
+				e = kk == ue ? (kk + 2) % 3 : kk;
+				u = u2;
+			}
+			if (closed)
+				break;
+		}
+	}
+	for (i = 0; i < ntl; i++)
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int v = r->tv[3 * tl[i] + k];
+			for (j = 0; j < nvl && vl[j] != v; j++)
+				;
+			if (j == nvl)
+			{
+				if (nvl == MI_LOOP_MAX)
+					return 0;
+				vl[nvl++] = v;
+			}
+			lt[3 * i + k] = j;
+		}
+	for (i = 0; i < ntl; i++)
+		for (k = 0; k < 3; k++)
+			if (r->tcrease[3 * tl[i] + k])
+			{
+				unsigned int a = lt[3 * i + k], b = lt[3 * i + (k + 1) % 3];
+				for (q = 0; q < ncl && !((cl[2 * q] == a && cl[2 * q + 1] == b) || (cl[2 * q] == b && cl[2 * q + 1] == a)); q++)
+					;
+				if (q == ncl)
+				{
+					if (ncl == MI_LOOP_MAX)
+						return 0;
+					cl[2 * ncl] = a;
+					cl[2 * ncl + 1] = b;
+					ncl++;
+				}
+			}
+	/* the corners fixed: a feature corner, a vertex of one face */
+	cnt[3] = 0;
+	for (k = 0; k < 3; k++)
+	{
+		unsigned int v = r->tv[3 * t + k], f0 = HM_NONE, one = 1;
+		for (i = 0; i < ntl; i++)
+			if (r->tv[3 * tl[i]] == v || r->tv[3 * tl[i] + 1] == v || r->tv[3 * tl[i] + 2] == v)
+			{
+				if (f0 == HM_NONE)
+					f0 = r->tf[tl[i]];
+				else if (r->tf[tl[i]] != f0)
+					one = 0;
+			}
+		if (r->mesh->hm.vflag && (r->mesh->hm.vflag[v] & HM_CORNER))
+			cnt[3] |= 1u << k;
+		if (one)
+			cnt[3] |= 8u << k;
+	}
+	cnt[0] = nvl;
+	cnt[1] = ntl;
+	cnt[2] = ncl;
+	return 1;
+}
+
+/* SUBDIVISION: every triangle's neighbourhood into r->loop (two passes: sizes, then the pool) */
+static qaws_status mr_loop_rings(qaws_mesh_reference* r)
+{
+	unsigned int buf[MI_LOOP_MAX * 7], cnt[4], t, pass;
+	size_t total = 0, at = 0;
+	r->loop = (mi_loop*)qaws_internal_zalloc((size_t)r->nt + 1, sizeof(mi_loop));
+	if (!r->loop)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (pass = 0; pass < 2; pass++)
+	{
+		if (pass && !(r->loopi = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), total + 1))))
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		for (t = 0; t < r->nt; t++)
+		{
+			unsigned int *tl = buf, *vl = buf + MI_LOOP_MAX, *lt = buf + 2 * MI_LOOP_MAX, *cl = buf + 5 * MI_LOOP_MAX;
+			mi_loop* L = &r->loop[t];
+			if (!mr_loop_gather(r, t, tl, vl, lt, cl, cnt))
+				return QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (a vertex of more than about 50 triangles) */
+			if (!pass)
+			{
+				total += cnt[0] + 3 * (size_t)cnt[1] + 2 * (size_t)cnt[2];
+				continue;
+			}
+			memcpy(r->loopi + at, vl, sizeof(unsigned int) * cnt[0]);
+			memcpy(r->loopi + at + cnt[0], lt, sizeof(unsigned int) * 3 * cnt[1]);
+			memcpy(r->loopi + at + cnt[0] + 3 * cnt[1], cl, sizeof(unsigned int) * 2 * cnt[2]);
+			L->x = r->mesh->hm.x;
+			L->v = r->loopi + at;
+			L->t = L->v + cnt[0];
+			L->c = L->t + 3 * cnt[1];
+			L->nv = cnt[0];
+			L->nt = cnt[1];
+			L->nc = cnt[2];
+			L->fixed = cnt[3];
+			at += cnt[0] + 3 * (size_t)cnt[1] + 2 * (size_t)cnt[2];
+		}
+	}
+	return QAWS_STATUS_OK;
 }
 
 int mr_seam(qaws_hm const* h, unsigned int c, unsigned int o)
@@ -266,7 +406,8 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if ((unsigned int)kind > QAWS_INTERPOLANT_MLS)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (kind != QAWS_INTERPOLANT_PN && kind != QAWS_INTERPOLANT_LINEAR && kind != QAWS_INTERPOLANT_PHONG && kind != QAWS_INTERPOLANT_NAGATA && kind != QAWS_INTERPOLANT_G1)
+	if (kind != QAWS_INTERPOLANT_PN && kind != QAWS_INTERPOLANT_LINEAR && kind != QAWS_INTERPOLANT_PHONG && kind != QAWS_INTERPOLANT_NAGATA && kind != QAWS_INTERPOLANT_G1 &&
+		kind != QAWS_INTERPOLANT_SUBDIVISION)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	r = (qaws_mesh_reference*)qaws_internal_zalloc(1, sizeof *r);
 	if (!r)
@@ -348,6 +489,8 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 	else
 		mr_corner_normals(m, cn, fnrm);
 	mr_crease_tangents(m, tan, has);
+	if (kind == QAWS_INTERPOLANT_SUBDIVISION && (st = mr_loop_rings(r)) != QAWS_STATUS_OK)
+		goto done;
 	/* patches and their boxes */
 	for (t = 0; t < nt; t++)
 	{
@@ -379,16 +522,18 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 			}
 			crease[e] = T[e];
 		}
+		r->patch[t].loop = r->loop ? &r->loop[t] : NULL;
 		mi_build(&r->patch[t], kind, P, N, crease);
 		for (k = 0; k < 3; k++)
 		{
 			r->box[t].lo[k] = 1e300;
 			r->box[t].hi[k] = -1e300;
 		}
-		for (q = 0; q < (r->patch[t].gregory ? 16u : 10u); q++)
+		/* (the Loop limit: within its neighbourhood's hull) */
+		for (q = 0; q < (r->loop ? r->loop[t].nv : r->patch[t].gregory ? 16u : 10u); q++)
 			for (k = 0; k < 3; k++)
 			{
-				double v = q < 10 ? r->patch[t].p[q][k] : r->patch[t].n[q - 10][k];
+				double v = r->loop ? m->x[3 * (size_t)r->loop[t].v[q] + k] : q < 10 ? r->patch[t].p[q][k] : r->patch[t].n[q - 10][k];
 				if (v < r->box[t].lo[k]) r->box[t].lo[k] = v;
 				if (v > r->box[t].hi[k]) r->box[t].hi[k] = v;
 				if (v < lo[k]) lo[k] = v;

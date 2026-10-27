@@ -7,8 +7,8 @@
  *   - the same can with its creases detected: rims sharp, sides round,
  *     caps flat, no cracks;
  *   - mean curvature read from the reference of a finer blob;
- *   - below, one coarse sphere (80 triangles) five ways: flat, PN, PHONG, NAGATA
- *     and G1, each with its farthest point off the sphere.
+ *   - below, one coarse sphere (80 triangles) six ways: flat, PN, PHONG, NAGATA, G1
+ *     and SUBDIVISION, each with its farthest point off the sphere.
  */
 
 /* the reference sampled n x n per triangle: smooth shaded by its normal
@@ -175,8 +175,8 @@ static double ms_off_sphere(qaws_mesh_reference const* r, unsigned int n)
 static void ms_reference_row(er_canvas* c, int y0)
 {
 	static double const curve[3] = { 70, 60, 50 }, tint[3] = { 178, 192, 212 };
-	static qaws_interpolant const kinds[5] = { QAWS_INTERPOLANT_LINEAR, QAWS_INTERPOLANT_PN, QAWS_INTERPOLANT_PHONG, QAWS_INTERPOLANT_NAGATA, QAWS_INTERPOLANT_G1 };
-	static char const* const names[5] = { "flat", "PN (Vlachos)", "PHONG (Boubekeur, Alexa)", "NAGATA", "G1 (Walton, Meek)" };
+	static qaws_interpolant const kinds[6] = { QAWS_INTERPOLANT_LINEAR, QAWS_INTERPOLANT_PN, QAWS_INTERPOLANT_PHONG, QAWS_INTERPOLANT_NAGATA, QAWS_INTERPOLANT_G1, QAWS_INTERPOLANT_SUBDIVISION };
+	static char const* const names[6] = { "flat", "PN (Vlachos)", "PHONG", "NAGATA", "G1", "SUBDIVISION (Loop)" };
 	qaws_mesh_3d* s = ms_blob(1);
 	unsigned int i, n;
 	double* p;
@@ -195,7 +195,7 @@ static void ms_reference_row(er_canvas* c, int y0)
 		ps[3 * i + 2] = (qaws_scalar)(p[3 * i + 2] / l);
 	}
 	qaws_mesh_3d_set_positions(s, ps);
-	for (i = 0; i < 5; i++)
+	for (i = 0; i < 6; i++)
 	{
 		qaws_mesh_reference* r = NULL;
 		qaws_mesh_reference_desc d;
@@ -203,8 +203,8 @@ static void ms_reference_row(er_canvas* c, int y0)
 		d.interpolant = kinds[i];
 		if (qaws_mesh_reference_create(&r, s, &d) != QAWS_STATUS_OK)
 			continue;
-		sprintf(sub, "%u triangles: %.4f off the sphere", qaws_mesh_3d_get_face_count(s), ms_off_sphere(r, 12));
-		ms_panel(c, 550 * (int)i, y0, 550, 640, s, 0.6, 0.5, names[i], sub);
+		sprintf(sub, "%u triangles: %.4f off", qaws_mesh_3d_get_face_count(s), ms_off_sphere(r, 12));
+		ms_panel(c, 458 * (int)i, y0, 458, 640, s, 0.6, 0.5, names[i], sub);
 		ms_draw_reference(c, r, 12, tint, 0, 0, 0, curve, 1.4);
 		printf("  sphere %s: %s\n", names[i], sub);
 		qaws_mesh_reference_destroy(r);
