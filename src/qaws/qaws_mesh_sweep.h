@@ -193,4 +193,11 @@ typedef struct qaws_contact_report
 qaws_status qaws_mesh_3d_first_contact(qaws_contact_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d const* obstacle,
 	qaws_motion const* obstacle_motion, qaws_sweep_desc const* desc);
 
+/* A mesh against itself (a vertex motion: a cloth folding, a strip curling, parts of one mesh meeting): the same search
+   over the pairs of its triangles sharing no vertex (vertices at one position at 0 count as one), each pair once;
+   report.face and obstacle_face are both its triangles. Triangles crossing at 0 give time 0; a rigid motion keeps the
+   mesh apart from itself (no contact past 0). Neighbours (a shared vertex) are not tested: a fold within one vertex's
+   ring is missed. INVALID_ARGUMENT as qaws_mesh_3d_first_contact */
+qaws_status qaws_mesh_3d_first_self_contact(qaws_contact_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_sweep_desc const* desc);
+
 #endif /* QAWS_MESH_SWEEP_H */

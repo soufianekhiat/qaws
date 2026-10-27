@@ -8,7 +8,9 @@
  *   - a rod turning a quarter toward a wall: its contact pose, the corner on
  *     the wall;
  *   - both moving on straight paths: two boxes flying at each other, met at
- *     a time solved exactly (faint: at 0, 0.15 and 0.3).
+ *     a time solved exactly (faint: at 0, 0.15 and 0.3);
+ *   - a mesh against itself: a strip whose vertices go straight from flat to
+ *     a ring pinches where its arc turns half a circle, at 0.5.
  * Printed: the contact times.
  */
 
@@ -19,7 +21,7 @@ static qaws_mesh_3d* ms_fc_at(qaws_mesh_3d const* m, qaws_motion const* mo, doub
 	qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *y = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
 	qaws_mesh_3d* c = NULL;
 	qaws_mesh_3d_get_positions(x, m);
-	qaws_motion_transform_points(y, NULL, mo, (qaws_scalar)t, x, nv);
+	qaws_motion_transform_points(y, NULL, mo, (qaws_scalar)t, qaws_motion_is_per_vertex(mo) ? NULL : x, nv);
 	qaws_mesh_3d_clone(&c, m);
 	if (c)
 		qaws_mesh_3d_set_positions(c, y);
@@ -27,7 +29,8 @@ static qaws_mesh_3d* ms_fc_at(qaws_mesh_3d const* m, qaws_motion const* mo, doub
 	return c;
 }
 
-/* a panel: the obstacle, the moving mesh at the given times (faint), at the contact (solid), the contact point */
+/* a panel: the obstacle, the moving mesh at the given times (faint), at the contact (solid), the contact point; obstacle m:
+   the mesh against itself */
 static void ms_fc_panel(er_canvas* c, int px, qaws_mesh_3d const* m, qaws_motion const* mo, qaws_mesh_3d const* obstacle, qaws_motion const* om, double const* ts,
 	unsigned int nts, char const* title, double yaw, double pitch)
 {
@@ -39,7 +42,10 @@ static void ms_fc_panel(er_canvas* c, int px, qaws_mesh_3d const* m, qaws_motion
 	char sub[200];
 	memset(&d, 0, sizeof d);
 	d.tolerance = (qaws_scalar)1e-4;
-	qaws_mesh_3d_first_contact(&r, m, mo, obstacle, om, &d);
+	if (obstacle == m)
+		qaws_mesh_3d_first_self_contact(&r, m, mo, &d);
+	else
+		qaws_mesh_3d_first_contact(&r, m, mo, obstacle, om, &d);
 	{
 		double* x = ms_positions(obstacle);
 		memcpy(fit, x, sizeof(double) * 3 * no);
@@ -74,7 +80,7 @@ static void ms_fc_panel(er_canvas* c, int px, qaws_mesh_3d const* m, qaws_motion
 	er_panel(c, px, 72, 600, 640 - 72, fit, n, yaw, pitch, 0.06);
 	er_text(c, px + 14, 12, title, 3, 30, 30, 30);
 	er_text(c, px + 14, 46, sub, 2, 95, 95, 95);
-	if (!om)
+	if (!om && obstacle != m)
 		ms_draw(c, obstacle, grey, NULL, 0, wire, 0.4);
 	for (i = 0; i < nts; i++)
 	{
@@ -113,7 +119,7 @@ static void ms_fc_panel(er_canvas* c, int px, qaws_mesh_3d const* m, qaws_motion
 
 static void demo_first_contact(void)
 {
-	er_canvas* c = er_create(2400, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(3000, 640, 3, 252, 252, 250);
 	qaws_motion_pose s, e;
 	qaws_motion* m = NULL;
 	if (!c)
@@ -182,6 +188,38 @@ static void demo_first_contact(void)
 		ms_fc_panel(c, 1800, a, m, b, mb, ts, 3, "both moving: exact", -0.3, 1.0);
 		qaws_motion_destroy(m); qaws_motion_destroy(mb);
 		qaws_mesh_3d_destroy(a); qaws_mesh_3d_destroy(b);
+	}
+	{
+		/* itself: a strip of 60 squares, each vertex straight from flat to its place on a ring 1.15 times shorter */
+		unsigned int n = 60, i, k, *f = (unsigned int*)malloc(sizeof(unsigned int) * 6 * n);
+		qaws_scalar *x0 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (n + 1)), *x1 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (n + 1)),
+			*v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (n + 1));
+		double rad = 2 / (2 * MS_PI * 1.15), ts[2] = { 0, 0.3 };
+		qaws_mesh_3d_desc md;
+		qaws_mesh_3d* strip = NULL;
+		for (i = 0; i <= 2 * n + 1; i++)
+		{
+			double sx = 2.0 * (i / 2) / n, a = sx / rad;
+			x0[3 * i] = (qaws_scalar)sx; x0[3 * i + 1] = (qaws_scalar)(i % 2 ? 0.5 : 0); x0[3 * i + 2] = 0;
+			x1[3 * i] = (qaws_scalar)(rad * sin(a)); x1[3 * i + 1] = x0[3 * i + 1]; x1[3 * i + 2] = (qaws_scalar)(rad * (1 - cos(a)));
+			for (k = 0; k < 3; k++)
+				v[3 * i + k] = x1[3 * i + k] - x0[3 * i + k];
+		}
+		for (i = 0; i < n; i++)
+		{
+			unsigned int a = 2 * i, b = 2 * i + 2;
+			f[6 * i] = a; f[6 * i + 1] = b; f[6 * i + 2] = b + 1;
+			f[6 * i + 3] = a; f[6 * i + 4] = b + 1; f[6 * i + 5] = a + 1;
+		}
+		memset(&md, 0, sizeof md);
+		md.positions = x0; md.vertex_count = 2 * (n + 1); md.face_vertices = f; md.face_count = 2 * n;
+		qaws_mesh_3d_create(&strip, &md);
+		m = NULL;
+		qaws_motion_create_vertices(&m, x0, x1, v, v, NULL, NULL, 2 * (n + 1), 0);
+		ms_fc_panel(c, 2400, strip, m, strip, NULL, ts, 2, "itself: a strip pinching", 0, 0.08);
+		qaws_motion_destroy(m);
+		qaws_mesh_3d_destroy(strip);
+		free(f); free(x0); free(x1); free(v);
 	}
 	er_save(c, "showcase/mesh71_first_contact.png");
 	printf("mesh71_first_contact.png\n");

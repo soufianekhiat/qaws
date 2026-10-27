@@ -3,7 +3,8 @@
  * mesh meets an obstacle (standing still or moving too), by slabs of time
  * tested with each triangle's swept prism against the obstacle's prisms, the
  * first touching slab halved; for straight moves the first contact time
- * solved exactly (a rational, on the exact kernel's integers).
+ * solved exactly (a rational, on the exact kernel's integers). A mesh against
+ * itself: the same, its triangles sharing no vertex.
  */
 
 #include "../internal/qaws_internal_memory.h"
@@ -42,6 +43,8 @@ typedef struct cc_ctx
 	unsigned long long* pairs;      /* with collect: the touching pairs (mesh triangle << 32 | obstacle triangle) */
 	unsigned int npairs, cappairs;
 	int collect;
+	int self;                       /* the obstacle is the mesh itself: pairs sharing a vertex (vid) skipped, each pair once */
+	unsigned int* vid;              /* per vertex: the least vertex at its position (at 0) */
 } cc_ctx;
 
 /* a body's vertices at t, in double */
@@ -251,6 +254,17 @@ static int cc_touch(cc_ctx* c, double const* A, double const* B, unsigned int* f
 			unsigned int o = c->cand[q], z, w, nU, hit = 0;
 			double Q[6][3], U[8][3][3];
 			static unsigned int const ip[3] = { 0, 1, 2 }, iq[3] = { 3, 4, 5 };
+			if (c->self)
+			{
+				unsigned int const *u = c->a.t + 3 * (size_t)i, *v = c->a.t + 3 * (size_t)o;
+				unsigned int sh = 0;
+				for (z = 0; z < 9; z++)
+					sh |= c->vid[u[z / 3]] == c->vid[v[z % 3]];
+				/* shortcut: neighbours (a shared vertex) never tested, so a fold within one vertex's ring is missed; refine
+				   the mesh there to catch it */
+				if (o <= i || sh)
+					continue;
+			}
 			nU = cc_prism(c->OA, still ? c->OA : c->OB, c->o.t, o, Q, U);
 			for (z = 0; z < nT && !hit; z++)
 				for (w = 0; w < nU && !hit; w++)
@@ -337,7 +351,7 @@ static int cc_meet(cc_ctx* c, double const* X, unsigned int* f, unsigned int* g,
 	c->OB = c->OA;
 	r = cc_touch(c, X, X, f, g, p);
 	c->OB = keep;
-	if (r)
+	if (r || c->self)
 		return r;
 	if (fabs(cc_winding(c->OA, c->o.t, c->o.nt, X)) > 0.5 || fabs(cc_winding(X, c->a.t, c->a.nt, c->OA)) > 0.5)
 	{
@@ -754,8 +768,18 @@ static qaws_status cc_speed(cc_body* b, double* vmax)
 	return st;
 }
 
-qaws_status qaws_mesh_3d_first_contact(qaws_contact_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d const* obstacle,
-	qaws_motion const* obstacle_motion, qaws_sweep_desc const* desc)
+static int cc_cmp_vertex(void const* a, void const* b)
+{
+	double const *x = (double const*)a, *y = (double const*)b;
+	unsigned int k;
+	for (k = 0; k < 4; k++)
+		if (x[k] != y[k])
+			return x[k] < y[k] ? -1 : 1;
+	return 0;
+}
+
+static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d const* obstacle,
+	qaws_motion const* obstacle_motion, int self, qaws_sweep_desc const* desc)
 {
 	qaws_contact_report local;
 	cc_ctx c;
@@ -771,8 +795,36 @@ qaws_status qaws_mesh_3d_first_contact(qaws_contact_report* report, qaws_mesh_3d
 	if (!mesh || !motion || !obstacle)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&c, 0, sizeof c);
+	c.self = self;
 	if ((st = cc_body_init(&c.a, mesh, motion)) != QAWS_STATUS_OK || (st = cc_body_init(&c.o, obstacle, obstacle_motion)) != QAWS_STATUS_OK)
 		goto done;
+	if (self)
+	{
+		/* vertices at one position (seams not welded) taken as one: x, y, z, index sorted */
+		double* s = (double*)qaws_internal_malloc(sizeof(double) * (4 * (size_t)c.a.nv + 1));
+		c.vid = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)c.a.nv + 1));
+		if (!s || !c.vid)
+		{
+			qaws_internal_free(s);
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (i = 0; i < c.a.nv; i++)
+		{
+			for (k = 0; k < 3; k++)
+				s[4 * (size_t)i + k] = (double)c.a.x[3 * (size_t)i + k];
+			s[4 * (size_t)i + 3] = i;
+		}
+		qsort(s, c.a.nv, 4 * sizeof(double), cc_cmp_vertex);
+		for (i = 0; i < c.a.nv; i++)
+		{
+			unsigned int j = i;
+			while (j > 0 && memcmp(s + 4 * (size_t)(j - 1), s + 4 * (size_t)i, 3 * sizeof(double)) == 0)
+				j--;
+			c.vid[(unsigned int)s[4 * (size_t)i + 3]] = (unsigned int)s[4 * (size_t)j + 3];
+		}
+		qaws_internal_free(s);
+	}
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 	X0 = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.a.nv + 1));
 	X1 = (double*)qaws_internal_malloc(sizeof(double) * (3 * (size_t)c.a.nv + 1));
@@ -837,6 +889,9 @@ qaws_status qaws_mesh_3d_first_contact(qaws_contact_report* report, qaws_mesh_3d
 			goto found;
 		}
 	}
+	/* a rigid motion keeps every distance: a mesh apart from itself at 0 stays so */
+	if (self && !qaws_motion_is_per_vertex(motion))
+		goto done;
 	/* the fastest vertex of either (sampled): the halving stops when a step moves none past tol */
 	if ((st = cc_speed(&c.a, &vmax)) != QAWS_STATUS_OK || (st = cc_speed(&c.o, &vmax)) != QAWS_STATUS_OK)
 		goto done;
@@ -1047,6 +1102,17 @@ done:
 	cc_body_free(&c.o);
 	qaws_internal_free(X0); qaws_internal_free(X1); qaws_internal_free(Xm); qaws_internal_free(O0); qaws_internal_free(O1); qaws_internal_free(Om);
 	qaws_internal_free(c.OA); qaws_internal_free(c.OB); qaws_internal_free(c.bpos); qaws_internal_free(c.bsim); qaws_internal_free(c.bel);
-	qaws_internal_free(c.seen); qaws_internal_free(c.cand); qaws_internal_free(c.pairs); qaws_internal_free(times);
+	qaws_internal_free(c.seen); qaws_internal_free(c.cand); qaws_internal_free(c.pairs); qaws_internal_free(times); qaws_internal_free(c.vid);
 	return st;
+}
+
+qaws_status qaws_mesh_3d_first_contact(qaws_contact_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d const* obstacle,
+	qaws_motion const* obstacle_motion, qaws_sweep_desc const* desc)
+{
+	return cc_contact(report, mesh, motion, obstacle, obstacle_motion, 0, desc);
+}
+
+qaws_status qaws_mesh_3d_first_self_contact(qaws_contact_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_sweep_desc const* desc)
+{
+	return cc_contact(report, mesh, motion, mesh, motion, 1, desc);
 }
