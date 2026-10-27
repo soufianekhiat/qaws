@@ -37,6 +37,10 @@ All notable changes to Qaws are documented here.
   profile's straight sides one edge each (a spinning cube 5,460 faces to 168). `qaws_sweep_desc.revolve_spins` revolves
   an asymmetric body's spin drifting past the tolerance too (a one-flute cutter fed 25 tolerances a turn: 0.01 s where
   the slabs did not finish), the overshoot bound in `qaws_sweep_report.spin_drift` (figure 69).
+- Remeshing keeps the attributes' seams as lines (corner or face values that jump across an edge, edge values) without
+  making them features: no face across one (a cube's per-triangle colours: 70 faces across its diagonals, now none);
+  edge values carried to their pieces (they were lost); a corner read from its own footpoint on the face's side (a
+  remeshed face over two reference triangles read its corners clamped into one: UVs off by 0.165), figure 70.
 - Sweeps' simplify keeps the vertices where an attribute is not one linear function across their faces (a revolved
   floor's colour rings were flattened to the rim's colour: the decimation weighs only the shape).
 

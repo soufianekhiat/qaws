@@ -12,7 +12,12 @@
  *     smaller size in each direction; a rotated one: the result's ball
  *     inside both; a field with itself: unchanged;
  *   - gradation: a size of 0.01 at one corner in 0.2 elsewhere grows from it
- *     no faster than the gradation allows, and stays 0.2 far away.
+ *     no faster than the gradation allows, and stays 0.2 far away;
+ *   - a cube's attributes remeshed (its own reference): per-side UV charts
+ *     (a seam on every edge) exact at every corner, a value per triangle (a
+ *     seam along every side's diagonal, no crease) with no face across a
+ *     diagonal (each face's corners on its own triangle), the edge values'
+ *     lengths kept, the features the cube's edges alone.
  */
 
 #include "test_common.h"
@@ -384,6 +389,129 @@ static void test_gradation(void)
 	free(M);
 }
 
+static void test_seams(void)
+{
+	static unsigned int const F[36] = { 0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1, 2, 6, 1, 6, 5, 0, 4, 7, 0, 7, 3 };
+	qaws_scalar x[24], uv[72], tri[12], *e;
+	unsigned int i, k, id, ne, nt = 0, nfe = 0, onfe = 0;
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d *m = NULL, *o = NULL;
+	qaws_attribute_desc ad;
+	qaws_remesh_desc rd;
+	double wu = -1, lin[8] = { 0 }, lout[8] = { 0 }, wl = 0;
+	unsigned int across = 1000;
+	char msg[300];
+	for (i = 0; i < 8; i++)
+	{
+		x[3 * i] = (qaws_scalar)((i == 1 || i == 2 || i == 5 || i == 6) ? 1 : 0);
+		x[3 * i + 1] = (qaws_scalar)((i == 2 || i == 3 || i == 6 || i == 7) ? 1 : 0);
+		x[3 * i + 2] = (qaws_scalar)(i >= 4 ? 1 : 0);
+	}
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 8; d.face_vertices = F; d.face_count = 12;
+	qaws_mesh_3d_create(&m, &d);
+	qaws_mesh_3d_detect_features(m, (qaws_scalar)0.5, 0, 0);
+	nfe = qaws_mesh_3d_get_feature_edge_count(m);
+	for (i = 0; i < 12; i++)
+	{
+		unsigned int ax = i < 4 ? 2 : i < 8 ? 1 : 0;   /* (the sides: z-, z+, y-, y+, x+, x-) */
+		tri[i] = (qaws_scalar)i;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int v = F[3 * i + k];
+			uv[6 * i + 2 * k] = (qaws_scalar)((ax == 0 ? x[3 * v + 1] : x[3 * v]) + 2 * (i / 2));
+			uv[6 * i + 2 * k + 1] = (qaws_scalar)(ax == 2 ? x[3 * v + 1] : x[3 * v + 2]);
+		}
+	}
+	memset(&ad, 0, sizeof ad);
+	ad.name = "uv"; ad.element = QAWS_MESH_CORNER; ad.components = 2; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(&id, m, uv, &ad);
+	ad.name = "tri"; ad.element = QAWS_MESH_FACE; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_NEAREST;
+	qaws_mesh_3d_add_attribute(&id, m, tri, &ad);
+	ne = qaws_mesh_3d_get_edge_count(m);
+	e = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ne);
+	{
+		unsigned int* ev = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+		qaws_mesh_3d_get_edges(ev, m);
+		for (i = 0; i < ne; i++)
+		{
+			qaws_vec3 a = qaws_mesh_3d_get_vertex(m, ev[2 * i]), b = qaws_mesh_3d_get_vertex(m, ev[2 * i + 1]);
+			int diff = (a.x != b.x) + (a.y != b.y) + (a.z != b.z);
+			e[i] = (qaws_scalar)(diff == 1 ? 1 + (ev[2 * i] + ev[2 * i + 1]) % 7 : 0);
+			if (e[i] > 0)
+				lin[(int)e[i]] += 1;
+		}
+		free(ev);
+	}
+	ad.name = "e"; ad.element = QAWS_MESH_EDGE; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(&id, m, e, &ad);
+	memset(&rd, 0, sizeof rd);
+	rd.target_length = (qaws_scalar)0.2;
+	if (qaws_mesh_remesh(&o, NULL, m, &rd) == QAWS_STATUS_OK && o)
+	{
+		unsigned int c[3], iu, it, ie, ne2 = qaws_mesh_3d_get_edge_count(o), *ev2 = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (ne2 + 1)), *fe;
+		qaws_scalar *ouv, *ot, *oe = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (ne2 + 1));
+		nt = qaws_mesh_3d_get_triangle_count(o);
+		ouv = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * nt);
+		ot = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nt);
+		qaws_mesh_3d_find_attribute(&iu, o, "uv"); qaws_mesh_3d_get_attribute(ouv, o, iu);
+		qaws_mesh_3d_find_attribute(&it, o, "tri"); qaws_mesh_3d_get_attribute(ot, o, it);
+		qaws_mesh_3d_find_attribute(&ie, o, "e"); qaws_mesh_3d_get_attribute(oe, o, ie);
+		wu = 0;
+		across = 0;
+		for (i = 0; i < nt; i++)
+		{
+			unsigned int j = (unsigned int)lround((double)ot[i]), ax = j < 4 ? 2 : j < 8 ? 1 : 0, out = 0;
+			qaws_mesh_3d_get_triangle(c, o, i);
+			for (k = 0; k < 3; k++)
+			{
+				qaws_vec3 pp = qaws_mesh_3d_get_vertex(o, c[k]);
+				double P[3] = { pp.x, pp.y, pp.z }, A[3], B[3], C[3], u[3], w[3], q[3], d00 = 0, d01 = 0, d11 = 0, d20 = 0, d21 = 0, den, bu, bv;
+				unsigned int z;
+				wu = fmax(wu, fabs((double)ouv[6 * i + 2 * k] - ((ax == 0 ? P[1] : P[0]) + 2 * (j / 2))) + fabs((double)ouv[6 * i + 2 * k + 1] - (ax == 2 ? P[1] : P[2])));
+				/* (on triangle j: its barycentric weights not under -1e-9) */
+				for (z = 0; z < 3; z++) { A[z] = x[3 * F[3 * j] + z]; B[z] = x[3 * F[3 * j + 1] + z]; C[z] = x[3 * F[3 * j + 2] + z]; }
+				for (z = 0; z < 3; z++) { u[z] = B[z] - A[z]; w[z] = C[z] - A[z]; q[z] = P[z] - A[z]; d00 += u[z] * u[z]; d01 += u[z] * w[z]; d11 += w[z] * w[z]; d20 += q[z] * u[z]; d21 += q[z] * w[z]; }
+				den = d00 * d11 - d01 * d01; bu = (d11 * d20 - d01 * d21) / den; bv = (d00 * d21 - d01 * d20) / den;
+				out |= bu < -1e-9 || bv < -1e-9 || 1 - bu - bv < -1e-9;
+			}
+			across += out;
+		}
+		qaws_mesh_3d_get_edges(ev2, o);
+		for (i = 0; i < ne2; i++)
+		{
+			qaws_vec3 a = qaws_mesh_3d_get_vertex(o, ev2[2 * i]), b = qaws_mesh_3d_get_vertex(o, ev2[2 * i + 1]);
+			int v = (int)lround((double)oe[i]);
+			if (v > 0 && v < 8)
+				lout[v] += sqrt(((double)a.x - b.x) * ((double)a.x - b.x) + ((double)a.y - b.y) * ((double)a.y - b.y) + ((double)a.z - b.z) * ((double)a.z - b.z));
+		}
+		for (i = 1; i < 8; i++)
+			wl = fmax(wl, fabs(lin[i] - lout[i]));
+		/* the features on the cube's edges alone (two coordinates of their middles 0 or 1) */
+		onfe = qaws_mesh_3d_get_feature_edge_count(o);
+		fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (onfe + 1));
+		qaws_mesh_3d_get_feature_edges(fe, o);
+		for (i = 0; i < onfe; i++)
+		{
+			qaws_vec3 a = qaws_mesh_3d_get_vertex(o, fe[2 * i]), b = qaws_mesh_3d_get_vertex(o, fe[2 * i + 1]);
+			double mid[3] = { 0.5 * ((double)a.x + b.x), 0.5 * ((double)a.y + b.y), 0.5 * ((double)a.z + b.z) };
+			unsigned int on = 0;
+			for (k = 0; k < 3; k++)
+				on += fabs(mid[k]) < 1e-9 || fabs(mid[k] - 1) < 1e-9;
+			if (on < 2)
+				onfe = 0;   /* (a feature off the cube's edges) */
+		}
+		free(fe); free(ev2); free(oe); free(ouv); free(ot);
+	}
+	sprintf(msg, "a cube's attributes remeshed: %u faces, UVs off their side's chart by %.1e, %u faces across a seam, edge values' lengths off by %.1e, %u features on the cube's edges (input %u)",
+		nt, wu, across, wl, onfe, nfe);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && wu >= 0 && wu < 1e-9 && across == 0 && wl < 1e-9 && onfe >= nfe, msg);
+	free(e);
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(o);
+}
+
 int test_168_remesh_attributes_main(void)
 {
 	g_pass = 0;
@@ -393,6 +521,7 @@ int test_168_remesh_attributes_main(void)
 	test_isoline_remesh();
 	test_intersection();
 	test_gradation();
+	test_seams();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

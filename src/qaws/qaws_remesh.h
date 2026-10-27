@@ -116,9 +116,14 @@
  * along itself, its vertices not slid. Every output vertex keeps its location on the
  * reference (qaws_mesh_3d_get_footpoints), and every attribute of the
  * reference's mesh is evaluated there by its rule: vertex attributes at the
- * vertex, corner attributes at the vertex as seen from the face's side (a
- * seam that is a feature keeps both sides), face attributes at the face's
- * centre. The input is not changed.
+ * vertex, corner attributes at the vertex as seen from the face's side (its
+ * own footpoint when no crease or seam lies between it and the face's
+ * centre), face attributes at the face's centre, edge values on the edges
+ * lying on the reference mesh's (its pieces; the others zeros). With its own
+ * reference the input's attributes' seams (corner or face values differing
+ * across an edge, an edge value) are kept as lines like its features (no
+ * face across one: its values never blend), without becoming features of
+ * the result. The input is not changed.
  */
 
 #ifndef QAWS_ENUM_QAWS_REMESH_METHOD
