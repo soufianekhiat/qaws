@@ -101,6 +101,28 @@
 #define QAWS_DECIMATE_HEMISPHERE 8u         /* the octahedral views over the +z hemisphere only */
 #define QAWS_DECIMATE_MEMORYLESS 16u        /* costs from the current faces, nothing stored (Lindstrom and Turk 1998) */
 
+/* How a vertex attribute's two values meet when a collapse merges two vertices (qaws_decimate_desc.merges, by name):
+   INTERPOLATE (the default) along the edge to the new place (or the attribute quadric's best, with attribute_weight);
+   MINIMUM and MAXIMUM per component (the extremes kept: a thickness never thinned); SUM (a count or mass kept in total);
+   AVERAGE the two's mean by the attribute's rule. */
+#ifndef QAWS_ENUM_QAWS_ATTRIBUTE_MERGE
+#define QAWS_ENUM_QAWS_ATTRIBUTE_MERGE
+typedef enum qaws_attribute_merge
+{
+	QAWS_MERGE_INTERPOLATE = 0,
+	QAWS_MERGE_MINIMUM,
+	QAWS_MERGE_MAXIMUM,
+	QAWS_MERGE_SUM,
+	QAWS_MERGE_AVERAGE
+} qaws_attribute_merge;
+#endif
+
+typedef struct qaws_attribute_merge_rule
+{
+	char const* name;                   /* a vertex attribute */
+	qaws_attribute_merge merge;
+} qaws_attribute_merge_rule;
+
 typedef struct qaws_decimate_desc
 {
 	unsigned int target_faces;          /* stop at this many faces; 0: no count */
@@ -117,6 +139,8 @@ typedef struct qaws_decimate_desc
 	qaws_scalar feature_weight;         /* the border's and features' planes, the same way; 0: 100 */
 	qaws_scalar attribute_weight;       /* a unit of the vertex attributes (LINEAR, NORMALIZED) as this distance in the quadric
 	                                       (Hoppe 1999); 0: the attributes not in it */
+	qaws_attribute_merge_rule const* merges;   /* per vertex attribute how merged vertices' values meet (NULL: interpolated) */
+	unsigned int merge_count;
 } qaws_decimate_desc;
 
 typedef struct qaws_decimate_report
@@ -130,7 +154,8 @@ typedef struct qaws_decimate_report
 	unsigned int seams;                 /* edges made features as attribute seams */
 } qaws_decimate_report;
 
-/* report may be NULL; desc NULL: half the faces */
+/* report may be NULL; desc NULL: half the faces. INVALID_ARGUMENT also for a merge rule naming no vertex attribute or an
+   unknown merge */
 qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* mesh, qaws_decimate_desc const* desc);
 
 #endif /* QAWS_MESH_DECIMATE_H */

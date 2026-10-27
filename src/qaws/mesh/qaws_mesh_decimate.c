@@ -559,6 +559,7 @@ static int dc_wedge_same(double const* p, double const* q, unsigned int n, unsig
    counts. shortcut: 256 corners round the edge at most (the overlapping pieces of a sweep's flat faces pass 64; more: the
    attribute left as the collapse copies it), upgrade by growing the scratch */
 #define DC_WEDGE_MAX 256
+#define DC_MERGE_MAX 32u   /* merge rules at most */
 
 /* union-find over the wedge groups: the root of i (paths halved), and two joined (the least root kept) */
 static unsigned int dc_root(unsigned int* grp, unsigned int i)
@@ -990,6 +991,8 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 	double* sopt = NULL;
 	double* wtab = NULL;   /* the corner attributes' wedges round a collapse (dc_wedges_before) */
 	unsigned int* wnt = NULL;
+	unsigned int nmg = 0, mga[DC_MERGE_MAX], mgm[DC_MERGE_MAX];   /* the vertex attributes with a merge rule, their rules */
+	double mgv[32 * DC_MERGE_MAX];                                /* (their two values round a collapse) */
 	double bound2, *views = NULL, *share = NULL, *seen = NULL, sweight = desc && desc->silhouette_weight > 0 ? (double)desc->silhouette_weight : 100;
 	unsigned int nviews = 0;
 	int failed = 0;
@@ -1002,6 +1005,25 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		|| ((desc->flags & QAWS_DECIMATE_MEMORYLESS) && (desc->view_count || desc->octahedral_views || desc->attribute_weight > 0)))))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	m = &mesh->hm;
+	if (desc && desc->merge_count)
+	{
+		/* the merge rules: vertex attributes of 16 components at most, a known merge */
+		unsigned int r, id;
+		if (!desc->merges || desc->merge_count > DC_MERGE_MAX)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		for (r = 0; r < desc->merge_count; r++)
+		{
+			qaws_attribute_merge_rule const* mr = &desc->merges[r];
+			if (!mr->name || qaws_mesh_3d_find_attribute(&id, mesh, mr->name) != QAWS_STATUS_OK || m->attr[id].element != QAWS_MESH_VERTEX ||
+				m->attr[id].n > 16 || (unsigned int)mr->merge > QAWS_MERGE_AVERAGE)
+				return QAWS_STATUS_INVALID_ARGUMENT;
+			if (mr->merge != QAWS_MERGE_INTERPOLATE)
+			{
+				mga[nmg] = id;
+				mgm[nmg++] = (unsigned int)mr->merge;
+			}
+		}
+	}
 	memset(&w, 0, sizeof w);
 	memset(&H, 0, sizeof H);
 	live = dc_faces(m);
@@ -1256,6 +1278,13 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		t = l2 > 0 ? t / l2 : 1;
 		t = t < 0 ? 0 : t > 1 ? 1 : t;
 		dc_wedges_before(m, a, b, x, wtab, wnt, 8 * DC_WEDGE_MAX);
+		/* (the merged attributes' two values, kept for after the collapse) */
+		for (k = 0; k < nmg; k++)
+		{
+			unsigned int at = mga[k], n2 = m->attr[at].n;
+			memcpy(mgv + 32 * (size_t)k, hm_attr_at(m, at, a), sizeof(double) * n2);
+			memcpy(mgv + 32 * (size_t)k + 16, hm_attr_at(m, at, b), sizeof(double) * n2);
+		}
 		na_ring = w.memless ? 0 : hm_ring(m, a, aring, acap);
 		if (na_ring > acap)
 		{
@@ -1280,6 +1309,18 @@ qaws_status qaws_mesh_3d_decimate(qaws_decimate_report* report, qaws_mesh_3d* me
 		for (a0 = 0; na && a0 < m->na; a0++)
 			if (m->attr[a0].element == QAWS_MESH_VERTEX && hm_rule_unit(m->attr[a0].rule))
 				hm_space_out(hm_attr_at(m, a0, b), m->attr[a0].n, m->attr[a0].rule);
+		/* the merge rules: b's value from the two (over the interpolation) */
+		for (k = 0; k < nmg; k++)
+		{
+			unsigned int at = mga[k], n2 = m->attr[at].n, q;
+			double const *va = mgv + 32 * (size_t)k, *vb = va + 16;
+			double* o = hm_attr_at(m, at, b);
+			if (mgm[k] == QAWS_MERGE_AVERAGE)
+				hm_lerp(o, va, vb, 0.5, n2, m->attr[at].rule);
+			else
+				for (q = 0; q < n2; q++)
+					o[q] = mgm[k] == QAWS_MERGE_MINIMUM ? fmin(va[q], vb[q]) : mgm[k] == QAWS_MERGE_MAXIMUM ? fmax(va[q], vb[q]) : va[q] + vb[q];
+		}
 		for (k = 0; k < w.K; k++)
 			w.Q[w.K * (size_t)b + k] += w.Q[w.K * (size_t)a + k];
 		w.W[b] += w.W[a];

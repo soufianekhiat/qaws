@@ -118,6 +118,7 @@
 #define qaws_array_view_validate QAWS_SFX(qaws_array_view_validate)
 #define qaws_attribute_combine QAWS_SFX(qaws_attribute_combine)
 #define qaws_attribute_desc QAWS_SFX(qaws_attribute_desc)
+#define qaws_attribute_merge_rule QAWS_SFX(qaws_attribute_merge_rule)
 #define qaws_attribute_promote_desc QAWS_SFX(qaws_attribute_promote_desc)
 #define qaws_attribute_track QAWS_SFX(qaws_attribute_track)
 #define qaws_bezier3_eval_2d QAWS_SFX(qaws_bezier3_eval_2d)

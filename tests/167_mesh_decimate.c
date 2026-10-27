@@ -1,6 +1,10 @@
 /*
  * Test 167: decimation by quadric error (qaws_mesh_3d_decimate), small meshes
  *
+ *   - merge rules (qaws_decimate_desc.merges): an icosphere down to a quarter with a vertex "count" of 1 merged by SUM (the
+ *     total kept: the input's vertex count), a "thick" (the vertex's height, + 2) by MAXIMUM and a "low" (the same) by
+ *     MINIMUM (the input's extremes still there exactly); a rule naming a face attribute refused;
+ *
  *   - a unit icosphere (1280 triangles) down to 320: the count reached, still
  *     closed, its certified deviation from the input within 2% of the radius;
  *     an error bound stops it with every collapse under the bound;
@@ -795,6 +799,65 @@ static void test_attributes(void)
 	TEST_ASSERT(faces[1] <= 2 * n * n / 6 + 1 && faces[0] <= 2 * n * n / 6 + 1 && rms[1] < 0.25 * rms[0] && lin < 1e-12, msg);
 }
 
+static void test_merges(void)
+{
+	qaws_mesh_3d* m = dm_icosphere(3);
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nf = qaws_mesh_3d_get_face_count(m), i, id, nv2;
+	qaws_scalar *one = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv), *th = (qaws_scalar*)malloc(sizeof(qaws_scalar) * nv), *fa = (qaws_scalar*)calloc(nf, sizeof(qaws_scalar));
+	qaws_scalar *c2, *t2, *l2;
+	qaws_attribute_desc ad;
+	qaws_attribute_merge_rule rules[3], bad;
+	qaws_decimate_desc d;
+	qaws_status s1, s2;
+	double hi = -1e30, lo = 1e30, sum = 0, hi2 = -1e30, lo2 = 1e30;
+	char msg[300];
+	for (i = 0; i < nv; i++)
+	{
+		qaws_vec3 v = qaws_mesh_3d_get_vertex(m, i);
+		one[i] = 1;
+		th[i] = (qaws_scalar)(v.z + 2);
+		hi = fmax(hi, (double)th[i]);
+		lo = fmin(lo, (double)th[i]);
+	}
+	memset(&ad, 0, sizeof ad);
+	ad.element = QAWS_MESH_VERTEX; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	ad.name = "count"; qaws_mesh_3d_add_attribute(&id, m, one, &ad);
+	ad.name = "thick"; qaws_mesh_3d_add_attribute(&id, m, th, &ad);
+	ad.name = "low"; qaws_mesh_3d_add_attribute(&id, m, th, &ad);
+	ad.name = "mat"; ad.element = QAWS_MESH_FACE; qaws_mesh_3d_add_attribute(&id, m, fa, &ad);
+	rules[0].name = "count"; rules[0].merge = QAWS_MERGE_SUM;
+	rules[1].name = "thick"; rules[1].merge = QAWS_MERGE_MAXIMUM;
+	rules[2].name = "low"; rules[2].merge = QAWS_MERGE_MINIMUM;
+	memset(&d, 0, sizeof d);
+	d.target_faces = nf / 4;
+	d.merges = rules;
+	d.merge_count = 3;
+	s1 = qaws_mesh_3d_decimate(NULL, m, &d);
+	nv2 = qaws_mesh_3d_get_vertex_count(m);
+	c2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (nv2 + 1));
+	t2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (nv2 + 1));
+	l2 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (nv2 + 1));
+	qaws_mesh_3d_find_attribute(&id, m, "count"); qaws_mesh_3d_get_attribute(c2, m, id);
+	qaws_mesh_3d_find_attribute(&id, m, "thick"); qaws_mesh_3d_get_attribute(t2, m, id);
+	qaws_mesh_3d_find_attribute(&id, m, "low"); qaws_mesh_3d_get_attribute(l2, m, id);
+	for (i = 0; i < nv2; i++)
+	{
+		sum += (double)c2[i];
+		hi2 = fmax(hi2, (double)t2[i]);
+		lo2 = fmin(lo2, (double)l2[i]);
+	}
+	bad.name = "mat"; bad.merge = QAWS_MERGE_SUM;
+	d.merges = &bad;
+	d.merge_count = 1;
+	s2 = qaws_mesh_3d_decimate(NULL, m, &d);
+	sprintf(msg, "merges: %u vertices to %u, count summed %.0f (%u), the highest kept %.6f (%.6f), the lowest %.6f (%.6f); a face attribute refused %d",
+		nv, nv2, sum, nv, hi2, hi, lo2, lo, (int)s2);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && nv2 < nv / 2 && sum == nv && hi2 == hi && lo2 == lo && s2 == QAWS_STATUS_INVALID_ARGUMENT, msg);
+	free(one); free(th); free(fa); free(c2); free(t2); free(l2);
+	qaws_mesh_3d_destroy(m);
+}
+
 int test_167_mesh_decimate_main(void)
 {
 	g_pass = 0;
@@ -808,6 +871,7 @@ int test_167_mesh_decimate_main(void)
 	test_options();
 	test_seams();
 	test_attributes();
+	test_merges();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
