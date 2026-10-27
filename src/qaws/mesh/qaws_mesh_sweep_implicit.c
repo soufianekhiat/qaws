@@ -509,7 +509,7 @@ static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d co
 			swi_weights(c, best, q, w + 3 * (size_t)cc);
 		}
 	}
-	st = swp_carry(out, mesh, c->nt, src + nvo, w + 3 * (size_t)nvo, c->pv ? NULL : cR);
+	st = swp_carry(out, mesh, c->nt, src + nvo, w + 3 * (size_t)nvo, c->pv ? NULL : cR, 0);
 done:
 	qaws_internal_free(xo); qaws_internal_free(tri); qaws_internal_free(X); qaws_internal_free(src); qaws_internal_free(w); qaws_internal_free(tb);
 	qaws_internal_free(cR); qaws_internal_free(tn); qaws_internal_free(vto); qaws_internal_free(vtl);

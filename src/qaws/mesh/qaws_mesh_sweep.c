@@ -1580,11 +1580,113 @@ static void swp_rv_bary(double const* x, double const* a, double const* b, doubl
 		w[k] = den > 0 ? w[k] / den : 1.0 / 3;
 }
 
+/* an out edge's values (sv, n each, zeroed) from the mesh's edge whose points both its ends come from: per out corner its
+   source triangle (csrc), weights (cw) and rotation (cR, NULL none); the mesh's vertices weighed (above 1e-9) at both ends
+   two, one edge of it; one (a vertex tracing the out edge: a ring), its edge whose turned direction lies along the out edge
+   (within 30 degrees, the nearest) */
+static qaws_status swp_carry_edges(qaws_scalar* sv, qaws_scalar const* val, unsigned int n, qaws_mesh_3d const* out, unsigned int const* tri,
+	unsigned int nto, qaws_mesh_3d const* mesh, unsigned int const* fv, unsigned int const* tc, unsigned int const* csrc, double const* cw,
+	double const* cR, qaws_scalar const* xo)
+{
+	unsigned int ne = qaws_mesh_3d_get_edge_count(mesh), neo = qaws_mesh_3d_get_edge_count(out), nv = qaws_mesh_3d_get_vertex_count(mesh), i, k, j;
+	unsigned int *e = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)ne + 1));
+	unsigned int *eo = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)neo + 1));
+	unsigned int *vto = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 2, sizeof(unsigned int));
+	unsigned int *vte = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)ne + 1));
+	qaws_scalar* xm = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
+	unsigned long long *key = NULL, *keyo = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!e || !eo || !vto || !vte || !xm)
+		goto done;
+	qaws_mesh_3d_get_edges(e, mesh);
+	qaws_mesh_3d_get_edges(eo, out);
+	qaws_mesh_3d_get_positions(xm, mesh);
+	if (!(key = cy_keys(e, ne)) || !(keyo = cy_keys(eo, neo)))
+		goto done;
+	/* (the edges round each vertex) */
+	for (i = 0; i < 2 * ne; i++)
+		vto[e[i] + 1]++;
+	for (i = 0; i < nv; i++)
+		vto[i + 1] += vto[i];
+	for (i = 0; i < 2 * ne; i++)
+		vte[vto[e[i]]++] = i / 2;
+	for (i = nv; i > 0; i--)
+		vto[i] = vto[i - 1];
+	vto[0] = 0;
+	for (i = 0; i < nto; i++)
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int c0 = 3 * i + k, c1 = 3 * i + (k + 1) % 3, set[6], ns = 0, q, x, eg, oe;
+			for (q = 0; q < 2; q++)
+			{
+				unsigned int cc = q ? c1 : c0;
+				for (j = 0; j < 3; j++)
+					if (cw[3 * (size_t)cc + j] > 1e-9)
+					{
+						unsigned int v = fv[tc[3 * (size_t)csrc[cc] + j]], have = 0;
+						for (x = 0; x < ns; x++)
+							have |= set[x] == v;
+						if (!have)
+							set[ns++] = v;
+					}
+			}
+			if ((oe = cy_find(keyo, neo, tri[c0], tri[c1])) == QAWS_MESH_NONE)
+				continue;
+			if (ns == 2 && (eg = cy_find(key, ne, set[0], set[1])) != QAWS_MESH_NONE)
+				;
+			else
+			{
+				/* (the first end's source vertices: their edges, the one along the out edge) */
+				double d[3], ld = 0, best = 0.866;
+				unsigned int s0[3], n0 = 0, z;
+				for (j = 0; j < 3; j++)
+					if (cw[3 * (size_t)c0 + j] > 1e-9)
+						s0[n0++] = fv[tc[3 * (size_t)csrc[c0] + j]];
+				eg = QAWS_MESH_NONE;
+				for (j = 0; j < 3; j++)
+				{
+					d[j] = (double)xo[3 * (size_t)tri[c1] + j] - (double)xo[3 * (size_t)tri[c0] + j];
+					ld += d[j] * d[j];
+				}
+				ld = sqrt(ld);
+				for (z = 0; z < n0 && n0 <= 2; z++)
+				for (j = vto[s0[z]]; ld > 0 && j < vto[s0[z] + 1]; j++)
+				{
+					unsigned int g = vte[j], y;
+					double a[3], r[3], la = 0, c;
+					for (y = 0; y < 3; y++)
+						a[y] = (double)xm[3 * (size_t)e[2 * (size_t)g + 1] + y] - (double)xm[3 * (size_t)e[2 * (size_t)g] + y];
+					for (y = 0; y < 3; y++)
+						r[y] = cR ? cR[9 * (size_t)c0 + 3 * y] * a[0] + cR[9 * (size_t)c0 + 3 * y + 1] * a[1] + cR[9 * (size_t)c0 + 3 * y + 2] * a[2] : a[y];
+					for (y = 0; y < 3; y++)
+						la += r[y] * r[y];
+					c = la > 0 ? fabs(r[0] * d[0] + r[1] * d[1] + r[2] * d[2]) / (sqrt(la) * ld) : 0;
+					if (c > best)
+					{
+						best = c;
+						eg = g;
+					}
+				}
+				if (eg == QAWS_MESH_NONE)
+					continue;
+			}
+			for (j = 0; j < n; j++)
+				sv[(size_t)n * oe + j] = val[(size_t)n * eg + j];
+		}
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(e); qaws_internal_free(eo); qaws_internal_free(key); qaws_internal_free(keyo); qaws_internal_free(vto); qaws_internal_free(vte);
+	qaws_internal_free(xm);
+	return st;
+}
+
 /* out's attributes from the mesh's (its nt triangles, faces fanned from their first corner): per out corner (3 per
    triangle, in order) its source triangle csrc, the weights cw (3) on it and a rotation cR (9 by rows, NULL: none) for
-   directions and quaternions; vertex values come out per corner, face ones from the first corner's source, edge ones zeros
-   (a NORMAL straying past 30 degrees from its out triangle: the triangle's own) */
-qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* csrc, double const* cw, double const* cR)
+   directions and quaternions; vertex values come out per corner, face ones from the first corner's source (a NORMAL straying
+   past 30 degrees from its out triangle: the triangle's own); with edges, an out edge whose two ends come from points of one
+   edge of the mesh (a ring a point of that edge traces, a meridian along it) takes that edge's values, else (and without
+   edges) zeros */
+qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* csrc, double const* cw, double const* cR, int edges)
 {
 	unsigned int na = qaws_mesh_3d_get_attribute_count(mesh), nf = qaws_mesh_3d_get_face_count(mesh), nc = qaws_mesh_3d_get_corner_count(mesh), a;
 	unsigned int nv = qaws_mesh_3d_get_vertex_count(mesh), nto = qaws_mesh_3d_get_triangle_count(out), nvo = qaws_mesh_3d_get_vertex_count(out), i, k;
@@ -1626,7 +1728,10 @@ qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int 
 		if (d.element == QAWS_MESH_EDGE)
 		{
 			memset(sv, 0, sizeof(qaws_scalar) * n * (size_t)qaws_mesh_3d_get_edge_count(out));
-			st = qaws_mesh_3d_add_attribute(&id, out, sv, &d);
+			if (edges)
+				st = swp_carry_edges(sv, val, n, out, tri, nto, mesh, fv, tc, csrc, cw, cR, xo);
+			if (st == QAWS_STATUS_OK)
+				st = qaws_mesh_3d_add_attribute(&id, out, sv, &d);
 			continue;
 		}
 		cnt = d.element == QAWS_MESH_VERTEX ? nv : d.element == QAWS_MESH_CORNER ? nc : nf;
@@ -2096,7 +2201,7 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 				for (k = 0; k < 3; k++)
 					cw[3 * (size_t)i + k] = wsrc[3 * (size_t)v + k];
 			}
-			st = swp_carry(*out, mesh, nt, cs, cw, cR);
+			st = swp_carry(*out, mesh, nt, cs, cw, cR, 1);
 		}
 		qaws_internal_free(cs); qaws_internal_free(cw); qaws_internal_free(cR);
 	}

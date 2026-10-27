@@ -31,6 +31,8 @@
  *     implicitly (report.implicit) within 3% of that volume; its turn's drift
  *     reported, its volume between the true sweep's and the cylinder's along
  *     the drift;
+ *   - edge values through a spin: the 64-gon cylinder with 7 on its two rims' edges, spun two turns: its revolution's
+ *     edges carrying 7 are the two rim circles (their length 2 pi r each, within the chords), every other edge 0;
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -475,6 +477,56 @@ static void test_spin_more(void)
 	qaws_motion_destroy(m0); qaws_motion_destroy(m1);
 }
 
+static void test_spin_edges(void)
+{
+	double r = 0.5, len7 = 0, other = 0;
+	qaws_mesh_3d *cyl = sw_cylinder(r), *o = NULL;
+	qaws_motion* m = sw_spin(0.001);
+	qaws_sweep_desc d;
+	qaws_sweep_report rep;
+	qaws_attribute_desc ad;
+	unsigned int ne = qaws_mesh_3d_get_edge_count(cyl), *e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne), i, id;
+	qaws_scalar* v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ne);
+	char msg[300];
+	qaws_mesh_3d_get_edges(e, cyl);
+	for (i = 0; i < ne; i++)
+	{
+		qaws_vec3 a = qaws_mesh_3d_get_vertex(cyl, e[2 * i]), b = qaws_mesh_3d_get_vertex(cyl, e[2 * i + 1]);
+		/* (a rim edge: both ends on the circle, at one height) */
+		v[i] = (qaws_scalar)(e[2 * i] < 128 && e[2 * i + 1] < 128 && a.z == b.z ? 7 : 0);
+	}
+	memset(&ad, 0, sizeof ad);
+	ad.name = "w"; ad.element = QAWS_MESH_EDGE; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(&id, cyl, v, &ad);
+	free(e); free(v);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)0.002;
+	qaws_mesh_3d_sweep(&o, &rep, cyl, m, &d);
+	if (o && qaws_mesh_3d_find_attribute(&id, o, "w") == QAWS_STATUS_OK)
+	{
+		ne = qaws_mesh_3d_get_edge_count(o);
+		e = (unsigned int*)malloc(sizeof(unsigned int) * 2 * ne);
+		v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * ne);
+		qaws_mesh_3d_get_edges(e, o);
+		qaws_mesh_3d_get_attribute(v, o, id);
+		for (i = 0; i < ne; i++)
+		{
+			qaws_vec3 a = qaws_mesh_3d_get_vertex(o, e[2 * i]), b = qaws_mesh_3d_get_vertex(o, e[2 * i + 1]);
+			double l = sqrt(((double)b.x - a.x) * ((double)b.x - a.x) + ((double)b.y - a.y) * ((double)b.y - a.y) + ((double)b.z - a.z) * ((double)b.z - a.z));
+			if (v[i] == 7)
+				len7 += l;
+			else if (v[i] != 0)
+				other += l;
+		}
+		free(e); free(v);
+	}
+	sprintf(msg, "edge values through a spin (%.2f turns): length carrying 7 %.5f (two rims %.5f), other values %.5f", (double)rep.turns, len7, 4 * SW_PI * r, other);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && rep.turns > 1.9 && fabs(len7 - 4 * SW_PI * r) < 0.01 && other == 0, msg);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(cyl); qaws_mesh_3d_destroy(o);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *c = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -502,6 +554,7 @@ int test_180_mesh_sweep_main(void)
 	test_carving();
 	test_spin();
 	test_spin_more();
+	test_spin_edges();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

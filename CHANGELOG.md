@@ -102,6 +102,8 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Sweeps of spins carry edge values (they came out zeros): an edge of the revolution from points of one body edge, or a
+  ring a body vertex traces along one of its edges, takes that edge's values (test 180).
 - Sweeps: a face sliding along itself (a cube's top moved sideways or turned in its plane) lost its values on the
   sweep's top: the side faces' hulls' top walls lying in that plane carried theirs. Such walls now take the values of the
   face whose plane they lie in, at the edge that swept them (test 181, figure 72).

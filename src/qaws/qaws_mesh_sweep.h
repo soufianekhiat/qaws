@@ -65,7 +65,10 @@
  * stands; a flat face across the circle its own point), directions turned
  * by that angle; a NORMAL straying past 30 degrees from its face (a corner or
  * edge of the body tracing the surface has no normal of it) the face's own;
- * edge values do not survive the revolution (zeros). The report's turns says
+ * an edge of the revolution whose two ends come from one edge of the body
+ * takes its values, as does a ring a body vertex or edge traces from the
+ * body's edge there lying along it (within 30 degrees), other edges zeros.
+ * The report's turns says
  * a spin was found. An asymmetric body spinning while it drifts past the
  * tolerance a turn is swept implicitly (qaws_mesh_3d_sweep_implicit, the
  * report's implicit set: within a cell of desc.resolution's grid, its
