@@ -16,7 +16,12 @@
  *     centre within it of its corners' mean; the box shell in quads, its
  *     faces' grids meeting (closed, genus 0, the 8 corners its only irregular
  *     vertices); the patch in triangles;
- *   - refusals: PARAMETRIC (reserved), no description, a negative length.
+ *   - PARAMETRIC (triangles meshed in (u, v) in the surface's metric): the
+ *     torus and the box shell closed, every vertex on its face exactly, the
+ *     edges near the target in space, angles fair; the patch to a chord
+ *     tolerance, finer where it bends;
+ *   - refusals: RESTRICTED_DELAUNAY (reserved), PARAMETRIC in quads, no
+ *     description, a negative length.
  *
  * By default the torus at 0.4 and the box at 0.25 (written at 0.25 and
  * 0.15, run so with QAWS_TEST_HEAVY=1).
@@ -479,23 +484,95 @@ static void test_structured(void)
 	qaws_surface_destroy(patch);
 }
 
+static qaws_mesh_3d* tg_parametric(qaws_surface const* s, qaws_shell_atlas const* a, double L, double chord, tg_mesh* t)
+{
+	qaws_generate_desc d;
+	qaws_mesh_3d* m = NULL;
+	memset(&d, 0, sizeof d);
+	d.method = QAWS_GENERATE_PARAMETRIC;
+	d.target_length = (qaws_scalar)L;
+	d.chord_tolerance = (qaws_scalar)chord;
+	d.min_length = (qaws_scalar)(chord > 0 ? 0.02 : 0);
+	d.max_length = (qaws_scalar)(chord > 0 ? 0.3 : 0);
+	if ((s ? qaws_mesh_generate_surface(&m, NULL, s, &d) : qaws_mesh_generate_shell(&m, NULL, a, &d)) == QAWS_STATUS_OK && m)
+		tg_read(m, t);
+	else
+		memset(t, 0, sizeof *t);
+	return m;
+}
+
+static void test_parametric(void)
+{
+	static double const h[3] = { 1, 0.7, 0.5 };
+	qaws_surface *torus = tg_torus(2, 0.7), *patch = tg_patch(), *box[6];
+	qaws_shell_atlas* atlas = NULL;
+	qaws_mesh_3d* m;
+	tg_mesh t;
+	char msg[400];
+	unsigned int i;
+	double err;
+	m = tg_parametric(torus, NULL, 0.3, 0, &t);
+	err = m ? tg_foot_error(&t, torus, NULL) : HUGE_VAL;
+	sprintf(msg, "PARAMETRIC torus to 0.3: %u triangles, valid %d, closed %d genus %u, footpoints %.2e, edges %.3g..%.3g mean %.3g, angles %.3g..%.3g",
+		t.nf, m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK, t.top.closed, t.top.genus, err, (double)t.q.min_edge, (double)t.q.max_edge,
+		(double)t.q.mean_edge, (double)t.q.min_angle, (double)t.q.max_angle);
+	printf("  %s\n", msg);
+	TEST_ASSERT(m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.triangles == t.nf && t.top.closed && t.top.genus == 1 && err < TEST_BOUND(1e-9, 32)
+		&& fabs(t.q.mean_edge - 0.3) < 0.08 && t.q.min_angle > 20, msg);
+	if (m)
+		tg_free(&t);
+	qaws_mesh_3d_destroy(m);
+	tg_box(box, h);
+	qaws_shell_atlas_create(&atlas, (qaws_surface const* const*)box, 6, 0);
+	m = atlas ? tg_parametric(NULL, atlas, 0.25, 0, &t) : NULL;
+	err = m ? tg_foot_error(&t, NULL, atlas) : HUGE_VAL;
+	sprintf(msg, "PARAMETRIC box shell to 0.25: %u triangles, valid %d, closed %d genus %u, footpoints %.2e, edges %.3g..%.3g mean %.3g, angles %.3g..%.3g",
+		t.nf, m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK, t.top.closed, t.top.genus, err, (double)t.q.min_edge, (double)t.q.max_edge,
+		(double)t.q.mean_edge, (double)t.q.min_angle, (double)t.q.max_angle);
+	printf("  %s\n", msg);
+	TEST_ASSERT(m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.top.closed && t.top.genus == 0 && err < TEST_BOUND(1e-9, 32)
+		&& fabs(t.q.mean_edge - 0.25) < 0.07 && t.q.min_angle > 20, msg);
+	if (m)
+		tg_free(&t);
+	qaws_mesh_3d_destroy(m);
+	m = tg_parametric(patch, NULL, 0, 0.005, &t);
+	err = m ? tg_foot_error(&t, patch, NULL) : HUGE_VAL;
+	sprintf(msg, "PARAMETRIC patch to a chord of 0.005: %u triangles, valid %d, footpoints %.2e, edges %.3g..%.3g, angles %.3g..%.3g", t.nf,
+		m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK, err, (double)t.q.min_edge, (double)t.q.max_edge, (double)t.q.min_angle, (double)t.q.max_angle);
+	printf("  %s\n", msg);
+	TEST_ASSERT(m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && err < TEST_BOUND(1e-9, 32) && t.q.max_edge > 2 * t.q.min_edge, msg);
+	if (m)
+		tg_free(&t);
+	qaws_mesh_3d_destroy(m);
+	qaws_shell_atlas_destroy(atlas);
+	for (i = 0; i < 6; i++)
+		qaws_surface_destroy(box[i]);
+	qaws_surface_destroy(torus);
+	qaws_surface_destroy(patch);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* s = tg_patch();
 	qaws_generate_desc d;
 	qaws_mesh_3d* out = NULL;
-	qaws_status s1, s2, s3;
+	qaws_status s1, s2, s3, s4;
 	char msg[200];
 	memset(&d, 0, sizeof d);
-	d.method = QAWS_GENERATE_PARAMETRIC;
+	d.method = QAWS_GENERATE_RESTRICTED_DELAUNAY;
 	s1 = qaws_mesh_generate_surface(&out, NULL, s, &d);
+	d.method = QAWS_GENERATE_PARAMETRIC;
+	d.elements = QAWS_ELEMENTS_QUADS;
+	s4 = qaws_mesh_generate_surface(&out, NULL, s, &d);
+	d.elements = QAWS_ELEMENTS_TRIANGLES;
 	s2 = qaws_mesh_generate_surface(&out, NULL, s, NULL);
 	d.method = QAWS_GENERATE_REMESH;
 	d.target_length = (qaws_scalar)-1;
 	s3 = qaws_mesh_generate_surface(&out, NULL, s, &d);
-	sprintf(msg, "refusals: PARAMETRIC %s, no description %s, a negative length %s", qaws_status_to_string(s1), qaws_status_to_string(s2),
+	sprintf(msg, "refusals: RESTRICTED_DELAUNAY %s, PARAMETRIC in quads %s, no description %s, a negative length %s", qaws_status_to_string(s1),
+		qaws_status_to_string(s4), qaws_status_to_string(s2),
 		qaws_status_to_string(s3));
-	TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT && !out, msg);
+	TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && s4 == QAWS_STATUS_UNSUPPORTED_OPERATION && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT && !out, msg);
 	qaws_surface_destroy(s);
 }
 
@@ -508,6 +585,7 @@ int test_126_mesh_generate_main(void)
 	test_torus();
 	test_box();
 	test_structured();
+	test_parametric();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

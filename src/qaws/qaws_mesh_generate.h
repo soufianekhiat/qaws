@@ -42,9 +42,20 @@
  *           seams and poles meet; every vertex exactly on its face, edges
  *           between faces features. A shell's faces must be untrimmed
  *           (UNSUPPORTED_OPERATION otherwise).
- *   PARAMETRIC, RESTRICTED_DELAUNAY  reserved (UNSUPPORTED_OPERATION
- *           today): meshing in (u, v) with the metric, with Delaunay
- *           guarantees.
+ *   PARAMETRIC  triangles meshed in each face's (u, v) and lifted: the
+ *           boundary split in space (each side by equal steps of its length
+ *           over the size: the target, or with tolerances the side curve's
+ *           own chord and angle sizes, within [min_length, max_length]; the
+ *           same points from both faces of an edge), the counts made the
+ *           larger across shared edges; inside, LOCAL remeshing in (u, v)
+ *           with the metric of the surface's first fundamental form over
+ *           the size squared (the size from the larger principal curvature
+ *           with tolerances), the boundary pinned. Every vertex exactly on
+ *           its face; isotropic in space whatever the parametrization.
+ *           Triangles only (UNSUPPORTED_OPERATION for quads); a shell's
+ *           faces untrimmed.
+ *   RESTRICTED_DELAUNAY  reserved (UNSUPPORTED_OPERATION today):
+ *           Delaunay guarantees.
  *
  * Sizes: a uniform target length, or adaptive by tolerances (the chord and
  * angle tolerances of qaws_curvature_size_desc, clamped and graded) read

@@ -4,6 +4,10 @@
  *   chord tolerance (the grid's counts doubled until every cell's centre is
  *   within it), the NURBS torus (no irregular vertex), the box shell (each
  *   face a grid, the counts matched across its edges).
+ *   PARAMETRIC, below: each face's grid remeshed in (u, v) in the surface's
+ *   metric (its first fundamental form over the size squared), lifted: the
+ *   torus, the box shell (faces meeting on the grids' border nodes), the
+ *   patch to a chord tolerance (sizes from its principal curvatures).
  */
 
 static qaws_mesh_3d* ms_gm_make(qaws_surface const* s, qaws_shell_atlas const* a, qaws_generate_method method, qaws_elements el, double L,
@@ -28,7 +32,7 @@ static void demo_generate_methods(void)
 {
 	static double const wire[3] = { 40, 45, 60 }, tint[3] = { 178, 192, 212 }, gold[3] = { 232, 196, 120 }, green[3] = { 170, 205, 160 };
 	static double const pal[6][3] = { { 230, 97, 1 }, { 253, 184, 99 }, { 178, 171, 210 }, { 94, 60, 153 }, { 120, 198, 121 }, { 49, 130, 189 } };
-	er_canvas* c = er_create(2200, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(2200, 1280, 3, 252, 252, 250);
 	qaws_surface *wavy = ms_wavy(), *torus = ms_nurbs_torus(2, 0.7), *box[6];
 	qaws_shell_atlas* atlas = NULL;
 	qaws_mesh_3d* g;
@@ -88,6 +92,41 @@ static void demo_generate_methods(void)
 		free(fid); free(fs); free(fv); free(p);
 	}
 	qaws_mesh_3d_destroy(g);
+	if ((g = ms_gm_make(torus, NULL, QAWS_GENERATE_PARAMETRIC, QAWS_ELEMENTS_TRIANGLES, 0.25, 0, &rep)) != NULL)
+	{
+		sprintf(sub, "%u triangles, angles %.0f..%.0f", qaws_mesh_3d_get_face_count(g), (double)rep.quality.min_angle, (double)rep.quality.max_angle);
+		ms_panel(c, 0, 640, 550, 640, g, 0.5, 0.75, "PARAMETRIC torus", sub);
+		ms_draw(c, g, green, NULL, 1, wire, 0.9);
+		printf("  parametric torus: %u triangles, angles %.1f..%.1f, edges %.3f..%.3f\n", qaws_mesh_3d_get_face_count(g), (double)rep.quality.min_angle,
+			(double)rep.quality.max_angle, (double)rep.quality.min_edge, (double)rep.quality.max_edge);
+	}
+	qaws_mesh_3d_destroy(g);
+	if ((g = atlas ? ms_gm_make(NULL, atlas, QAWS_GENERATE_PARAMETRIC, QAWS_ELEMENTS_TRIANGLES, 0.15, 0, &rep) : NULL) != NULL)
+	{
+		sprintf(sub, "6 faces: %u triangles, angles %.0f..%.0f", qaws_mesh_3d_get_face_count(g), (double)rep.quality.min_angle, (double)rep.quality.max_angle);
+		ms_panel(c, 550, 640, 550, 640, g, 0.62, 0.55, "the box shell", sub);
+		ms_draw(c, g, tint, NULL, 0, wire, 1.0);
+		printf("  parametric box: %u triangles, angles %.1f..%.1f\n", qaws_mesh_3d_get_face_count(g), (double)rep.quality.min_angle, (double)rep.quality.max_angle);
+	}
+	qaws_mesh_3d_destroy(g);
+	{
+		qaws_generate_desc d;
+		g = NULL;
+		memset(&d, 0, sizeof d);
+		d.method = QAWS_GENERATE_PARAMETRIC;
+		d.chord_tolerance = (qaws_scalar)0.003;
+		d.min_length = (qaws_scalar)0.02;
+		d.max_length = (qaws_scalar)0.25;
+		if (qaws_mesh_generate_surface(&g, &rep, wavy, &d) == QAWS_STATUS_OK && g)
+		{
+			sprintf(sub, "chord 0.003: %u triangles", qaws_mesh_3d_get_face_count(g));
+			ms_panel(c, 1100, 640, 550, 640, g, 0.6, 0.65, "adaptive by curvature", sub);
+			ms_draw(c, g, gold, NULL, 1, wire, 0.8);
+			printf("  parametric patch by chord: %u triangles, edges %.3f..%.3f, angles %.1f..%.1f\n", qaws_mesh_3d_get_face_count(g),
+				(double)rep.quality.min_edge, (double)rep.quality.max_edge, (double)rep.quality.min_angle, (double)rep.quality.max_angle);
+		}
+		qaws_mesh_3d_destroy(g);
+	}
 	er_save(c, "showcase/mesh78_generate_methods.png");
 	printf("mesh78_generate_methods.png\n");
 	qaws_shell_atlas_destroy(atlas);

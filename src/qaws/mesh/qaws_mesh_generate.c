@@ -317,6 +317,8 @@ static int mg_check(qaws_generate_desc const* desc)
 
 static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_generate_desc const* desc, double L, qaws_mesh_3d** out_mesh,
 	qaws_mesh_report* rep);
+static qaws_status mg_parametric(mg_src const* src, unsigned int nf, qaws_generate_desc const* desc, double L, qaws_mesh_3d** out_mesh,
+	qaws_mesh_report* rep);
 
 /* the dense mesh's size: half the target, finer for an adaptive one with a small minimum */
 static double mg_dense_length(qaws_generate_desc const* desc, double L)
@@ -345,7 +347,7 @@ qaws_status qaws_mesh_generate_shell(qaws_mesh_3d** out_mesh, qaws_mesh_report* 
 	*out_mesh = NULL;
 	if (!shell || !mg_check(desc))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method != QAWS_GENERATE_REMESH && desc->method != QAWS_GENERATE_STRUCTURED)
+	if (desc->method == QAWS_GENERATE_RESTRICTED_DELAUNAY || (desc->method == QAWS_GENERATE_PARAMETRIC && desc->elements != QAWS_ELEMENTS_TRIANGLES))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	memset(&rep, 0, sizeof rep);
 	st = qaws_shell_region_create_whole(&whole, shell);
@@ -358,11 +360,12 @@ qaws_status qaws_mesh_generate_shell(qaws_mesh_3d** out_mesh, qaws_mesh_report* 
 		st = QAWS_STATUS_INVALID_ARGUMENT;
 		goto done;
 	}
-	if (desc->method == QAWS_GENERATE_STRUCTURED)
+	if (desc->method == QAWS_GENERATE_STRUCTURED || desc->method == QAWS_GENERATE_PARAMETRIC)
 	{
 		src.shell = shell;
 		src.one = NULL;
-		st = mg_structured(&src, qaws_shell_atlas_get_face_count(shell), desc, L, out_mesh, &rep);
+		st = desc->method == QAWS_GENERATE_PARAMETRIC ? mg_parametric(&src, qaws_shell_atlas_get_face_count(shell), desc, L, out_mesh, &rep)
+			: mg_structured(&src, qaws_shell_atlas_get_face_count(shell), desc, L, out_mesh, &rep);
 		goto done;
 	}
 	/* the dense conformal mesh of the whole shell */
@@ -642,6 +645,485 @@ static void mg_grid_uv(qaws_surface const* s, double const* dom, unsigned int nu
 		}
 }
 
+/* PARAMETRIC: a face's start mesh (its boundary polygon triangulated, flat at z = 0 in (u, v)) remeshed by LOCAL in the
+   metric of the surface's first fundamental form over the size squared (sampled on a 64 x 64 grid of the domain D, the
+   reference), the start's first npin vertices (the boundary) pinned, so
+   faces still meet point to point: the size L, or with tolerances the chord's sqrt(8 chord / k) and the angle's angle / k
+   at the larger principal curvature k, within [min_length, L]. Out: the vertices' (u, v) and the triangles,
+   counter-clockwise in (u, v). */
+static qaws_status mg_param_face(qaws_surface const* s, double const* D, double const* uv, unsigned int nv, unsigned int npin, unsigned int const* tri0, unsigned int nt0,
+	double L, qaws_generate_desc const* desc, double** ouv, unsigned int* onv, unsigned int** otri, unsigned int* ont)
+{
+	enum { GN = 64, GV = (GN + 1) * (GN + 1) };
+	unsigned int i, j, *tri = NULL, *pin = NULL;
+	double* gx = NULL;
+	qaws_mesh_3d* gm = NULL;
+	double* x = NULL;
+	qaws_scalar *met = NULL, *pos = NULL;
+	qaws_mesh_3d *pm = NULL, *om = NULL;
+	qaws_mesh_reference* ref = NULL;
+	qaws_metric_field* mf = NULL;
+	qaws_mesh_reference_desc rd;
+	qaws_remesh_desc ld;
+	int adaptive = desc->target_length == 0 && (desc->chord_tolerance > 0 || desc->angle_tolerance > 0);
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	x = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nv + 1));
+	pin = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nv + 1));
+	met = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 6, GV));
+	gx = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, GV));
+	tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 6, GN * GN));
+	if (!x || !pin || !met || !gx || !tri)
+		goto done;
+	for (j = 0; j <= GN; j++)
+		for (i = 0; i <= GN; i++)
+		{
+			unsigned int v = i + (GN + 1) * j;
+			gx[3 * (size_t)v] = D[0] + (D[1] - D[0]) * i / GN;
+			gx[3 * (size_t)v + 1] = D[2] + (D[3] - D[2]) * j / GN;
+			gx[3 * (size_t)v + 2] = 0;
+			if (i < GN && j < GN)
+			{
+				unsigned int* q = tri + 6 * (size_t)(i + GN * j);
+				q[0] = v; q[1] = v + 1; q[2] = v + GN + 2;
+				q[3] = v; q[4] = v + GN + 2; q[5] = v + GN + 1;
+			}
+		}
+	if ((st = hm_mesh_3d_create(gx, GV, tri, NULL, 2 * GN * GN, &gm)) != QAWS_STATUS_OK)
+		goto done;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < nv; i++)
+	{
+		x[3 * (size_t)i] = uv[2 * (size_t)i];
+		x[3 * (size_t)i + 1] = uv[2 * (size_t)i + 1];
+		x[3 * (size_t)i + 2] = 0;
+		pin[i] = i;
+	}
+	if ((st = hm_mesh_3d_create(x, nv, tri0, NULL, nt0, &pm)) != QAWS_STATUS_OK)
+		goto done;
+	memset(&rd, 0, sizeof rd);
+	rd.interpolant = QAWS_INTERPOLANT_LINEAR;
+	if ((st = qaws_mesh_reference_create(&ref, gm, &rd)) != QAWS_STATUS_OK)
+		goto done;
+	/* each grid node's metric: the first fundamental form over its size squared (z: their mean, the plane's normal) */
+	for (i = 0; i < GV; i++)
+	{
+		qaws_surface_eval_result e;
+		double du[3], dv[3], E, F, G, h = L, eps;
+		memset(&e, 0, sizeof e);
+		qaws_surface_evaluate(&e, s, (qaws_scalar)gx[3 * (size_t)i], (qaws_scalar)gx[3 * (size_t)i + 1],
+			QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL | QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV);
+		mg_v3(e.du, du);
+		mg_v3(e.dv, dv);
+		E = mg_dot(du, du);
+		F = mg_dot(du, dv);
+		G = mg_dot(dv, dv);
+		if (adaptive)
+		{
+			double n[3], uu[3], uw[3], ww[3], l2, m2, n2, det = E * G - F * F, H, K, km;
+			mg_v3(e.normal, n);
+			mg_v3(e.duu, uu);
+			mg_v3(e.duv, uw);
+			mg_v3(e.dvv, ww);
+			l2 = mg_dot(uu, n);
+			m2 = mg_dot(uw, n);
+			n2 = mg_dot(ww, n);
+			H = det > 0 ? (l2 * G + n2 * E - 2 * m2 * F) / (2 * det) : 0;
+			K = det > 0 ? (l2 * n2 - m2 * m2) / det : 0;
+			km = fabs(H) + sqrt(fmax(0, H * H - K));
+			if (km > 0 && desc->chord_tolerance > 0)
+				h = fmin(h, sqrt(8 * (double)desc->chord_tolerance / km));
+			if (km > 0 && desc->angle_tolerance > 0)
+				h = fmin(h, (double)desc->angle_tolerance / km);
+			h = fmax(h, desc->min_length > 0 ? (double)desc->min_length : 1e-3 * L);
+		}
+		/* (a pole's degenerate form kept invertible) */
+		eps = 1e-9 * (E + G) + 1e-300;
+		met[6 * (size_t)i] = (qaws_scalar)((E + eps) / (h * h));
+		met[6 * (size_t)i + 1] = (qaws_scalar)(F / (h * h));
+		met[6 * (size_t)i + 2] = 0;
+		met[6 * (size_t)i + 3] = (qaws_scalar)((G + eps) / (h * h));
+		met[6 * (size_t)i + 4] = 0;
+		met[6 * (size_t)i + 5] = (qaws_scalar)(0.5 * (E + G) / (h * h));
+	}
+	if ((st = qaws_metric_field_create_vertices(&mf, ref, met)) != QAWS_STATUS_OK)
+		goto done;
+	memset(&ld, 0, sizeof ld);
+	ld.method = QAWS_REMESH_LOCAL;
+	ld.reference = ref;
+	ld.metric = mf;
+	ld.pinned = pin;
+	ld.pinned_count = npin;
+	if ((st = qaws_mesh_remesh(&om, NULL, pm, &ld)) != QAWS_STATUS_OK)
+		goto done;
+	*onv = qaws_mesh_3d_get_vertex_count(om);
+	*ont = qaws_mesh_3d_get_triangle_count(om);
+	pos = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)*onv + 1));
+	*ouv = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)*onv + 1));
+	*otri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)*ont + 1));
+	if (!pos || !*ouv || !*otri)
+	{
+		qaws_internal_free(*ouv);
+		qaws_internal_free(*otri);
+		*ouv = NULL;
+		*otri = NULL;
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	qaws_mesh_3d_get_positions(pos, om);
+	for (i = 0; i < *onv; i++)
+	{
+		(*ouv)[2 * (size_t)i] = (double)pos[3 * (size_t)i];
+		(*ouv)[2 * (size_t)i + 1] = (double)pos[3 * (size_t)i + 1];
+	}
+	qaws_mesh_3d_get_triangles(*otri, om);
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(x);
+	qaws_internal_free(tri);
+	qaws_internal_free(pin);
+	qaws_internal_free(met);
+	qaws_internal_free(pos);
+	qaws_metric_field_destroy(mf);
+	qaws_mesh_reference_destroy(ref);
+	qaws_mesh_3d_destroy(pm);
+	qaws_mesh_3d_destroy(om);
+	qaws_mesh_3d_destroy(gm);
+	qaws_internal_free(gx);
+	return st;
+}
+
+/* the vertex at p (face f, (u, v)): the one already within cell of it (welded: hashed in slot) or a new one, hashed when
+   weld (a point where faces may meet) */
+static unsigned int mg_weld_point(double* x, qaws_mesh_location* foot, unsigned int* nv, unsigned int* slot, unsigned int mask, double cell,
+	double const* p, unsigned int f, double u, double v, int weld)
+{
+	unsigned int q, found = HM_NONE, hh;
+	int dx, dy, dz;
+	for (dx = -1; weld && dx <= 1 && found == HM_NONE; dx++)
+		for (dy = -1; dy <= 1 && found == HM_NONE; dy++)
+			for (dz = -1; dz <= 1 && found == HM_NONE; dz++)
+			{
+				hh = (unsigned int)((mg_cell(p[0], cell) + dx) * 73856093LL ^ (mg_cell(p[1], cell) + dy) * 19349663LL ^ (mg_cell(p[2], cell) + dz) * 83492791LL);
+				for (q = hh & mask; slot[q] != HM_NONE; q = (q + 1) & mask)
+				{
+					double const* o = x + 3 * (size_t)slot[q];
+					if (fabs(o[0] - p[0]) <= cell && fabs(o[1] - p[1]) <= cell && fabs(o[2] - p[2]) <= cell)
+					{
+						found = slot[q];
+						break;
+					}
+				}
+			}
+	if (found != HM_NONE)
+		return found;
+	memcpy(x + 3 * (size_t)*nv, p, sizeof(double) * 3);
+	foot[*nv].patch = f;
+	foot[*nv].a = (qaws_scalar)u;
+	foot[*nv].b = (qaws_scalar)v;
+	if (weld)
+	{
+		hh = (unsigned int)(mg_cell(p[0], cell) * 73856093LL ^ mg_cell(p[1], cell) * 19349663LL ^ mg_cell(p[2], cell) * 83492791LL);
+		for (q = hh & mask; slot[q] != HM_NONE; q = (q + 1) & mask) {}
+		slot[q] = *nv;
+	}
+	return (*nv)++;
+}
+
+/* the generated mesh from its arrays: footpoints (face, u, v), the "face" attribute, the edges between faces features and
+   their meeting points corners, the quality reported */
+static qaws_status mg_assemble(double const* x, qaws_mesh_location const* foot, unsigned int nv, unsigned int const* fv, unsigned int const* fs,
+	unsigned int const* fface, unsigned int nface, qaws_mesh_3d** out_mesh, qaws_mesh_report* rep)
+{
+	qaws_mesh_3d* out = NULL;
+	qaws_status st;
+	st = hm_mesh_3d_create(x, nv, fv, fs, nface, &out);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	if (!hm_foot_enable(&out->hm))
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	{
+		/* footpoints (face, u, v); the "face" attribute; edges between faces features, their meeting points corners */
+		qaws_hm* m = &out->hm;
+		qaws_attribute_desc ad;
+		qaws_scalar* fa = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)m->nf + 1));
+		unsigned int id, c, v;
+		if (!fa)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (v = 0; v < m->nv; v++)
+			m->foot[v] = foot[m->vsrc[v] < nv ? m->vsrc[v] : 0];
+		for (c = 0; c < m->nf; c++)
+			fa[c] = (qaws_scalar)(c < nface ? fface[c] : 0);
+		memset(&ad, 0, sizeof ad);
+		ad.name = "face";
+		ad.element = QAWS_MESH_FACE;
+		ad.components = 1;
+		ad.rule = QAWS_ATTRIBUTE_NEAREST;
+		st = qaws_mesh_3d_add_attribute(&id, out, fa, &ad);
+		qaws_internal_free(fa);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+		for (c = 0; c < m->nc; c++)
+		{
+			unsigned int o = m->co[c];
+			if (m->cf[c] == HM_NONE || o == HM_NONE)
+				continue;
+			if (hm_attr_at(m, id, m->cf[c])[0] != hm_attr_at(m, id, m->cf[o])[0])
+			{
+				m->cflag[c] |= HM_FEATURE;
+				m->cflag[o] |= HM_FEATURE;
+			}
+		}
+		for (v = 0; v < m->nv; v++)
+		{
+			unsigned int fd = hm_feature_degree(m, v);
+			if (fd != 0 && fd != 2)
+				m->vflag[v] |= HM_CORNER;
+		}
+	}
+	memset(rep, 0, sizeof *rep);
+	qaws_mesh_3d_measure_quality(&rep->quality, out);
+	*out_mesh = out;
+	return QAWS_STATUS_OK;
+done:
+	qaws_mesh_3d_destroy(out);
+	return st;
+}
+
+/* PARAMETRIC: per face its boundary split in space, each side by equal steps of its length over the size (L, or with
+   tolerances the side curve's own chord and angle sizes from its curvature, within [min_length, L]: the same curve from
+   both faces of an edge, so the same points), the counts made the larger across shared edges; the polygon in (u, v)
+   fanned from the domain's centre and remeshed in the surface's metric with the boundary pinned (mg_param_face); every
+   vertex lifted, the boundary's welded where faces meet (shared edges, seams, poles). Untrimmed faces. */
+static qaws_status mg_parametric(mg_src const* src, unsigned int nf, qaws_generate_desc const* desc, double L, qaws_mesh_3d** out_mesh,
+	qaws_mesh_report* rep)
+{
+	enum { K = 256 };
+	unsigned int *n = NULL, f, k, i, nv = 0, nc = 0, nface = 0, cap = 0, ccap = 0, fcap = 0, *fv = NULL, *fs = NULL, *fface = NULL, *slot = NULL, mask, nb[4];
+	int nbs[4], adaptive = desc->target_length == 0 && (desc->chord_tolerance > 0 || desc->angle_tolerance > 0);
+	double *dom = NULL, *W = NULL, *x = NULL, minstep = HUGE_VAL, cell, hmin = desc->min_length > 0 ? (double)desc->min_length : 1e-3 * L;
+	qaws_mesh_location* foot = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	n = (unsigned int*)qaws_internal_scratch_zalloc(4 * (size_t)nf + 4, sizeof(unsigned int));
+	dom = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4, (size_t)nf + 1));
+	W = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4 * (size_t)nf + 4, K + 1));
+	if (!n || !dom || !W)
+		goto done;
+	/* each side's weight sum_ds / h (the sizes from the side curve's turning between samples) and count */
+	for (f = 0; f < nf; f++)
+	{
+		qaws_surface const* s = mg_face(src, f);
+		qaws_range ur = qaws_surface_get_u_range(s), vr = qaws_surface_get_v_range(s);
+		if (src->shell && !sh_face_grid_sides(src->shell, f, nb, nbs))
+		{
+			st = QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (a trimmed face) */
+			goto done;
+		}
+		dom[4 * (size_t)f] = (double)ur.min_value;
+		dom[4 * (size_t)f + 1] = (double)ur.max_value;
+		dom[4 * (size_t)f + 2] = (double)vr.min_value;
+		dom[4 * (size_t)f + 3] = (double)vr.max_value;
+		for (k = 0; k < 4; k++)
+		{
+			double P[K + 1][3], hs[K + 1], len = 0, *w = W + (4 * (size_t)f + k) * (K + 1), uv[2];
+			for (i = 0; i <= K; i++)
+			{
+				mg_side_uv(dom + 4 * (size_t)f, (int)k, (double)i / K, uv);
+				mg_at(s, uv[0], uv[1], P[i]);
+			}
+			for (i = 0; i <= K; i++)
+			{
+				unsigned int a = i ? i - 1 : 0, b = i < K ? i + 1 : K, q;
+				double e1[3], e2[3], l1, l2, c, kap = 0, h = L;
+				for (q = 0; q < 3; q++)
+				{
+					e1[q] = P[i][q] - P[a][q];
+					e2[q] = P[b][q] - P[i][q];
+				}
+				l1 = sqrt(mg_dot(e1, e1));
+				l2 = sqrt(mg_dot(e2, e2));
+				if (l1 > 0 && l2 > 0)
+				{
+					c = fmax(-1, fmin(1, mg_dot(e1, e2) / (l1 * l2)));
+					kap = acos(c) / (0.5 * (l1 + l2));
+				}
+				if (adaptive && kap > 0)
+				{
+					if (desc->chord_tolerance > 0)
+						h = fmin(h, sqrt(8 * (double)desc->chord_tolerance / kap));
+					if (desc->angle_tolerance > 0)
+						h = fmin(h, (double)desc->angle_tolerance / kap);
+				}
+				hs[i] = fmax(h, hmin);
+			}
+			w[0] = 0;
+			for (i = 1; i <= K; i++)
+			{
+				double d[3], ds;
+				d[0] = P[i][0] - P[i - 1][0];
+				d[1] = P[i][1] - P[i - 1][1];
+				d[2] = P[i][2] - P[i - 1][2];
+				ds = sqrt(mg_dot(d, d));
+				len += ds;
+				w[i] = w[i - 1] + 0.5 * ds * (1 / hs[i - 1] + 1 / hs[i]);
+			}
+			n[4 * f + k] = (unsigned int)fmin(65536, fmax(1, ceil(w[K] - 1e-9)));
+			if (len > 1e-12 * L)
+				minstep = fmin(minstep, len / n[4 * f + k]);
+		}
+	}
+	/* the counts the larger across shared edges (twice: chains of edges settle) */
+	for (k = 0; src->shell && k < 2; k++)
+		for (f = 0; f < nf; f++)
+		{
+			unsigned int q;
+			sh_face_grid_sides(src->shell, f, nb, nbs);
+			for (q = 0; q < 4; q++)
+				if (nb[q] < nf && nbs[q] >= 0 && nbs[q] < 4)
+				{
+					unsigned int a = 4 * f + q, b = 4 * nb[q] + (unsigned int)nbs[q], m = n[a] > n[b] ? n[a] : n[b];
+					n[a] = n[b] = m;
+				}
+		}
+	/* the weld: boundary points only, a ten-thousandth of the finest boundary step */
+	{
+		size_t nbp = 0;
+		for (i = 0; i < 4 * nf; i++)
+			nbp += n[i] + 1;
+		for (mask = 1; mask < 2 * nbp + 2; mask <<= 1) {}
+		slot = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), mask));
+		if (!slot)
+			goto done;
+		memset(slot, 0xFF, sizeof(unsigned int) * mask);
+		mask -= 1;
+		cell = 1e-4 * (minstep < HUGE_VAL ? minstep : L);
+	}
+	for (f = 0; f < nf; f++)
+	{
+		qaws_surface const* s = mg_face(src, f);
+		double const* D = dom + 4 * (size_t)f;
+		double *poly = NULL, *uv0 = NULL, *puv = NULL, eu = 1e-9 * (D[1] - D[0]), ev = 1e-9 * (D[3] - D[2]);
+		unsigned int np = 0, *t0 = NULL, n0 = 0, nt0 = 0, pnv = 0, pnt = 0, *pt = NULL, *pmap = NULL, t;
+		for (k = 0; k < 4; k++)
+			np += n[4 * f + k];
+		poly = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)np + 2));
+		if (!poly)
+			goto done;
+		/* the polygon counter-clockwise: sides 0 and 1 forward, 2 and 3 backward, each without its last point */
+		np = 0;
+		for (k = 0; k < 4; k++)
+		{
+			unsigned int m = n[4 * f + k], j, z;
+			double const* w = W + (4 * (size_t)f + k) * (K + 1);
+			for (j = 0; j < m; j++)
+			{
+				unsigned int jj = k < 2 ? j : m - j;
+				double target = w[K] * jj / m, tt, uv[2];
+				for (z = 0; z < K && w[z + 1] < target; z++) {}
+				tt = jj == 0 ? 0 : jj == m ? 1 : (z + (w[z + 1] > w[z] ? (target - w[z]) / (w[z + 1] - w[z]) : 0)) / K;
+				mg_side_uv(D, (int)k, tt, uv);
+				poly[2 * (size_t)np] = uv[0];
+				poly[2 * (size_t)np + 1] = uv[1];
+				np++;
+			}
+		}
+		/* the start: a fan from the domain's centre (the domain convex, its polygon's points kept: they are pinned) */
+		uv0 = poly;
+		uv0[2 * (size_t)np] = 0.5 * (D[0] + D[1]);
+		uv0[2 * (size_t)np + 1] = 0.5 * (D[2] + D[3]);
+		n0 = np + 1;
+		nt0 = np;
+		t0 = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)np + 1));
+		if (!t0)
+		{
+			qaws_internal_free(poly);
+			goto done;
+		}
+		for (i = 0; i < np; i++)
+		{
+			t0[3 * (size_t)i] = np;
+			t0[3 * (size_t)i + 1] = i;
+			t0[3 * (size_t)i + 2] = (i + 1) % np;
+		}
+		st = mg_param_face(s, D, uv0, n0, np, t0, nt0, L, desc, &puv, &pnv, &pt, &pnt);
+		qaws_internal_free(uv0);
+		qaws_internal_free(t0);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		/* the arrays grown to take the face */
+		if (nv + pnv + 1 > cap)
+		{
+			double* x2;
+			qaws_mesh_location* f2;
+			cap = 2 * (nv + pnv + 1);
+			x2 = (double*)qaws_internal_realloc(x, qaws_internal_mul3(sizeof(double), 3, cap));
+			x = x2 ? x2 : x;
+			f2 = (qaws_mesh_location*)qaws_internal_realloc(foot, qaws_internal_mul2(sizeof(qaws_mesh_location), cap));
+			foot = f2 ? f2 : foot;
+			if (!x2 || !f2)
+				cap = 0;
+		}
+		if (nc + 3 * pnt + 1 > ccap)
+		{
+			unsigned int* v2;
+			ccap = 2 * (nc + 3 * pnt + 1);
+			v2 = (unsigned int*)qaws_internal_realloc(fv, qaws_internal_mul2(sizeof(unsigned int), ccap));
+			fv = v2 ? v2 : fv;
+			if (!v2)
+				ccap = 0;
+		}
+		if (nface + pnt + 1 > fcap)
+		{
+			unsigned int *s2, *g2;
+			fcap = 2 * (nface + pnt + 1);
+			s2 = (unsigned int*)qaws_internal_realloc(fs, qaws_internal_mul2(sizeof(unsigned int), fcap));
+			fs = s2 ? s2 : fs;
+			g2 = (unsigned int*)qaws_internal_realloc(fface, qaws_internal_mul2(sizeof(unsigned int), fcap));
+			fface = g2 ? g2 : fface;
+			if (!s2 || !g2)
+				fcap = 0;
+		}
+		pmap = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)pnv + 1));
+		if (!cap || !ccap || !fcap || !pmap)
+		{
+			qaws_internal_free(puv); qaws_internal_free(pt); qaws_internal_free(pmap);
+			goto done;
+		}
+		for (i = 0; i < pnv; i++)
+		{
+			double p[3], u = puv[2 * (size_t)i], v = puv[2 * (size_t)i + 1];
+			int side = fabs(u - D[0]) <= eu || fabs(u - D[1]) <= eu || fabs(v - D[2]) <= ev || fabs(v - D[3]) <= ev;
+			mg_at(s, u, v, p);
+			pmap[i] = mg_weld_point(x, foot, &nv, slot, mask, cell, p, f, u, v, side);
+		}
+		for (t = 0; t < pnt; t++)
+		{
+			unsigned int a = pmap[pt[3 * (size_t)t]], b = pmap[pt[3 * (size_t)t + 1]], c = pmap[pt[3 * (size_t)t + 2]];
+			if (a == b || b == c || a == c)
+				continue;   /* (at a pole) */
+			fv[nc++] = a;
+			fv[nc++] = b;
+			fv[nc++] = c;
+			fs[nface] = 3;
+			fface[nface++] = f;
+		}
+		qaws_internal_free(puv);
+		qaws_internal_free(pt);
+		qaws_internal_free(pmap);
+	}
+	st = mg_assemble(x, foot, nv, fv, fs, fface, nface, out_mesh, rep);
+done:
+	qaws_internal_free(n); qaws_internal_free(dom); qaws_internal_free(W); qaws_internal_free(x); qaws_internal_free(foot);
+	qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(fface); qaws_internal_free(slot);
+	return st;
+}
+
 /* STRUCTURED: per face an iso-parametric grid, its counts made the same across shared sides and opposite sides (classes of
    face directions joined), each class's count its sides' longest length over L; with tolerances (no target) the classes
    of faces whose cells miss them (the surface at a cell's centre off its corners' mean by more than the chord tolerance,
@@ -837,37 +1319,8 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 			for (i = 0; i <= nu; i++)
 			{
 				double p[3], u = uv[2 * (i + (size_t)(nu + 1) * j)], v = uv[2 * (i + (size_t)(nu + 1) * j) + 1];
-				unsigned int q, found = HM_NONE;
-				int dx, dy, dz;
 				mg_at(s, u, v, p);
-				for (dx = -1; dx <= 1 && found == HM_NONE; dx++)
-					for (dy = -1; dy <= 1 && found == HM_NONE; dy++)
-						for (dz = -1; dz <= 1 && found == HM_NONE; dz++)
-						{
-							unsigned int hh = (unsigned int)((mg_cell(p[0], cell) + dx) * 73856093LL ^ (mg_cell(p[1], cell) + dy) * 19349663LL
-								^ (mg_cell(p[2], cell) + dz) * 83492791LL);
-							for (q = hh & mask; slot[q] != HM_NONE; q = (q + 1) & mask)
-							{
-								double const* o = x + 3 * (size_t)slot[q];
-								if (fabs(o[0] - p[0]) <= cell && fabs(o[1] - p[1]) <= cell && fabs(o[2] - p[2]) <= cell)
-								{
-									found = slot[q];
-									break;
-								}
-							}
-						}
-				if (found == HM_NONE)
-				{
-					unsigned int hh = (unsigned int)(mg_cell(p[0], cell) * 73856093LL ^ mg_cell(p[1], cell) * 19349663LL ^ mg_cell(p[2], cell) * 83492791LL);
-					memcpy(x + 3 * (size_t)nv, p, sizeof p);
-					foot[nv].patch = f;
-					foot[nv].a = (qaws_scalar)u;
-					foot[nv].b = (qaws_scalar)v;
-					for (q = hh & mask; slot[q] != HM_NONE; q = (q + 1) & mask) {}
-					slot[q] = nv;
-					found = nv++;
-				}
-				map[base + i + (nu + 1) * j] = found;
+				map[base + i + (nu + 1) * j] = mg_weld_point(x, foot, &nv, slot, mask, cell, p, f, u, v, 1);
 			}
 		total += (nu + 1) * (nw + 1);
 		/* the cells, counter-clockwise in (u, v) */
@@ -915,61 +1368,7 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 			}
 		qaws_internal_free(uv);
 	}
-	st = hm_mesh_3d_create(x, nv, fv, fs, nface, &out);
-	if (st != QAWS_STATUS_OK)
-		goto done;
-	if (!hm_foot_enable(&out->hm))
-	{
-		st = QAWS_STATUS_ALLOCATION_FAILURE;
-		goto done;
-	}
-	{
-		/* footpoints (face, u, v); the "face" attribute; edges between faces features, their meeting points corners */
-		qaws_hm* m = &out->hm;
-		qaws_attribute_desc ad;
-		qaws_scalar* fa = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)m->nf + 1));
-		unsigned int id, c, v;
-		if (!fa)
-		{
-			st = QAWS_STATUS_ALLOCATION_FAILURE;
-			goto done;
-		}
-		for (v = 0; v < m->nv; v++)
-			m->foot[v] = foot[m->vsrc[v] < nv ? m->vsrc[v] : 0];
-		for (c = 0; c < m->nf; c++)
-			fa[c] = (qaws_scalar)(c < nface ? fface[c] : 0);
-		memset(&ad, 0, sizeof ad);
-		ad.name = "face";
-		ad.element = QAWS_MESH_FACE;
-		ad.components = 1;
-		ad.rule = QAWS_ATTRIBUTE_NEAREST;
-		st = qaws_mesh_3d_add_attribute(&id, out, fa, &ad);
-		qaws_internal_free(fa);
-		if (st != QAWS_STATUS_OK)
-			goto done;
-		for (c = 0; c < m->nc; c++)
-		{
-			unsigned int o = m->co[c];
-			if (m->cf[c] == HM_NONE || o == HM_NONE)
-				continue;
-			if (hm_attr_at(m, id, m->cf[c])[0] != hm_attr_at(m, id, m->cf[o])[0])
-			{
-				m->cflag[c] |= HM_FEATURE;
-				m->cflag[o] |= HM_FEATURE;
-			}
-		}
-		for (v = 0; v < m->nv; v++)
-		{
-			unsigned int fd = hm_feature_degree(m, v);
-			if (fd != 0 && fd != 2)
-				m->vflag[v] |= HM_CORNER;
-		}
-	}
-	memset(rep, 0, sizeof *rep);
-	qaws_mesh_3d_measure_quality(&rep->quality, out);
-	*out_mesh = out;
-	out = NULL;
-	st = QAWS_STATUS_OK;
+	st = mg_assemble(x, foot, nv, fv, fs, fface, nface, out_mesh, rep);
 done:
 	qaws_mesh_3d_destroy(out);
 	qaws_internal_free(uf); qaws_internal_free(cnt); qaws_internal_free(dom); qaws_internal_free(len); qaws_internal_free(x); qaws_internal_free(foot);
@@ -992,7 +1391,7 @@ qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out_mesh, qaws_mesh_report
 	*out_mesh = NULL;
 	if (!surface || !mg_check(desc))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method != QAWS_GENERATE_REMESH && desc->method != QAWS_GENERATE_STRUCTURED)
+	if (desc->method == QAWS_GENERATE_RESTRICTED_DELAUNAY || (desc->method == QAWS_GENERATE_PARAMETRIC && desc->elements != QAWS_ELEMENTS_TRIANGLES))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	memset(&rep, 0, sizeof rep);
 	/* no length given: a 30th of the square root of the area, from a coarse pass */
@@ -1014,9 +1413,9 @@ qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out_mesh, qaws_mesh_report
 	}
 	src.shell = NULL;
 	src.one = surface;
-	if (desc->method == QAWS_GENERATE_STRUCTURED)
+	if (desc->method == QAWS_GENERATE_STRUCTURED || desc->method == QAWS_GENERATE_PARAMETRIC)
 	{
-		st = mg_structured(&src, 1, desc, L, out_mesh, &rep);
+		st = desc->method == QAWS_GENERATE_PARAMETRIC ? mg_parametric(&src, 1, desc, L, out_mesh, &rep) : mg_structured(&src, 1, desc, L, out_mesh, &rep);
 		if (st == QAWS_STATUS_OK && out_report)
 			*out_report = rep;
 		return st;

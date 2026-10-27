@@ -836,8 +836,14 @@ corners on its corners.
 at equal lengths (a shared edge alike from both faces), counts matched
 across edges, doubled per direction to meet chord or angle tolerances.
 Quads or triangles, exactly on the faces, no irregular vertex but at shell
-corners (figure 78). Trimmed faces are refused. `PARAMETRIC` and
-`RESTRICTED_DELAUNAY` are reserved.
+corners (figure 78). Trimmed faces are refused.
+
+`PARAMETRIC` meshes each face in its (u, v) in the surface's metric (the
+first fundamental form over the size squared, the size from the curvature
+with tolerances), its boundary split alike from both faces of an edge and
+pinned, then lifts every vertex onto the face: triangles exactly on the
+surface, isotropic in space (figure 78, second row). Triangles only;
+untrimmed faces. `RESTRICTED_DELAUNAY` is reserved.
 
 ### Curved elements
 
