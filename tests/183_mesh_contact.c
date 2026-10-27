@@ -8,7 +8,11 @@
  *   - a rod turning a quarter about z toward a wall: its corner on the wall at the interval's end (the motion's own
  *     rotation, rational in t);
  *   - a small cube inside a big one: contact at 0;
- *   - a vertex motion (a box's top rising into a ceiling): it touches at 0.5.
+ *   - a vertex motion (a box's top rising into a ceiling): it touches at 0.5;
+ *   - straight moves exactly: the ball at 0.5, the cube at the wall at 0.19 (the double nearest 19/100), two cubes
+ *     flying at each other at 0.7, the ball and a slab rising to meet it at 0.375, all marked exact;
+ *   - a rod turning toward a wall moving toward it (not straight): its corner on the wall within the tolerance at the
+ *     interval's end.
  */
 
 #include "test_common.h"
@@ -102,13 +106,14 @@ static void test_translations(void)
 	char msg[400];
 	memset(&d, 0, sizeof d);
 	d.tolerance = (qaws_scalar)1e-4;
-	s1 = qaws_mesh_3d_first_contact(&r, b, mb, slab, &d);
-	s2 = qaws_mesh_3d_first_contact(&r2, c, mc, wall, &d);
-	s3 = qaws_mesh_3d_first_contact(&r3, c, mm, wall, &d);
+	s1 = qaws_mesh_3d_first_contact(&r, b, mb, slab, NULL, &d);
+	s2 = qaws_mesh_3d_first_contact(&r2, c, mc, wall, NULL, &d);
+	s3 = qaws_mesh_3d_first_contact(&r3, c, mm, wall, NULL, &d);
 	sprintf(msg, "a ball on a slab: contact in [%.6f, %.6f] (0.5) at (%.4f %.4f %.4f); a cube through a thin wall: [%.6f, %.6f] (0.19); beside it: contact %d",
 		(double)r.time, (double)r.time_upper, (double)r.point.x, (double)r.point.y, (double)r.point.z, (double)r2.time, (double)r2.time_upper, r3.contact);
 	printf("  %s\n", msg);
-	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_OK && r.contact && (double)r.time <= 0.5 + 1e-9 && (double)r.time_upper >= 0.5 - 1e-9 &&
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && s3 == QAWS_STATUS_OK && r.contact && r.exact && (double)r.time == 0.5 && r2.exact && (double)r2.time == 0.19 &&
+		(double)r.time <= 0.5 + 1e-9 && (double)r.time_upper >= 0.5 - 1e-9 &&
 		(double)r.time_upper - (double)r.time < 1e-4 && fabs((double)r.point.x) + fabs((double)r.point.y) + fabs((double)r.point.z) < 1e-3 && r2.contact &&
 		(double)r2.time <= 0.19 + 1e-6 && (double)r2.time_upper >= 0.19 - 1e-6 && !r3.contact, msg);
 	qaws_motion_destroy(mb); qaws_motion_destroy(mc); qaws_motion_destroy(mm);
@@ -137,13 +142,13 @@ static void test_more(void)
 	e.rotation[3] = (qaws_scalar)sin(3.14159265358979323846 / 4);
 	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(3.14159265358979323846 / 2);
 	qaws_motion_create_poses(&mr, &s, &e, 0);
-	qaws_mesh_3d_first_contact(&r, rod, mr, wall, &d);
+	qaws_mesh_3d_first_contact(&r, rod, mr, wall, NULL, &d);
 	/* the rod's corner (1, 0.01) at the interval's ends: under the wall, then on it */
 	qaws_motion_evaluate(&at, mr, r.time);
 	ylo = (double)at.rotation[3] + 0.01 * (double)at.rotation[4];
 	qaws_motion_evaluate(&at, mr, r.time_upper);
 	yhi = (double)at.rotation[3] + 0.01 * (double)at.rotation[4];
-	qaws_mesh_3d_first_contact(&r2, sm, ms, big, &d);
+	qaws_mesh_3d_first_contact(&r2, sm, ms, big, NULL, &d);
 	qaws_mesh_3d_get_positions(p0, bx);
 	memcpy(p1, p0, sizeof p1);
 	for (i = 4; i < 8; i++)
@@ -151,7 +156,7 @@ static void test_more(void)
 	for (i = 0; i < 24; i++)
 		v[i] = p1[i] - p0[i];
 	qaws_motion_create_vertices(&mv, p0, p1, v, v, NULL, NULL, 8, 0);
-	qaws_mesh_3d_first_contact(&r3, bx, mv, ceil, &d);
+	qaws_mesh_3d_first_contact(&r3, bx, mv, ceil, NULL, &d);
 	sprintf(msg, "a rod turning into a wall: [%.6f, %.6f], its corner at y %.6f then %.6f (the wall at 0.5); inside at 0: contact %d at %.1f; a deforming box: [%.6f, %.6f] (0.5)",
 		(double)r.time, (double)r.time_upper, ylo, yhi, r2.contact, (double)r2.time, (double)r3.time, (double)r3.time_upper);
 	printf("  %s\n", msg);
@@ -161,6 +166,44 @@ static void test_more(void)
 	qaws_mesh_3d_destroy(rod); qaws_mesh_3d_destroy(wall); qaws_mesh_3d_destroy(sm); qaws_mesh_3d_destroy(big); qaws_mesh_3d_destroy(bx); qaws_mesh_3d_destroy(ceil);
 }
 
+static void test_both_moving(void)
+{
+	qaws_contact_report r, r2, r3;
+	qaws_sweep_desc d;
+	qaws_mesh_3d *a = ct_box(-0.1, 0.1, -0.1, 0.1, -0.1, 0.1), *b = ct_box(2.9, 3.1, -0.1, 0.1, -0.1, 0.1), *ball = ct_ball(0.5, 24, 12), *slab = ct_box(-2, 2, -2, 2, -1, 0),
+		*rod = ct_box(0, 1, -0.01, 0.01, -0.01, 0.01), *wall = ct_box(-2, 2, 0.8, 0.9, -1, 1);
+	qaws_motion *ma = ct_line(0, 0, 0, 2, 0, 0), *mb = ct_line(0, 0, 0, -2, 0, 0), *mball = ct_line(0, 0, 2, 0, 0, -3), *mslab = ct_line(0, 0, 0, 0, 0, 1),
+		*mrod = NULL, *mwall = ct_line(0, 0, 0, 0, -0.4, 0);
+	qaws_motion_pose s, e;
+	qaws_motion_state at;
+	double gap = 1;
+	char msg[400];
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)1e-4;
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	e.rotation[0] = (qaws_scalar)cos(3.14159265358979323846 / 4);
+	e.rotation[3] = (qaws_scalar)sin(3.14159265358979323846 / 4);
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(3.14159265358979323846 / 2);
+	qaws_motion_create_poses(&mrod, &s, &e, 0);
+	qaws_mesh_3d_first_contact(&r, a, ma, b, mb, &d);
+	qaws_mesh_3d_first_contact(&r2, ball, mball, slab, mslab, &d);
+	qaws_mesh_3d_first_contact(&r3, rod, mrod, wall, mwall, &d);
+	if (r3.contact)
+	{
+		/* the rod's corner (1, 0.01) against the wall's face y = 0.8 - 0.4 t at the interval's end */
+		qaws_motion_evaluate(&at, mrod, r3.time_upper);
+		gap = (double)at.rotation[3] + 0.01 * (double)at.rotation[4] - (0.8 - 0.4 * (double)r3.time_upper);
+	}
+	sprintf(msg, "both moving: two cubes at %.17g (exact %d, 0.7), a ball and a rising slab at %.17g (exact %d, 0.375); a rod and a moving wall in [%.6f, %.6f], its corner past the wall by %.1e",
+		(double)r.time, r.exact, (double)r2.time, r2.exact, (double)r3.time, (double)r3.time_upper, gap);
+	printf("  %s\n", msg);
+	TEST_ASSERT(r.contact && r.exact && (double)r.time == 0.7 && r2.contact && r2.exact && (double)r2.time == 0.375 && r3.contact && !r3.exact && gap >= -1e-9 && gap <= 1e-4, msg);
+	qaws_motion_destroy(ma); qaws_motion_destroy(mb); qaws_motion_destroy(mball); qaws_motion_destroy(mslab); qaws_motion_destroy(mrod); qaws_motion_destroy(mwall);
+	qaws_mesh_3d_destroy(a); qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(ball); qaws_mesh_3d_destroy(slab); qaws_mesh_3d_destroy(rod); qaws_mesh_3d_destroy(wall);
+}
+
 int test_183_mesh_contact_main(void)
 {
 	g_pass = 0;
@@ -168,6 +211,7 @@ int test_183_mesh_contact_main(void)
 	printf("Test 183: continuous collision detection\n");
 	test_translations();
 	test_more();
+	test_both_moving();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

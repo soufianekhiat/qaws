@@ -32,7 +32,8 @@ All notable changes to Qaws are documented here.
 - Continuous collision detection: `qaws_mesh_3d_first_contact`, the first time a moving mesh (rigid or vertex motion)
   meets a standing obstacle, by the sweep's slabs, each triangle's swept prism against the obstacle's triangles (BVH,
   exact predicates), the first touching slab halved to the tolerance; no tunnelling through thin walls at any speed
-  (test 183, figure 71).
+  (test 183, figure 71). The obstacle may move too (its own motion, prisms against prisms); straight motions on both
+  sides give the exact time (vertex-face and edge-edge coplanarity roots on exact integers, `report.exact`).
 - Sweeps of spins: a motion turning a whole turn or more about one axis, drifting under the tolerance a turn (a grinding
   wheel, a drill), is swept as the body's solid of revolution along its drift (`qaws_sweep_report.turns`): passes over
   the same places coincide instead of piling up hulls dozens deep. Attributes from the point the turn first brings to
