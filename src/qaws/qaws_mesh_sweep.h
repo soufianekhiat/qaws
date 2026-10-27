@@ -149,4 +149,36 @@ typedef struct qaws_sweep_boolean_report
 qaws_status qaws_mesh_sweep_boolean(qaws_mesh_3d** out_mesh, qaws_sweep_boolean_report* report, qaws_mesh_3d const* tool,
 	qaws_motion const* const* moves, qaws_mesh_3d const* stock, unsigned int move_count, qaws_boolean_op op, qaws_sweep_desc const* desc);
 
+/*
+ * Continuous collision detection: the first time a moving mesh meets an
+ * obstacle (a mesh standing still), or none. Time is cut into the sweep's
+ * slabs (the chords within the tolerance); slab by slab, in time order, each
+ * triangle's swept prism (its two positions, its sides split in two, its
+ * three tetrahedra) is tested against the obstacle's triangles its box
+ * meets (a BVH; exact triangle predicates), an obstacle triangle inside a
+ * prism counting too: a thin wall is not passed through at any speed. The
+ * first slab that touches is halved, its touching halves kept, until a step
+ * moves no vertex more than the tolerance: the contact lies between time
+ * and time_upper (no contact before time, up to the chords' tolerance).
+ * Meshes meeting at 0 (triangles crossing, or one inside the other by the
+ * winding number) give time 0. The overlap's volume over the whole motion
+ * is qaws_mesh_sweep_boolean's INTERSECTION.
+ */
+typedef struct qaws_contact_report
+{
+	int contact;                        /* the meshes meet during the motion */
+	qaws_scalar time, time_upper;       /* the first contact between them (1 and 1 with none) */
+	unsigned int face;                  /* the moving mesh's triangle and the obstacle's that meet first (QAWS_MESH_NONE when
+	                                       one mesh is inside the other at 0, or with none) */
+	unsigned int obstacle_face;
+	qaws_vec3 point;                    /* near the contact: the obstacle triangle's centre (or a vertex inside the other) */
+	unsigned int slabs;
+	unsigned int tests;                 /* triangle pairs tested */
+} qaws_contact_report;
+
+/* desc: the tolerance and max_slabs (as the sweep's); report may be NULL. INVALID_ARGUMENT for a vertex motion of
+   another vertex count, a mesh without faces */
+qaws_status qaws_mesh_3d_first_contact(qaws_contact_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d const* obstacle,
+	qaws_sweep_desc const* desc);
+
 #endif /* QAWS_MESH_SWEEP_H */

@@ -299,6 +299,11 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    tested by the BVH (item 1), the first slab that touches bisected in time to the tolerance (exactly for translations by
    the exact kernel); the overlap's volume over the whole motion. Check: a ball falling on a plane touches at the
    analytic time; a thin wall is not tunnelled through at any speed.
+   Done (2026-10-27): `qaws_mesh_3d_first_contact` (test 183, figure 71 key &): the sweep's slabs, each triangle's swept
+   prism (caps, split sides, three tetrahedra) against the obstacle's triangles by a BVH and exact triangle predicates,
+   the first touching slab halved until a step moves no vertex past the tolerance; a ball on a slab at 0.5 to 1.5e-5, a
+   cube at 10 per unit time stopped by a wall 0.001 thick, a rod turning into a wall, a vertex motion. Not done: two
+   moving meshes (their relative motion), the exact kernel for translations, self-collision.
 6. **The implicit route, for comparison and sculpting.** The swept volume's signed distance as the least over time of
    the moving shape's distance (ISV-SDF; the BVH's signed distance for the shape, a 1D minimization in t per query
    bracketed by the slabs), contoured by the offsets' contouring (item 17 of the enrichments, adaptive blocks): smooth

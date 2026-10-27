@@ -1819,6 +1819,18 @@ Figure 61 (key Z) shows:
 - a coloured ball swept along a curve while turning;
 - a block carved by a red tool.
 
+### Continuous collision detection
+
+`qaws_mesh_3d_first_contact(&report, mesh, motion, obstacle, &desc)`: the first time a moving mesh (a rigid or a vertex motion) meets an obstacle standing still. Time is cut into the sweep's slabs (chords within `desc.tolerance`); slab by slab, in time order, each triangle's swept prism (its two positions, its three sides split in two, its three tetrahedra) is tested against the obstacle's triangles its box meets (a BVH, exact triangle predicates), an obstacle triangle inside a prism counting too, so a thin wall is never passed through. The first slab that touches is halved, its touching halves kept, until a step moves no vertex more than the tolerance: `report.time` and `time_upper` bracket the contact (none before `time`), `face` and `obstacle_face` name the triangles, `point` lies between their nearest points. Meshes meeting at 0 (crossing, or one inside the other by the winding number) give 0. The overlap's volume over the motion is `qaws_mesh_sweep_boolean`'s INTERSECTION.
+
+Test 183 (tolerance 1e-4):
+- a ball of radius 0.5 falling 3 from 2 onto a slab: contact in [0.499985, 0.500000] (exactly 0.5 at its pole), at (0, 0, 0);
+- a cube shot 10 along x through a wall 0.001 thick: [0.189999, 0.190002] (0.19); beside the wall, none;
+- a rod turning a quarter toward a wall: its corner at y 0.49996 at `time` and 0.500001 at `time_upper` (the motion's own rotation);
+- a cube inside another: 0; a box whose top rises (a vertex motion) under a ceiling: [0.499939, 0.5] (0.5).
+
+Figure 71 (key &) shows the falling ball (its positions every tenth, the contact pose and point), frames at 0, 0.15 and 0.3 that never meet a thin wall while the contact at 0.19 is found, and a rod turning into a wall.
+
 ## Example: a NURBS torus, its surface, tetrahedra and hexahedra
 
 ```c
