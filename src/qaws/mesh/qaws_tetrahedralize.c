@@ -20,6 +20,9 @@
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_tetrahedralize.h"
 #include "../qaws_mesh_bvh.h"
+#include "../qaws_mesh_watertight.h"
+#include "../qaws_mesh_intersect.h"
+#include "../qaws_remesh.h"
 #include "../internal/qaws_internal_wide.h"
 #include <stdlib.h>
 #include <string.h>
@@ -1817,6 +1820,277 @@ done:
 	return st;
 }
 
+/* ======================================================================== */
+/*  ENVELOPE: any triangle input within an envelope (after fTetWild)        */
+/* ======================================================================== */
+
+/* (a vertex with its position, sorted to find coincident points) */
+typedef struct tt_pt
+{
+	double p[3];
+	unsigned int v;
+} tt_pt;
+
+static int tt_x_cmp(void const* pp, void const* qq)
+{
+	double const *a = ((tt_pt const*)pp)->p, *b = ((tt_pt const*)qq)->p;
+	int k;
+	for (k = 0; k < 3; k++)
+		if (a[k] != b[k])
+			return a[k] < b[k] ? -1 : 1;
+	return 0;
+}
+
+/* the largest (and mean) distance from a surface's vertices and faces' centres to the input (bvh); negative on failure */
+static double tt_stray(qaws_mesh_bvh const* bvh, qaws_mesh_3d const* m, double* mean)
+{
+	unsigned int bnv = qaws_mesh_3d_get_vertex_count(m), bnt = qaws_mesh_3d_get_triangle_count(m), n = bnv + bnt, j, k;
+	qaws_scalar *bx = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)bnv + 1));
+	qaws_scalar* pts = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)n + 1));
+	unsigned int* bt = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)bnt + 1));
+	qaws_mesh_hit* hits = (qaws_mesh_hit*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_mesh_hit), (size_t)n + 1));
+	double dmax = -1, dsum = 0;
+	if (bx && pts && bt && hits)
+	{
+		qaws_mesh_3d_get_positions(bx, m);
+		qaws_mesh_3d_get_triangles(bt, m);
+		memcpy(pts, bx, sizeof(qaws_scalar) * 3 * bnv);
+		for (j = 0; j < bnt; j++)
+			for (k = 0; k < 3; k++)
+				pts[3 * ((size_t)bnv + j) + k] = (bx[3 * (size_t)bt[3 * j] + k] + bx[3 * (size_t)bt[3 * j + 1] + k] + bx[3 * (size_t)bt[3 * j + 2] + k]) / 3;
+		if (qaws_mesh_bvh_closest(hits, bvh, pts, n, 0, NULL) == QAWS_STATUS_OK)
+		{
+			dmax = 0;
+			for (j = 0; j < n; j++)
+			{
+				dmax = fmax(dmax, (double)hits[j].distance);
+				dsum += (double)hits[j].distance;
+			}
+		}
+	}
+	if (mean)
+		*mean = n ? dsum / n : 0;
+	qaws_internal_free(bx);
+	qaws_internal_free(pts);
+	qaws_internal_free(bt);
+	qaws_internal_free(hits);
+	return dmax;
+}
+
+/* ENVELOPE: the border taken as it is when it is a clean closed surface (every edge of two faces, no two faces crossing:
+   qaws_mesh_resolve_intersections finds no pair), else made watertight first (the winding number's inside contoured by
+   dual contouring on cells of the envelope's size, sharp edges kept: soups, holes, overlaps and self-intersections do);
+   remeshed (LOCAL) to the target within half the envelope of that surface; filled by DELAUNAY. The report's
+   max_deviation: how far the result's border strays from the input (its vertices and faces' centres to the input's
+   closest points); quality, the border's. */
+static qaws_status tt_envelope(qaws_mesh_3d const* boundary, qaws_tetrahedralize_desc const* desc, qaws_volume_mesh** out_mesh, qaws_mesh_report* rep)
+{
+	qaws_hm const* hb = &boundary->hm;
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(boundary), nf = qaws_mesh_3d_get_face_count(boundary), nc = qaws_mesh_3d_get_corner_count(boundary);
+	unsigned int *fv = NULL, *fs = NULL, c, i, k;
+	qaws_scalar* x = NULL;
+	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, L, eps, longest = 0;
+	int clean = 1;
+	qaws_mesh_3d *clean_mesh = NULL, *surface = NULL;
+	qaws_mesh_bvh* bvh = NULL;
+	qaws_tetrahedralize_desc dd;
+	qaws_mesh_report r2;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	memset(rep, 0, sizeof *rep);
+	if (!nf)
+		return QAWS_STATUS_INVALID_TOPOLOGY;
+	fv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nc + 1));
+	fs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
+	if (!fv || !fs || !x)
+		goto done;
+	qaws_mesh_3d_get_faces(fv, fs, boundary);
+	qaws_mesh_3d_get_positions(x, boundary);
+	for (i = 0; i < nv; i++)
+		for (k = 0; k < 3; k++)
+		{
+			lo[k] = fmin(lo[k], (double)x[3 * (size_t)i + k]);
+			hi[k] = fmax(hi[k], (double)x[3 * (size_t)i + k]);
+		}
+	for (k = 0; k < 3; k++)
+		longest = fmax(longest, hi[k] - lo[k]);
+	L = desc->target_length > 0 ? (double)desc->target_length : 0;
+	if (L == 0)
+	{
+		qaws_mesh_quality qq;
+		qaws_mesh_3d_measure_quality(&qq, boundary);
+		L = qq.mean_edge > 0 ? (double)qq.mean_edge : longest / 30;
+	}
+	eps = desc->envelope > 0 ? (double)desc->envelope : 0.1 * L;
+	/* clean: closed, manifold, no faces crossing */
+	for (c = 0; c < hb->nc && clean; c++)
+		if (hb->cf[c] != HM_NONE && hb->co[c] == HM_NONE)
+			clean = 0;
+	if (clean)
+	{
+		qaws_intersect_report ir;
+		qaws_mesh_3d* cut = NULL;
+		memset(&ir, 0, sizeof ir);
+		if ((st = qaws_mesh_resolve_intersections(&cut, &ir, x, fv, fs, nv, nf, NULL)) != QAWS_STATUS_OK)
+			goto done;
+		qaws_mesh_3d_destroy(cut);
+		clean = ir.pairs == 0;
+	}
+	if (!clean)
+	{
+		/* contoured coarse first (cells of the target), finer while it strays past half the envelope (dual contouring puts its
+		   vertices on the input's planes: flat and sharp parts come out near exact at any size, curved ones by the cell's square) */
+		qaws_watertight_desc wd;
+		qaws_watertight_report wr;
+		unsigned int res = (unsigned int)fmin(384, fmax(16, ceil(longest / L)));
+		double last = HUGE_VAL;
+		if ((st = qaws_mesh_bvh_create_mesh_3d(&bvh, boundary, NULL)) != QAWS_STATUS_OK)
+			goto done;
+		for (;;)
+		{
+			double d;
+			memset(&wd, 0, sizeof wd);
+			wd.resolution = res;
+			qaws_mesh_3d_destroy(clean_mesh);
+			clean_mesh = NULL;
+			if ((st = qaws_mesh_make_watertight(&clean_mesh, &wr, x, fv, fs, nv, nf, &wd)) != QAWS_STATUS_OK)
+				goto done;
+			d = tt_stray(bvh, clean_mesh, NULL);
+			if (d < 0)
+			{
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+				goto done;
+			}
+			/* (stopped too when halving the cells no longer helps: caps across the input's holes stray whatever the cell) */
+			if (d <= 0.5 * eps || res >= 384 || d > 0.75 * last)
+				break;
+			last = d;
+			res = res * 2 > 384 ? 384 : res * 2;
+		}
+		rep->splits = res;   /* (made watertight, at this resolution) */
+	}
+	{
+		/* (the surface the truth: its flat triangles the reference; a clean input's edges sharper than 30 degrees creases, not a
+		   contoured one's, whose small triangles zig-zag along its sharp edges: the tolerance holds those) */
+		qaws_remesh_desc rd;
+		qaws_mesh_reference_desc fd;
+		qaws_mesh_reference* ref = NULL;
+		if (!clean_mesh)
+		{
+			if ((st = qaws_mesh_3d_clone(&clean_mesh, boundary)) != QAWS_STATUS_OK)
+				goto done;
+			qaws_mesh_3d_detect_features(clean_mesh, (qaws_scalar)(3.14159265358979323846 / 6), 0, 0);
+		}
+		memset(&fd, 0, sizeof fd);
+		fd.interpolant = QAWS_INTERPOLANT_LINEAR;
+		if ((st = qaws_mesh_reference_create(&ref, clean_mesh, &fd)) != QAWS_STATUS_OK)
+			goto done;
+		memset(&rd, 0, sizeof rd);
+		rd.reference = ref;
+		rd.target_length = (qaws_scalar)L;
+		rd.tolerance = (qaws_scalar)(0.5 * eps);
+		st = qaws_mesh_remesh(&surface, NULL, clean_mesh, &rd);
+		qaws_mesh_reference_destroy(ref);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+	}
+	{
+		/* copies of one point (a pinch the contouring split) moved apart, each a ten-thousandth of the size toward its faces */
+		qaws_hm* sh = &surface->hm;
+		tt_pt* order = (tt_pt*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(tt_pt), (size_t)sh->nv + 1));
+		if (!order)
+		{
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			goto done;
+		}
+		for (i = 0; i < sh->nv; i++)
+		{
+			memcpy(order[i].p, sh->x + 3 * (size_t)i, sizeof order[i].p);
+			order[i].v = i;
+		}
+		qsort(order, sh->nv, sizeof *order, tt_x_cmp);
+		for (i = 0; i + 1 < sh->nv; i++)
+		{
+			unsigned int j = i + 1;
+			while (j < sh->nv && tt_x_cmp(order + i, order + j) == 0)
+				j++;
+			for (k = i; j > i + 1 && k < j; k++)
+			{
+				unsigned int v = order[k].v, q2, nn = 0;
+				double cen[3] = { 0, 0, 0 }, len;
+				if (sh->vc[v] == HM_NONE)
+					continue;
+				for (q2 = sh->vc[v]; q2 != HM_NONE; q2 = hm_round(sh, v, q2))
+				{
+					unsigned int f = sh->cf[q2], z;
+					for (z = sh->fc[f]; z < sh->fc[f] + sh->fn[f]; z++)
+					{
+						cen[0] += sh->x[3 * (size_t)sh->cv[z]];
+						cen[1] += sh->x[3 * (size_t)sh->cv[z] + 1];
+						cen[2] += sh->x[3 * (size_t)sh->cv[z] + 2];
+						nn++;
+					}
+				}
+				if (!nn)
+					continue;
+				for (q2 = 0; q2 < 3; q2++)
+					cen[q2] = cen[q2] / nn - sh->x[3 * (size_t)v + q2];
+				len = sqrt(cen[0] * cen[0] + cen[1] * cen[1] + cen[2] * cen[2]);
+				for (q2 = 0; len > 0 && q2 < 3; q2++)
+					sh->x[3 * (size_t)v + q2] += 1e-4 * L * cen[q2] / len;
+			}
+			i = j - 1;
+		}
+		qaws_internal_free(order);
+	}
+	memset(&dd, 0, sizeof dd);
+	dd.method = QAWS_TETS_DELAUNAY;
+	dd.target_length = (qaws_scalar)L;
+	dd.radius_edge = desc->radius_edge;
+	memset(&r2, 0, sizeof r2);
+	if ((st = qaws_volume_mesh_tetrahedralize(out_mesh, &r2, surface, &dd)) != QAWS_STATUS_OK)
+		goto done;
+	{
+		/* the slivers the input's small features leave: flips and smoothing (the border kept) */
+		qaws_volume_mesh* better = NULL;
+		if (qaws_volume_mesh_improve(&better, NULL, *out_mesh, NULL) == QAWS_STATUS_OK && better)
+		{
+			qaws_volume_mesh_destroy(*out_mesh);
+			*out_mesh = better;
+		}
+	}
+	rep->moves = r2.moves;
+	rep->quality = r2.quality;
+	/* the border's distance from the input: its vertices and its faces' centres */
+	if (!bvh && (st = qaws_mesh_bvh_create_mesh_3d(&bvh, boundary, NULL)) != QAWS_STATUS_OK)
+		goto done;
+	{
+		qaws_mesh_3d* b = NULL;
+		double mean = 0, d;
+		if ((st = qaws_volume_mesh_get_boundary(&b, *out_mesh)) == QAWS_STATUS_OK)
+		{
+			d = tt_stray(bvh, b, &mean);
+			st = d < 0 ? QAWS_STATUS_ALLOCATION_FAILURE : QAWS_STATUS_OK;
+			rep->max_deviation = (qaws_scalar)d;
+			rep->mean_deviation = (qaws_scalar)mean;
+		}
+		qaws_mesh_3d_destroy(b);
+		if (st != QAWS_STATUS_OK)
+		{
+			qaws_volume_mesh_destroy(*out_mesh);
+			*out_mesh = NULL;
+		}
+	}
+done:
+	qaws_mesh_bvh_destroy(bvh);
+	qaws_mesh_3d_destroy(clean_mesh);
+	qaws_mesh_3d_destroy(surface);
+	qaws_internal_free(fv);
+	qaws_internal_free(fs);
+	qaws_internal_free(x);
+	return st;
+}
+
 qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* boundary,
 	qaws_tetrahedralize_desc const* desc)
 {
@@ -1844,8 +2118,16 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_me
 			*out_report = sr;
 		return st;
 	}
-	if (desc->method != QAWS_TETS_DELAUNAY)
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (desc->method == QAWS_TETS_ENVELOPE)
+	{
+		qaws_mesh_report er;
+		if (desc->envelope < 0)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		st = tt_envelope(boundary, desc, out_mesh, &er);
+		if (st == QAWS_STATUS_OK && out_report)
+			*out_report = er;
+		return st;
+	}
 	h = &boundary->hm;
 	memset(&t, 0, sizeof t);
 	memset(&rep, 0, sizeof rep);

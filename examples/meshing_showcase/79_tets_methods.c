@@ -8,7 +8,10 @@
  *     lattice cut by the surface, vertices near it warped onto it): the
  *     lattice's regular cells inside, the border the surface's cuts;
  *   - a blob's surface with every 12th triangle taken out, by STUFFING: the
- *     winding number tells the inside of the soup.
+ *     winding number tells the inside of the soup;
+ *   - two overlapping cubes as one soup by ENVELOPE (made watertight on cells
+ *     of the target, the union's sharp edges kept, remeshed within half the
+ *     envelope, DELAUNAY): a corner taken out.
  */
 
 static qaws_volume_mesh* ms_tm_fill(qaws_mesh_3d const* s, qaws_tetrahedralize_method method, double L, char* sub, char const* name)
@@ -37,6 +40,7 @@ static void demo_tets_methods(void)
 {
 	static double const wire[3] = { 40, 45, 60 }, green[3] = { 170, 205, 160 }, tint[3] = { 178, 192, 212 };
 	er_canvas* c = er_create(2200, 700, 3, 252, 252, 250);
+	static double const gold[3] = { 232, 196, 120 };
 	qaws_surface* torus = ms_nurbs_torus(2, 0.7);
 	qaws_mesh_3d *ts = NULL, *blob = ms_blob(2), *holed = NULL;
 	qaws_volume_mesh* v;
@@ -46,13 +50,13 @@ static void demo_tets_methods(void)
 	ts = ms_generate(torus, NULL, QAWS_ELEMENTS_TRIANGLES, 0.25, 0, NULL);
 	if (ts && (v = ms_tm_fill(ts, QAWS_TETS_DELAUNAY, 0.25, sub, "torus by DELAUNAY")) != NULL)
 	{
-		ms_vpanel(c, 0, 0, 733, 700, v, 0.5, 0.75, "DELAUNAY", sub);
+		ms_vpanel(c, 0, 0, 550, 700, v, 0.5, 0.75, "DELAUNAY", sub);
 		ms_cutaway(c, v, ms_keep_half, green, wire);
 		qaws_volume_mesh_destroy(v);
 	}
 	if (ts && (v = ms_tm_fill(ts, QAWS_TETS_STUFFING, 0.25, sub, "torus by STUFFING")) != NULL)
 	{
-		ms_vpanel(c, 733, 0, 733, 700, v, 0.5, 0.75, "STUFFING", sub);
+		ms_vpanel(c, 550, 0, 550, 700, v, 0.5, 0.75, "STUFFING", sub);
 		ms_cutaway(c, v, ms_keep_half, green, wire);
 		qaws_volume_mesh_destroy(v);
 	}
@@ -87,9 +91,45 @@ static void demo_tets_methods(void)
 	}
 	if (holed && (v = ms_tm_fill(holed, QAWS_TETS_STUFFING, 0.12, sub, "holed blob by STUFFING")) != NULL)
 	{
-		ms_vpanel(c, 1466, 0, 733, 700, v, 0.4, 0.6, "a soup with holes, STUFFING", sub);
+		ms_vpanel(c, 1100, 0, 550, 700, v, 0.4, 0.6, "a soup with holes, STUFFING", sub);
 		ms_cutaway(c, v, ms_keep_half, tint, wire);
 		qaws_volume_mesh_destroy(v);
+	}
+	{
+		static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
+		static double const cx[24] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1 };
+		double x[48];
+		unsigned int fv[48], fs[12], i;
+		qaws_mesh_3d* two;
+		qaws_tetrahedralize_desc d;
+		qaws_mesh_report rep;
+		qaws_volume_quality q;
+		for (i = 0; i < 24; i++)
+		{
+			x[i] = cx[i] - 0.75;
+			x[24 + i] = cx[i] - 0.25;
+			fv[i] = f[i];
+			fv[24 + i] = f[i] + 8;
+		}
+		for (i = 0; i < 12; i++)
+			fs[i] = 4;
+		two = ms_make(x, 16, fv, fs, 12);
+		memset(&d, 0, sizeof d);
+		d.method = QAWS_TETS_ENVELOPE;
+		d.target_length = (qaws_scalar)0.12;
+		d.envelope = (qaws_scalar)0.01;
+		v = NULL;
+		if (two && qaws_volume_mesh_tetrahedralize(&v, &rep, two, &d) == QAWS_STATUS_OK && v)
+		{
+			qaws_volume_mesh_measure_quality(&q, v);
+			sprintf(sub, "%u tetrahedra, %.0e off the input", q.tetrahedra, (double)rep.max_deviation);
+			ms_vpanel(c, 1650, 0, 550, 700, v, 0.62, 0.55, "ENVELOPE, crossing cubes", sub);
+			ms_cutaway(c, v, ms_keep_box, gold, wire);
+			printf("  crossing cubes by ENVELOPE: %u tetrahedra, dihedral %.2f..%.2f, volume %.4f, off the input %.2e, watertight at %u\n", q.tetrahedra,
+				(double)q.min_dihedral, (double)q.max_dihedral, (double)q.volume, (double)rep.max_deviation, rep.splits);
+			qaws_volume_mesh_destroy(v);
+		}
+		qaws_mesh_3d_destroy(two);
 	}
 	er_save(c, "showcase/mesh79_tets_methods.png");
 	printf("mesh79_tets_methods.png\n");

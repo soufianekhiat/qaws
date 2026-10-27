@@ -1618,7 +1618,15 @@ lattice cut by the surface (signed distance, the winding number telling the
 inside, so soups and holes do), vertices near a cut warped onto it, each
 cell's inside split conformingly: regular cells inside, dihedral angles
 about 19 to 149 degrees in figure 79; its border approximates the input
-surface. `ENVELOPE` is reserved.
+surface.
+
+`ENVELOPE` takes any triangle input (soups, holes, overlaps, crossing
+faces): a clean closed surface as it is, anything else made watertight first
+(winding number, dual contouring keeping sharp edges, cells refined until the
+contour is within half the envelope), remeshed within half the envelope,
+filled by DELAUNAY and improved. The report's `max_deviation` says how far
+the border strays from the input (two crossing cubes in figure 79: to
+rounding).
 
 `keep_border` keeps the border as given, using TetGen's Steiner point suppression rather than a constrained Delaunay recovery. Each point the recovery added to the border is moved inside afterwards:
 

@@ -48,8 +48,19 @@
  *             the input's triangles; the inside the lattice's regular
  *             cells. radius_edge, border_only and keep_border unused; the
  *             report's moves the vertices.
- *   ENVELOPE  reserved (UNSUPPORTED_OPERATION): any triangle soup within
- *             an envelope (fTetWild).
+ *   ENVELOPE  any triangle input within an envelope (after fTetWild):
+ *             the border taken as it is when it is closed, manifold and no
+ *             two faces cross, else made watertight first (the winding
+ *             number's inside contoured, sharp edges kept: soups, holes,
+ *             overlaps and self-intersections do), on cells of the target
+ *             halved while it strays past half the envelope (and still
+ *             helps); remeshed (LOCAL, the surface's flat triangles the
+ *             reference, a clean input's creases kept) to the target within
+ *             half the envelope; filled by DELAUNAY, then improved. The
+ *             report's max_deviation: how far the result's border strays
+ *             from the input (within the envelope but across the input's
+ *             holes, whose caps stray by their size); splits: the
+ *             contouring's resolution (0: taken as it is).
  *
  * The border: a closed qaws_mesh_3d turned outward (polygons fanned into
  * triangles), not self-intersecting. INVALID_TOPOLOGY when it is not
@@ -89,6 +100,7 @@ typedef struct qaws_tetrahedralize_desc
 	qaws_scalar radius_edge;            /* refinement bound (circumradius over shortest edge); 0: 2; negative: no refinement */
 	int border_only;                    /* 1: no vertex added inside (the border's vertices' cells, flipped) */
 	int keep_border;                    /* 1: the recovery's border points moved inside where they can be, the border's triangles merged back */
+	qaws_scalar envelope;               /* ENVELOPE: how far the border may stray from the input; 0: a tenth of target_length */
 } qaws_tetrahedralize_desc;
 
 qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* boundary,

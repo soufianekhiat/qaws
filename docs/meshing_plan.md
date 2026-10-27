@@ -346,7 +346,9 @@ cheapest and most reused first:
    flips, Chew/Ruppert circumcentre insertion snapped on the faces, encroached feature edges split on their curves; 30
    degrees, Delaunay off the features; test 126, figure 78). Generation complete.
 4. **Tetrahedra:** STUFFING done 2026-10-27 (tt_stuffing: BCC lattice, winding-signed distance, secant cuts,
-   Labelle-Shewchuk warping, Dompierre prisms; test 127, figure 79); ENVELOPE next.
+   Labelle-Shewchuk warping, Dompierre prisms; test 127, figure 79) and ENVELOPE (tt_envelope: clean input kept or
+   watertight contour refined to half the envelope, LOCAL within half the envelope on a LINEAR reference, DELAUNAY,
+   improve; test 127, figure 79).
 5. **Hexahedra:** an octree.
 
 ### Attributes through Booleans and sweeps (2026-10-26)

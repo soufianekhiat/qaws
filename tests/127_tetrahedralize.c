@@ -1,5 +1,5 @@
 /*
- * Test 127: volume meshes and tetrahedralization (DELAUNAY)
+ * Test 127: volume meshes and tetrahedralization (DELAUNAY, STUFFING, ENVELOPE)
  *
  *   - the container: a unit cube as one hexahedron (scaled Jacobian 1,
  *     volume 1, its border six quads) and as six tetrahedra round its
@@ -16,7 +16,11 @@
  *     vertices on the torus, the dihedral angles bounded; the same surface
  *     with faces taken out (a soup with holes: the winding number tells the
  *     inside) filled alike;
- *   - refusals: an open surface, the reserved method.
+ *   - ENVELOPE: a cube's clean surface (taken as it is), two overlapping
+ *     cubes as one soup (crossing faces: made watertight first, their union
+ *     filled) and the torus with holes: valid, the border within the
+ *     envelope of the input, the volumes near the union's;
+ *   - refusals: an open surface (DELAUNAY), a negative envelope.
  */
 
 #include "test_common.h"
@@ -412,6 +416,109 @@ static void test_stuffing(void)
 	qaws_surface_destroy(t);
 }
 
+static void tv_envelope_case(char const* name, qaws_mesh_3d const* s, double eps, double vol, double vtol)
+{
+	qaws_tetrahedralize_desc d;
+	qaws_volume_mesh* v = NULL;
+	qaws_volume_quality q;
+	qaws_mesh_report r;
+	qaws_status st;
+	char msg[400];
+	memset(&d, 0, sizeof d);
+	memset(&r, 0, sizeof r);
+	d.method = QAWS_TETS_ENVELOPE;
+	d.target_length = (qaws_scalar)0.25;
+	d.envelope = (qaws_scalar)eps;
+	st = qaws_volume_mesh_tetrahedralize(&v, &r, s, &d);
+	if (st != QAWS_STATUS_OK || !v)
+	{
+		sprintf(msg, "ENVELOPE, %s: %s", name, qaws_status_to_string(st));
+		TEST_ASSERT(0, msg);
+		return;
+	}
+	qaws_volume_mesh_measure_quality(&q, v);
+	sprintf(msg, "ENVELOPE, %s: %u tetrahedra, valid %d, made watertight %u, border off the input %.2e (envelope %.2g), volume %.4f of %.4f, "
+		"dihedral %.1f..%.1f", name, q.tetrahedra, qaws_volume_mesh_validate(v) == QAWS_STATUS_OK, r.splits, (double)r.max_deviation, eps, (double)q.volume,
+		vol, (double)q.min_dihedral, (double)q.max_dihedral);
+	printf("  %s\n", msg);
+	TEST_ASSERT(qaws_volume_mesh_validate(v) == QAWS_STATUS_OK && (double)r.max_deviation <= eps && fabs((double)q.volume - vol) < vtol * vol, msg);
+	qaws_volume_mesh_destroy(v);
+}
+
+static void test_envelope(void)
+{
+	qaws_mesh_3d *cube = tv_cube_surface(), *two = NULL;
+	qaws_surface* t = tv_torus(2, 0.7);
+	qaws_generate_desc g;
+	qaws_mesh_3d* ts = NULL;
+	tv_envelope_case("a cube's surface", cube, 0.02, 1, 0.01);
+	{
+		/* two unit cubes, the second moved by (0.5, 0.5, 0.5): their faces cross */
+		static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
+		qaws_scalar x[48];
+		unsigned int fv[48], fs[12], i;
+		qaws_mesh_3d_desc md;
+		for (i = 0; i < 24; i++)
+		{
+			x[i] = tv_cube_x[i];
+			x[24 + i] = tv_cube_x[i] + (qaws_scalar)0.5;
+			fv[i] = f[i];
+			fv[24 + i] = f[i] + 8;
+		}
+		for (i = 0; i < 12; i++)
+			fs[i] = 4;
+		memset(&md, 0, sizeof md);
+		md.positions = x;
+		md.vertex_count = 16;
+		md.face_vertices = fv;
+		md.face_sizes = fs;
+		md.face_count = 12;
+		qaws_mesh_3d_create(&two, &md);
+	}
+	if (two)
+		tv_envelope_case("two overlapping cubes", two, 0.02, 1.875, 0.02);
+	memset(&g, 0, sizeof g);
+	g.target_length = (qaws_scalar)0.25;
+	qaws_mesh_generate_surface(&ts, NULL, t, &g);
+	if (ts)
+	{
+		unsigned int nf = qaws_mesh_3d_get_face_count(ts), nv = qaws_mesh_3d_get_vertex_count(ts), nc = qaws_mesh_3d_get_corner_count(ts), f, k, o = 0, o2 = 0, kept = 0;
+		unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1)), *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+		unsigned int *fv2 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1)), *fs2 = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+		qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+		qaws_mesh_3d_desc md;
+		qaws_mesh_3d* holed = NULL;
+		qaws_mesh_3d_get_faces(fv, fs, ts);
+		qaws_mesh_3d_get_positions(x, ts);
+		for (f = 0; f < nf; f++)
+		{
+			if (f % 25 != 7)
+			{
+				for (k = 0; k < fs[f]; k++)
+					fv2[o2 + k] = fv[o + k];
+				o2 += fs[f];
+				fs2[kept++] = fs[f];
+			}
+			o += fs[f];
+		}
+		memset(&md, 0, sizeof md);
+		md.positions = x;
+		md.vertex_count = nv;
+		md.face_vertices = fv2;
+		md.face_sizes = fs2;
+		md.face_count = kept;
+		qaws_mesh_3d_create(&holed, &md);
+		if (holed)
+			tv_envelope_case("the torus with holes", holed, 0.15, tv_enclosed(ts), 0.02);
+		qaws_mesh_3d_destroy(holed);
+		free(fv); free(fs); free(fv2); free(fs2); free(x);
+	}
+	qaws_mesh_3d_destroy(ts);
+	qaws_mesh_3d_destroy(two);
+	qaws_mesh_3d_destroy(cube);
+	qaws_surface_destroy(t);
+}
+
 static void test_refusals(void)
 {
 	static qaws_scalar const p[12] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0 };
@@ -435,10 +542,11 @@ static void test_refusals(void)
 	memset(&d, 0, sizeof d);
 	s1 = qaws_volume_mesh_tetrahedralize(&v, NULL, open, &d);
 	d.method = QAWS_TETS_ENVELOPE;
+	d.envelope = (qaws_scalar)-1;
 	s2 = qaws_volume_mesh_tetrahedralize(&v, NULL, cube, &d);
 	s3 = qaws_volume_mesh_tetrahedralize(&v, NULL, cube, NULL);
-	sprintf(msg, "refusals: an open surface %s, ENVELOPE (reserved) %s, no description %s", qaws_status_to_string(s1), qaws_status_to_string(s2), qaws_status_to_string(s3));
-	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION && s3 == QAWS_STATUS_INVALID_ARGUMENT && !v, msg);
+	sprintf(msg, "refusals: an open surface %s, a negative envelope %s, no description %s", qaws_status_to_string(s1), qaws_status_to_string(s2), qaws_status_to_string(s3));
+	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT && !v, msg);
 	qaws_mesh_3d_destroy(open);
 	qaws_mesh_3d_destroy(cube);
 }
@@ -453,6 +561,7 @@ int test_127_tetrahedralize_main(void)
 	test_torus();
 	test_box();
 	test_stuffing();
+	test_envelope();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
