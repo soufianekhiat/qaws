@@ -126,16 +126,24 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out_mesh, qaws_sweep_report* repor
  * phi(x) = min over t of the moving shape's signed distance at x (the
  * BVH's, negative inside by the winding number), contoured on a grid by dual
  * contouring as qaws_mesh_3d_offset's CONTOUR (crossings by regula falsi,
- * their normals the closest point's direction, sharp edges and corners kept
- * where the cells resolve them). phi is sampled in time with no vertex moving
+ * their normals the closest point's direction, or on the surface phi's
+ * differences: sharp edges and corners kept where the cells resolve them). phi is sampled in time with no vertex moving
  * more than two cells between samples (a vertex motion: a quarter of one), each
  * point's samples pruned by their bounding spheres; a rigid motion's best
  * time is refined by golden sections between the samples beside it (no
  * staircase where a face slides along the sweep). Smooth, never inside out,
  * any motion (spins, vertex motions, self-overlapping paths) at the cost of
  * the grid: detail below the cell is lost, edges between cells are bevelled.
- * For sculpting and as a cross-check of qaws_mesh_3d_sweep. No attributes
- * or features are carried. desc: resolution, max_slabs (the most time
+ * For sculpting and as a cross-check of qaws_mesh_3d_sweep. Attributes:
+ * each result vertex's source is the shape's closest point at its best time
+ * (ties on a face over a span of time: the hit inside its triangle); a
+ * corner takes it on that triangle or, where it lies on an edge or corner of
+ * the shape (a wall an edge sweeps, a seam), on the triangle there whose
+ * normal at that time is nearest the corner's own triangle's: values sharp
+ * across seams, continuous where they are. Rules as qaws_mesh_3d_sweep
+ * (directions turned with a rigid motion, vertex values per corner, a
+ * NORMAL straying past 30 degrees its triangle's own); edge values zeros,
+ * features none. desc: resolution, max_slabs (the most time
  * samples; 0: 4096) and executor are read. The report: slabs the time
  * samples, deviation half the most a vertex moves between two (the sampling's
  * bound before refinement), closed.

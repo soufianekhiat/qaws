@@ -308,6 +308,10 @@ typedef struct wt_cross
 	double x[3], nrm[3];       /* the crossing and its normal, from inside to outside */
 } wt_cross;
 
+/* the swept mesh's attributes onto out (qaws_mesh_sweep.c): per out corner its source triangle (of the mesh's nt, faces fanned
+   from their first corner), weights on it and a rotation (9, NULL none) */
+qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* csrc, double const* cw, double const* cR);
+
 /* a field to contour (wt_contour_field, qaws_mesh_offset.c): phi at n points (3 each), negative inside, and when grad is
    not NULL its gradient (3 each) */
 typedef qaws_status (*wt_field_fn)(void* ctx, double const* x, size_t n, double* phi, double* grad);

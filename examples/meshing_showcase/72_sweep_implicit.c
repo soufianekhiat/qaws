@@ -8,7 +8,12 @@
  *     the true sweep within the grid, no revolution assumed;
  *   - the same coloured by the distance to its revolved sweep (revolve_spins,
  *     red at 0.03; a turn's drift is 0.05): the revolution passes the true sweep where
- *     the blade's next turn has not reached yet.
+ *     the blade's next turn has not reached yet;
+ *   - attributes: a cube with a colour per face (corner values, sharp at
+ *     its edges) along a curve while turning a quarter, implicit: each
+ *     corner the colour of the face that made it, the walls its edges sweep
+ *     split between their two faces' colours; the same swept by slabs (its
+ *     colours exact) to compare.
  * Printed: volumes, distances, samples, times.
  */
 
@@ -55,7 +60,7 @@ static double ms_si_volume(qaws_mesh_3d const* m)
 static void demo_sweep_implicit(void)
 {
 	static double const blue[3] = { 120, 160, 225 }, orange[3] = { 230, 170, 100 }, wire[3] = { 110, 110, 120 };
-	er_canvas* c = er_create(2400, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(3600, 640, 3, 252, 252, 250);
 	qaws_motion_pose s, e;
 	qaws_motion* m = NULL;
 	qaws_sweep_desc d;
@@ -143,6 +148,56 @@ static void demo_sweep_implicit(void)
 		}
 		qaws_motion_destroy(m);
 		qaws_mesh_3d_destroy(tool); qaws_mesh_3d_destroy(rv); qaws_mesh_3d_destroy(im);
+	}
+	{
+		/* a colour per face of a cube, along a curve while turning a quarter */
+		static double const pal[6][3] = { { 0.85, 0.3, 0.3 }, { 0.95, 0.8, 0.3 }, { 0.3, 0.7, 0.4 }, { 0.3, 0.5, 0.9 }, { 0.7, 0.4, 0.85 }, { 0.95, 0.6, 0.25 } };
+		qaws_mesh_3d *cube = ms_sw_box(-0.2, 0.2, -0.2, 0.2, -0.2, 0.2), *im = NULL;
+		double col[108];
+		unsigned int i, el;
+		for (i = 0; i < 108; i++)
+			col[i] = pal[i / 18][i % 3];
+		ms_at_add(cube, "color", QAWS_MESH_CORNER, 3, QAWS_ATTRIBUTE_OKLAB, col, 36);
+		memset(&s, 0, sizeof s);
+		memset(&e, 0, sizeof e);
+		s.rotation[0] = 1;
+		e.rotation[0] = (qaws_scalar)cos(MS_PI / 4);
+		e.rotation[3] = (qaws_scalar)sin(MS_PI / 4);
+		s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(MS_PI / 2);
+		e.position.x = 2;
+		s.velocity.x = 1; s.velocity.y = 2;
+		e.velocity.x = 1; e.velocity.y = -2;
+		qaws_motion_create_poses(&m, &s, &e, 0);
+		memset(&d, 0, sizeof d);
+		d.resolution = 64;
+		t0 = clock();
+		qaws_mesh_3d_sweep_implicit(&im, &ri, cube, m, &d);
+		secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+		if (im)
+		{
+			double* cc = ms_at_colours(im, &el);
+			sprintf(sub, "implicit, grid 64, colours carried: %.1f s", secs);
+			ms_panel(c, 2400, 0, 600, 640, im, -0.5, 0.75, "a cube's faces", sub);
+			if (cc)
+				ms_at_draw(c, im, cc, NULL, NULL, NULL, 0);
+			{
+				qaws_mesh_3d* ex = NULL;
+				d.tolerance = (qaws_scalar)0.002;
+				if (qaws_mesh_3d_sweep(&ex, &re, cube, m, &d) == QAWS_STATUS_OK && ex)
+				{
+					double* ce = ms_at_colours(ex, &el);
+					ms_panel(c, 3000, 0, 600, 640, ex, -0.5, 0.75, "by slabs, to compare", "the explicit sweep's colours");
+					if (ce)
+						ms_at_draw(c, ex, ce, NULL, NULL, NULL, 0);
+					free(ce);
+				}
+				qaws_mesh_3d_destroy(ex);
+			}
+			printf("  attributes: %s, closed %d\n", sub, ri.closed);
+			free(cc);
+		}
+		qaws_motion_destroy(m);
+		qaws_mesh_3d_destroy(cube); qaws_mesh_3d_destroy(im);
 	}
 	er_save(c, "showcase/mesh72_sweep_implicit.png");
 	printf("mesh72_sweep_implicit.png\n");

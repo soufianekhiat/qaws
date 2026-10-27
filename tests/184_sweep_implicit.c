@@ -6,7 +6,12 @@
  *   - a box turned a quarter about z: the implicit and the explicit sweeps within a cell of each other both ways, their
  *     volumes within 2%;
  *   - a vertex motion (a box's top rising from 1 to 2): closed, volume 2 within 3%;
- *   - refusals: no mesh, a vertex motion of another count.
+ *   - refusals: no mesh, a vertex motion of another count;
+ *   - attributes: the cube translated with its positions as a vertex attribute (each corner's value the source point: its
+ *     z and x - y those of the corner, the translation along (1, 1, 0), within half a cell), each face's corners its side's
+ *     number (a corner attribute: no value blended across the cube's edges, nine corners in ten their triangle's own side,
+ *     the rest on the walls the cube's vertical edges sweep, either side's), a face attribute the same; a box turned a
+ *     quarter with a constant VECTOR (1, 0, 0): unit, flat, turned between 0 and a quarter.
  */
 
 #include "test_common.h"
@@ -181,6 +186,108 @@ static void test_vertex_motion(void)
 	qaws_mesh_3d_destroy(b);
 }
 
+static qaws_scalar* si_values(qaws_mesh_3d const* m, char const* name, unsigned int n)
+{
+	unsigned int id;
+	qaws_scalar* v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n * (3 * (size_t)qaws_mesh_3d_get_triangle_count(m) + 1));
+	if (v && qaws_mesh_3d_find_attribute(&id, m, name) == QAWS_STATUS_OK)
+		qaws_mesh_3d_get_attribute(v, m, id);
+	else
+	{
+		free(v);
+		v = NULL;
+	}
+	return v;
+}
+
+static void test_attributes(void)
+{
+	qaws_mesh_3d *c = si_box(0, 1, 0, 1, 0, 1), *b = si_box(1, 2, -0.1, 0.1, 0, 0.6), *o = NULL, *ot = NULL;
+	qaws_motion *mt = NULL, *mr = NULL;
+	qaws_motion_pose s, e;
+	qaws_sweep_desc d;
+	qaws_attribute_desc ad;
+	qaws_scalar pos[24], side[36], fside[12], dir[24], *pv = NULL, *cv = NULL, *fv = NULL, *dv = NULL;
+	unsigned int i, k, nt = 0, ntt = 0, id, blended = 0, own = 0;
+	double perr = 0, cell = 3.0 / 32, worst = 0, amin = 9, amax = -9;
+	char msg[400];
+	qaws_mesh_3d_get_positions(pos, c);
+	for (i = 0; i < 36; i++)
+		side[i] = (qaws_scalar)(i / 6);
+	for (i = 0; i < 12; i++)
+		fside[i] = (qaws_scalar)(i / 2);
+	for (i = 0; i < 24; i++)
+		dir[i] = (qaws_scalar)(i % 3 == 0);
+	ad.name = "pos"; ad.element = QAWS_MESH_VERTEX; ad.components = 3; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	qaws_mesh_3d_add_attribute(&id, c, pos, &ad);
+	ad.name = "side"; ad.element = QAWS_MESH_CORNER; ad.components = 1;
+	qaws_mesh_3d_add_attribute(&id, c, side, &ad);
+	ad.name = "fside"; ad.element = QAWS_MESH_FACE;
+	qaws_mesh_3d_add_attribute(&id, c, fside, &ad);
+	ad.name = "dir"; ad.element = QAWS_MESH_VERTEX; ad.components = 3; ad.rule = QAWS_ATTRIBUTE_VECTOR;
+	qaws_mesh_3d_add_attribute(&id, b, dir, &ad);
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	e.position.x = e.position.y = 1;
+	s.velocity = e.velocity = e.position;
+	qaws_motion_create_poses(&mt, &s, &e, 0);
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	e.rotation[0] = (qaws_scalar)cos(3.14159265358979323846 / 4);
+	e.rotation[3] = (qaws_scalar)sin(3.14159265358979323846 / 4);
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(3.14159265358979323846 / 2);
+	qaws_motion_create_poses(&mr, &s, &e, 0);
+	memset(&d, 0, sizeof d);
+	d.resolution = 32;
+	qaws_mesh_3d_sweep_implicit(&o, NULL, c, mt, &d);
+	d.resolution = 24;
+	qaws_mesh_3d_sweep_implicit(&ot, NULL, b, mr, &d);
+	if (o)
+	{
+		nt = qaws_mesh_3d_get_triangle_count(o);
+		pv = si_values(o, "pos", 3);
+		cv = si_values(o, "side", 1);
+		fv = si_values(o, "fside", 1);
+	}
+	for (i = 0; pv && cv && fv && i < nt; i++)
+	{
+		unsigned int t[3];
+		qaws_mesh_3d_get_triangle(t, o, i);
+		for (k = 0; k < 3; k++)
+		{
+			qaws_vec3 x = qaws_mesh_3d_get_vertex(o, t[k]);
+			double z = (double)cv[3 * i + k];
+			perr = fmax(perr, fabs((double)pv[3 * (3 * i + k) + 2] - x.z));
+			perr = fmax(perr, fabs(((double)pv[3 * (3 * i + k)] - pv[3 * (3 * i + k) + 1]) - ((double)x.x - x.y)));
+			if (fabs(z - floor(z + 0.5)) > 1e-6)
+				blended++;
+			else if (fabs(z - (double)fv[i]) < 1e-6)
+				own++;
+		}
+	}
+	if (ot)
+	{
+		ntt = qaws_mesh_3d_get_triangle_count(ot);
+		dv = si_values(ot, "dir", 3);
+	}
+	for (i = 0; dv && i < 3 * ntt; i++)
+	{
+		double a = atan2((double)dv[3 * i + 1], (double)dv[3 * i]);
+		worst = fmax(worst, fabs(sqrt((double)dv[3 * i] * dv[3 * i] + (double)dv[3 * i + 1] * dv[3 * i + 1] + (double)dv[3 * i + 2] * dv[3 * i + 2]) - 1) + fabs((double)dv[3 * i + 2]));
+		amin = fmin(amin, a);
+		amax = fmax(amax, a);
+	}
+	sprintf(msg, "attributes: positions off by %.4f (cell %.4f), corners blended %u, their triangle's side %u of %u; a turned VECTOR unit and flat within %.1e, turned %.4f to %.4f",
+		perr, cell, blended, own, 3 * nt, worst, amin, amax);
+	printf("  %s\n", msg);
+	TEST_ASSERT(pv && cv && fv && dv && perr < 0.5 * cell && !blended && own > 0.85 * 3 * nt && worst < 1e-9 && amin > -1e-6 && amax < 1.5708 + 1e-6 && amax > 1.5, msg);
+	free(pv); free(cv); free(fv); free(dv);
+	qaws_motion_destroy(mt); qaws_motion_destroy(mr);
+	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(ot);
+}
+
 int test_184_sweep_implicit_main(void)
 {
 	g_pass = 0;
@@ -188,6 +295,7 @@ int test_184_sweep_implicit_main(void)
 	printf("Test 184: implicit sweeps\n");
 	test_rigid();
 	test_vertex_motion();
+	test_attributes();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }
