@@ -24,7 +24,10 @@
  *     NORMAL corner values the faces' (a crease tracing the surface has no
  *     normal of it: the face's own); a 64-gon cylinder drifting 100
  *     tolerances a turn, symmetric about the axis, still its revolution along
- *     the drift (the disc swept along the segment);
+ *     the drift (the disc swept along the segment); the cube drifting 10
+ *     tolerances a turn with revolve_spins: revolved anyway, its turn's drift
+ *     reported, its volume between the true sweep's and the cylinder's along
+ *     the drift;
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -360,7 +363,10 @@ static void test_spin_more(void)
 	qaws_mesh_3d *cube = sw_box(-0.5, 0.5, -0.5, 0.5, 0, 1), *cyl = sw_cylinder(r), *o = NULL, *oc = NULL;
 	qaws_motion *m0 = sw_spin(0.001), *m1 = sw_spin(dd);
 	qaws_sweep_desc d;
-	qaws_sweep_report r0, r1;
+	qaws_sweep_report r0, r1, r2;
+	qaws_motion* m2 = sw_spin(0.04);
+	qaws_mesh_3d* o2 = NULL;
+	double v2;
 	unsigned int nt = qaws_mesh_3d_get_triangle_count(cube), i, k, c[3], id, nf = 0;
 	qaws_scalar* nn = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 9 * nt);
 	qaws_attribute_desc ad;
@@ -409,6 +415,20 @@ static void test_spin_more(void)
 	}
 	qaws_mesh_3d_sweep(&oc, &r1, cyl, m1, &d);
 	v = sw_volume(oc);
+	d.revolve_spins = 1;
+	memset(&r2, 0, sizeof r2);
+	qaws_mesh_3d_sweep(&o2, &r2, cube, m2, &d);
+	v2 = sw_volume(o2);
+	{
+		/* (the cube's cylinder, radius sqrt(1/2), along 0.04: the bound; the true sweep is within a turn's drift of it) */
+		double hi = SW_PI * 0.5 + 2 * sqrt(0.5) * 0.04;
+		char m2s[200];
+		sprintf(m2s, "revolve_spins: %.2f turns, a turn drifts %.4f, volume %.5f (at most %.5f), closed %d", (double)r2.turns, (double)r2.spin_drift, v2, hi, r2.closed);
+		printf("  %s\n", m2s);
+		TEST_ASSERT(o2 && fabs((double)r2.turns - 2) < 1e-4 && fabs((double)r2.spin_drift - 0.02) < 1e-4 && v2 <= hi && v2 > hi - 2 * SW_PI * sqrt(0.5) * 2 * tol && r2.closed, m2s);
+	}
+	qaws_mesh_3d_destroy(o2);
+	qaws_motion_destroy(m2);
 	sprintf(msg, "a cube's two turns: %u faces, NORMALs against the faces at least %.4f; a cylinder drifting 100 tolerances a turn (%.2f turns): volume %.5f (the disc along the segment %.5f), closed %d",
 		nf, least, (double)r1.turns, v, want, r1.closed);
 	printf("  %s\n", msg);

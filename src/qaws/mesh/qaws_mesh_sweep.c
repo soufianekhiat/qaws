@@ -897,12 +897,125 @@ static int swp_flat_delaunay(qaws_hm* m, double eps)
    nothing (an error within a thousandth of the tolerance) are collapsed, features and attributes kept (seams are lines
    the collapses keep), then the flat regions turned toward Delaunay. The Boolean's
    "source" (the soup's faces, internal) is dropped first: every cut would be a seam */
+/* the vertices whose attributes are not one linear function across their faces (in one plane, one wedge) locked (imp 0, else 1):
+   removing one would lose what varies there (a revolved floor's rings), as the decimation weighs only the shape. A gradient
+   differing by a hundredth of the attribute's range over the vertex's longest edge counts; quaternions, angles and nearest
+   values pass. 0 on allocation failure */
+static int swp_attr_lock(qaws_hm const* m, qaws_scalar* imp)
+{
+	unsigned int v, f, k, a, j, c;
+	double* G = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)m->nf + 1));
+	double* N = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)m->nf + 1));
+	if (!G || !N)
+	{
+		qaws_internal_free(G);
+		qaws_internal_free(N);
+		return 0;
+	}
+	for (v = 0; v < m->nv; v++)
+		imp[v] = 1;
+	for (f = 0; f < m->nf; f++)
+	{
+		double n[3], l;
+		hm_face_normal(m, f, n);
+		l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		for (k = 0; k < 3; k++)
+			N[3 * (size_t)f + k] = l > 0 ? n[k] / l : 0;
+	}
+	for (a = 0; a < m->na; a++)
+	{
+		hm_attr const* at = &m->attr[a];
+		if ((at->element != QAWS_MESH_CORNER && at->element != QAWS_MESH_VERTEX) || at->rule == QAWS_ATTRIBUTE_QUATERNION || at->rule == QAWS_ATTRIBUTE_ANGLE ||
+			at->rule == QAWS_ATTRIBUTE_NEAREST)
+			continue;
+		for (j = 0; j < at->n; j++)
+		{
+			double lo = HUGE_VAL, hi = -HUGE_VAL, thr;
+			/* the component's range, each triangle's gradient in its plane */
+			for (c = 0; c < m->nc; c++)
+				if (m->cf[c] != HM_NONE)
+				{
+					double x = hm_attr_at(m, a, at->element == QAWS_MESH_CORNER ? c : m->cv[c])[j];
+					lo = fmin(lo, x);
+					hi = fmax(hi, x);
+				}
+			if (!(hi > lo))
+				continue;
+			thr = 0.01 * (hi - lo);
+			for (f = 0; f < m->nf; f++)
+			{
+				unsigned int c0 = m->fc[f];
+				double const *p0, *p1, *p2;
+				double e1[3], e2[3], d1, d2, a11 = 0, a12 = 0, a22 = 0, b1, b2, den, x0, x1, x2, al, be;
+				G[3 * (size_t)f] = G[3 * (size_t)f + 1] = G[3 * (size_t)f + 2] = 0;
+				if (m->fn[f] != 3 || m->cv[c0] == HM_NONE)
+					continue;
+				p0 = m->x + 3 * (size_t)m->cv[c0];
+				p1 = m->x + 3 * (size_t)m->cv[c0 + 1];
+				p2 = m->x + 3 * (size_t)m->cv[c0 + 2];
+				x0 = hm_attr_at(m, a, at->element == QAWS_MESH_CORNER ? c0 : m->cv[c0])[j];
+				x1 = hm_attr_at(m, a, at->element == QAWS_MESH_CORNER ? c0 + 1 : m->cv[c0 + 1])[j];
+				x2 = hm_attr_at(m, a, at->element == QAWS_MESH_CORNER ? c0 + 2 : m->cv[c0 + 2])[j];
+				for (k = 0; k < 3; k++)
+				{
+					e1[k] = p1[k] - p0[k];
+					e2[k] = p2[k] - p0[k];
+					a11 += e1[k] * e1[k];
+					a12 += e1[k] * e2[k];
+					a22 += e2[k] * e2[k];
+				}
+				d1 = x1 - x0;
+				d2 = x2 - x0;
+				den = a11 * a22 - a12 * a12;
+				if (!(den > 0))
+					continue;
+				b1 = d1;
+				b2 = d2;
+				al = (a22 * b1 - a12 * b2) / den;
+				be = (a11 * b2 - a12 * b1) / den;
+				for (k = 0; k < 3; k++)
+					G[3 * (size_t)f + k] = al * e1[k] + be * e2[k];
+			}
+			for (v = 0; v < m->nv; v++)
+			{
+				unsigned int c1, c2;
+				double L = 0;
+				if (!imp[v] || (m->vflag[v] & HM_DELETED))
+					continue;
+				for (c1 = m->vc[v]; c1 != HM_NONE; c1 = hm_round(m, v, c1))
+				{
+					double const* q = m->x + 3 * (size_t)m->cv[hm_next(m, c1)];
+					L = fmax(L, sqrt((q[0] - m->x[3 * (size_t)v]) * (q[0] - m->x[3 * (size_t)v]) + (q[1] - m->x[3 * (size_t)v + 1]) * (q[1] - m->x[3 * (size_t)v + 1]) +
+						(q[2] - m->x[3 * (size_t)v + 2]) * (q[2] - m->x[3 * (size_t)v + 2])));
+				}
+				for (c1 = m->vc[v]; c1 != HM_NONE && imp[v]; c1 = hm_round(m, v, c1))
+					for (c2 = hm_round(m, v, c1); c2 != HM_NONE && imp[v]; c2 = hm_round(m, v, c2))
+					{
+						unsigned int f1 = m->cf[c1], f2 = m->cf[c2];
+						double const *g1 = G + 3 * (size_t)f1, *g2 = G + 3 * (size_t)f2, *n1 = N + 3 * (size_t)f1, *n2 = N + 3 * (size_t)f2;
+						double dg;
+						if (n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2] < 1 - 1e-9)
+							continue;   /* (not one plane: the shape keeps it) */
+						if (at->element == QAWS_MESH_CORNER && fabs(hm_attr_at(m, a, c1)[j] - hm_attr_at(m, a, c2)[j]) > 1e-12 * (1 + fabs(hm_attr_at(m, a, c1)[j])))
+							continue;   /* (two wedges: a seam, kept as a line) */
+						dg = sqrt((g1[0] - g2[0]) * (g1[0] - g2[0]) + (g1[1] - g2[1]) * (g1[1] - g2[1]) + (g1[2] - g2[2]) * (g1[2] - g2[2]));
+						if (dg * L > thr)
+							imp[v] = 0;
+					}
+			}
+		}
+	}
+	qaws_internal_free(G);
+	qaws_internal_free(N);
+	return 1;
+}
+
 static qaws_status swp_tidy(qaws_mesh_3d* m, double tol)
 {
 	qaws_decimate_desc d;
 	qaws_attribute_desc ad;
 	unsigned int a, i, ne, nf = 0, *ev = NULL;
-	qaws_scalar* fv = NULL;
+	qaws_scalar *fv = NULL, *imp = NULL;
 	qaws_status st;
 	if (!m)
 		return QAWS_STATUS_OK;
@@ -930,6 +1043,11 @@ static qaws_status swp_tidy(qaws_mesh_3d* m, double tol)
 		goto done;
 	memset(&d, 0, sizeof d);
 	d.max_error = (qaws_scalar)(1e-3 * tol);
+	imp = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * ((size_t)m->hm.nv + 1));
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!imp || !swp_attr_lock(&m->hm, imp))
+		goto done;
+	d.importance = imp;
 	if ((st = qaws_mesh_3d_decimate(NULL, m, &d)) != QAWS_STATUS_OK)
 		goto done;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -956,6 +1074,7 @@ static qaws_status swp_tidy(qaws_mesh_3d* m, double tol)
 done:
 	qaws_internal_free(ev);
 	qaws_internal_free(fv);
+	qaws_internal_free(imp);
 	return st;
 }
 
@@ -966,12 +1085,13 @@ done:
 
 /* the motion a spin: rigid, its angular velocity keeping one direction u and sense, a whole turn or more; its turns (0: not
    a spin), *slow whether it moves at most tol along any turn */
-static double swp_spin(qaws_motion const* m, double tol, double* u, int* slow)
+static double swp_spin(qaws_motion const* m, double tol, double* u, int* slow, double* drift)
 {
 	double total = 0, prev = 0, l;
 	unsigned int i, k, ns = 512;
 	qaws_motion_state s;
 	*slow = 1;
+	*drift = 0;
 	if (qaws_motion_is_per_vertex(m) || qaws_motion_evaluate(&s, m, (qaws_scalar)0.5) != QAWS_STATUS_OK)
 		return 0;
 	u[0] = (double)s.angular_velocity.x;
@@ -998,6 +1118,7 @@ static double swp_spin(qaws_motion const* m, double tol, double* u, int* slow)
 		v = sqrt((double)s.velocity.x * s.velocity.x + (double)s.velocity.y * s.velocity.y + (double)s.velocity.z * s.velocity.z);
 		if (!(a > 0) || sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) > 1e-6 * lw)
 			return 0;
+		*drift = fmax(*drift, v * 2 * 3.14159265358979323846 / a);
 		if (v * 2 * 3.14159265358979323846 / a > tol)
 			*slow = 0;
 		if (i)
@@ -1860,7 +1981,7 @@ done:
 /* a spin's sweep: the solid of revolution at 0 (features its creases sharper than half the body's softest), swept along
    the drift (the translation from 0, no turn) */
 static qaws_status swp_spun(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, double const* X,
-	unsigned int nv, unsigned int const* t, unsigned int nt, double const* u, double tol, qaws_sweep_desc const* desc, double turns, int slow)
+	unsigned int nv, unsigned int const* t, unsigned int nt, double const* u, double tol, qaws_sweep_desc const* desc, double turns, int slow, double turn_drift)
 {
 	qaws_motion_state s0, s1;
 	qaws_motion_pose p0, p1;
@@ -1877,7 +1998,7 @@ static qaws_status swp_spun(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_
 	o[2] = (double)s0.position.z;
 	for (k = 0; k < 9; k++)
 		R0[k] = (double)s0.rotation[k];
-	if ((st = swp_revolve(&rev, mesh, X, nv, t, nt, o, u, R0, tol, !slow)) != QAWS_STATUS_OK)
+	if ((st = swp_revolve(&rev, mesh, X, nv, t, nt, o, u, R0, tol, !slow && !(desc && desc->revolve_spins))) != QAWS_STATUS_OK)
 		return st;
 	if ((st = qaws_mesh_3d_detect_features(rev, (qaws_scalar)(0.5 * swp_feature_angle(mesh)), 0, 0)) != QAWS_STATUS_OK)
 	{
@@ -1902,6 +2023,8 @@ static qaws_status swp_spun(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_
 		st = qaws_mesh_3d_sweep(out, report, rev, drift, &d2);
 		if (report)
 			report->turns = (qaws_scalar)turns;
+		if (report)
+			report->spin_drift = (qaws_scalar)turn_drift;
 	}
 	qaws_motion_destroy(drift);
 	qaws_mesh_3d_destroy(rev);
@@ -1964,10 +2087,10 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 		/* a spin (a whole turn or more about one axis, drifting under tol a turn): its solid of revolution swept along the drift */
 		/* (drifting faster: only a body symmetric about the axis; UNSUPPORTED_OPERATION otherwise, and the slabs below) */
 		int slow;
-		double ax[3], turns = swp_spin(motion, tol, ax, &slow);
+		double ax[3], drift, turns = swp_spin(motion, tol, ax, &slow, &drift);
 		if (turns > 0)
 		{
-			st = swp_spun(out, report, mesh, motion, Xa, nv, t, nt, ax, tol, desc, turns, slow);
+			st = swp_spun(out, report, mesh, motion, Xa, nv, t, nt, ax, tol, desc, turns, slow, drift);
 			if (st != QAWS_STATUS_UNSUPPORTED_OPERATION)
 				goto done;
 			memset(report, 0, sizeof *report);

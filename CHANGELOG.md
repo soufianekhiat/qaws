@@ -34,7 +34,11 @@ All notable changes to Qaws are documented here.
   the same places coincide instead of piling up hulls dozens deep. Attributes from the point the turn first brings to
   each place. A torus 100/10 mm, 3 turns at 10 turns/s, carves its groove in 1.5 s (figure 68). A body symmetric about
   the axis (an end mill, a drill) is revolved at any drift; NORMALs where a crease traced the surface are the faces'; the
-  profile's straight sides one edge each (a spinning cube 5,460 faces to 168).
+  profile's straight sides one edge each (a spinning cube 5,460 faces to 168). `qaws_sweep_desc.revolve_spins` revolves
+  an asymmetric body's spin drifting past the tolerance too (a one-flute cutter fed 25 tolerances a turn: 0.01 s where
+  the slabs did not finish), the overshoot bound in `qaws_sweep_report.spin_drift` (figure 69).
+- Sweeps' simplify keeps the vertices where an attribute is not one linear function across their faces (a revolved
+  floor's colour rings were flattened to the rim's colour: the decimation weighs only the shape).
 
 ### Changed
 

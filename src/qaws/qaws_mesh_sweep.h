@@ -67,8 +67,10 @@
  * edge of the body tracing the surface has no normal of it) the face's own;
  * edge values do not survive the revolution (zeros). The report's turns says
  * a spin was found. An asymmetric body spinning while it drifts past the
- * tolerance a turn is swept by slabs as any motion: its hulls overlap turn
- * after turn, and it is slow.
+ * tolerance a turn is swept by slabs as any motion (its hulls overlap turn
+ * after turn: slow), or with revolve_spins revolved anyway: the result then
+ * passes the true sweep by up to the report's spin_drift (a CNC simulator's
+ * spindle tool).
  *
  * A vertex motion must have the mesh's vertex count; the mesh's positions
  * are then ignored (the motion's at each time are used).
@@ -98,6 +100,9 @@ typedef struct qaws_sweep_desc
 	                                       leave removed (each collapse within a thousandth of the tolerance), the flat regions
 	                                       then turned toward Delaunay: far fewer faces, the shape, features and attributes kept */
 	qaws_batch_executor const* executor;   /* the Boolean's pair tests and samples through it; NULL: this thread */
+	int revolve_spins;                  /* nonzero: a spin drifting past the tolerance a turn is revolved even when the body is not
+	                                       symmetric about its axis (a one-flute cutter: the result may pass the true sweep by up
+	                                       to the report's spin_drift); 0: such a spin is swept by slabs (slow) */
 } qaws_sweep_desc;
 
 typedef struct qaws_sweep_report
@@ -108,6 +113,7 @@ typedef struct qaws_sweep_report
 	qaws_boolean_report boolean;
 	int closed;
 	qaws_scalar turns;                  /* a spin's turns, swept as its solid of revolution along its drift; 0 otherwise */
+	qaws_scalar spin_drift;             /* a spin's largest drift along one turn */
 } qaws_sweep_report;
 
 /* desc and report may be NULL. INVALID_ARGUMENT for a vertex motion of another vertex count. An empty result: OK and NULL. */
