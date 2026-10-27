@@ -55,8 +55,11 @@
  *           the size squared (the size from the larger principal curvature
  *           with tolerances), the boundary pinned. Every vertex exactly on
  *           its face; isotropic in space whatever the parametrization.
- *           Triangles only (UNSUPPORTED_OPERATION for quads); a shell's
- *           faces untrimmed.
+ *           Trimmed faces: their trim loops sampled alike (the counts the
+ *           larger across shared edges), ear-clipped with their holes
+ *           bridged, remeshed the same (not on surfaces closed in u or v:
+ *           UNSUPPORTED_OPERATION). Triangles only (UNSUPPORTED_OPERATION for
+ *           quads).
  *   RESTRICTED_DELAUNAY  PARAMETRIC's mesh made Delaunay (edge flips,
  *           never across a feature or border edge) and refined as Chew and
  *           Ruppert do: a triangle with an angle under 30 degrees (but
@@ -68,7 +71,8 @@
  *           features is Delaunay (its facing angles sum to pi at most) and
  *           every angle is at least 30 degrees but the input's between
  *           feature edges (at most 8 times the start's vertices added).
- *           Triangles only; untrimmed faces.
+ *           Triangles only; trimmed faces as PARAMETRIC (their border
+ *           points snapped onto the surface, not held on the trim curve).
  *
  * Sizes: a uniform target length, or adaptive by tolerances (the chord and
  * angle tolerances of qaws_curvature_size_desc, clamped and graded) read

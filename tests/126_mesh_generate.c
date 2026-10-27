@@ -26,6 +26,11 @@
  *     tolerance: closed (but the patch), every vertex on its face, no edge
  *     off the features facing angles summing past pi (Delaunay), every
  *     angle at least 30 degrees but between two feature edges (Chew);
+ *   - trimmed faces: a square plate with a round hole and the disk filling
+ *     it (another plane's parametrization, the circle their shared edge), by
+ *     PARAMETRIC and RESTRICTED_DELAUNAY: valid, the plate's outer square
+ *     the only border (the circle shared), every vertex on the plane, the
+ *     circle's vertices on the circle;
  *   - refusals: RESTRICTED_DELAUNAY and PARAMETRIC in quads, no
  *     description, a negative length.
  *
@@ -705,6 +710,123 @@ static void test_restricted_delaunay(void)
 	qaws_surface_destroy(patch);
 }
 
+static qaws_curve* tg_line(double x0, double y0, double x1, double y1)
+{
+	qaws_bezier_desc bd;
+	qaws_scalar cp[4];
+	qaws_curve* c = NULL;
+	cp[0] = (qaws_scalar)x0; cp[1] = (qaws_scalar)y0; cp[2] = (qaws_scalar)x1; cp[3] = (qaws_scalar)y1;
+	memset(&bd, 0, sizeof bd);
+	bd.dimension = QAWS_DIMENSION_2D; bd.degree = 1; bd.control_points = cp; bd.control_point_count = 2;
+	qaws_curve_create_bezier(&c, &bd);
+	return c;
+}
+
+static qaws_curve* tg_arc(double cx, double cy, double r, double a0, double a1)
+{
+	qaws_arc_segment g;
+	qaws_arc_desc ad;
+	qaws_curve* c = NULL;
+	memset(&g, 0, sizeof g);
+	g.center[0] = (qaws_scalar)cx; g.center[1] = (qaws_scalar)cy; g.radius = (qaws_scalar)r;
+	g.angle_start = (qaws_scalar)a0; g.angle_end = (qaws_scalar)a1;
+	memset(&ad, 0, sizeof ad);
+	ad.dimension = QAWS_DIMENSION_2D; ad.segments = &g; ad.segment_count = 1;
+	qaws_curve_create_arc(&c, &ad);
+	return c;
+}
+
+static void test_trimmed(void)
+{
+	/* the plate: z = 0 as (x, y) = (-2 + 4u, -2 + 4v), trimmed to [0.125, 0.875]^2 less the circle of 0.2 round (0.5, 0.5)
+	   (radius 0.8 in space); the disk: its own plane (x, y) = (1 - 2v, -1 + 2u), the circle of 0.4 round (0.5, 0.5) */
+	static double const A[4][3] = { { -2, -2, 0 }, { 2, -2, 0 }, { -2, 2, 0 }, { 2, 2, 0 } }, B[4][3] = { { 1, -1, 0 }, { 1, 1, 0 }, { -1, -1, 0 }, { -1, 1, 0 } };
+	qaws_surface* s[2];
+	qaws_curve *oc[4], *hole, *disk;
+	qaws_curve const *ol[4], *hl[1], *dl[1];
+	qaws_path_2d pa[2], pb[1];
+	qaws_shell_face_desc fd[2];
+	qaws_shell_atlas* a = NULL;
+	unsigned int i, k, m;
+	char msg[400];
+	for (k = 0; k < 2; k++)
+	{
+		qaws_surface_bilinear_desc d;
+		double const (*P)[3] = k ? B : A;
+		memset(&d, 0, sizeof d);
+		d.p00.x = (qaws_scalar)P[0][0]; d.p00.y = (qaws_scalar)P[0][1];
+		d.p10.x = (qaws_scalar)P[1][0]; d.p10.y = (qaws_scalar)P[1][1];
+		d.p01.x = (qaws_scalar)P[2][0]; d.p01.y = (qaws_scalar)P[2][1];
+		d.p11.x = (qaws_scalar)P[3][0]; d.p11.y = (qaws_scalar)P[3][1];
+		s[k] = NULL;
+		qaws_surface_create_bilinear(&s[k], &d);
+	}
+	oc[0] = tg_line(0.125, 0.125, 0.875, 0.125);
+	oc[1] = tg_line(0.875, 0.125, 0.875, 0.875);
+	oc[2] = tg_line(0.875, 0.875, 0.125, 0.875);
+	oc[3] = tg_line(0.125, 0.875, 0.125, 0.125);
+	hole = tg_arc(0.5, 0.5, 0.2, 0, 2 * 3.14159265358979323846);
+	disk = tg_arc(0.5, 0.5, 0.4, 1.0, 1.0 + 2 * 3.14159265358979323846);
+	for (i = 0; i < 4; i++)
+		ol[i] = oc[i];
+	hl[0] = hole;
+	dl[0] = disk;
+	pa[0].curves = ol; pa[0].curve_count = 4; pa[0].closed = 1;
+	pa[1].curves = hl; pa[1].curve_count = 1; pa[1].closed = 1;
+	pb[0].curves = dl; pb[0].curve_count = 1; pb[0].closed = 1;
+	fd[0].surface = s[0]; fd[0].trims = pa; fd[0].trim_count = 2;
+	fd[1].surface = s[1]; fd[1].trims = pb; fd[1].trim_count = 1;
+	qaws_shell_atlas_create_trimmed(&a, fd, 2, 0);
+	for (m = 0; a && m < 2; m++)
+	{
+		qaws_generate_desc d;
+		qaws_mesh_3d* out = NULL;
+		qaws_status st;
+		tg_mesh t;
+		double offz = 0, oncircle = HUGE_VAL, err;
+		unsigned int near = 0;
+		memset(&d, 0, sizeof d);
+		d.method = m ? QAWS_GENERATE_RESTRICTED_DELAUNAY : QAWS_GENERATE_PARAMETRIC;
+		d.target_length = (qaws_scalar)0.25;
+		st = qaws_mesh_generate_shell(&out, NULL, a, &d);
+		if (st != QAWS_STATUS_OK || !out)
+		{
+			sprintf(msg, "trimmed plate and disk by %s: %s", m ? "RESTRICTED_DELAUNAY" : "PARAMETRIC", qaws_status_to_string(st));
+			TEST_ASSERT(0, msg);
+			continue;
+		}
+		tg_read(out, &t);
+		err = tg_foot_error(&t, NULL, a);
+		oncircle = 0;
+		for (i = 0; i < t.nv; i++)
+		{
+			double r = sqrt(t.x[3 * i] * t.x[3 * i] + t.x[3 * i + 1] * t.x[3 * i + 1]);
+			offz = fmax(offz, fabs(t.x[3 * i + 2]));
+			/* (the circle's vertices: within a tenth of the size of radius 0.8, then on it) */
+			if (fabs(r - 0.8) < 0.025)
+			{
+				near++;
+				oncircle = fmax(oncircle, fabs(r - 0.8));
+			}
+		}
+		sprintf(msg, "trimmed plate and disk by %s: %u triangles, valid %d, border loops %u, genus %u, off the plane %.1e, footpoints %.1e, "
+			"%u vertices on the circle (to %.1e), angles %.3g..%.3g", m ? "RESTRICTED_DELAUNAY" : "PARAMETRIC", t.nf, qaws_mesh_3d_validate(out) == QAWS_STATUS_OK,
+			t.top.boundary_loops, t.top.genus, offz, err, near, oncircle, (double)t.q.min_angle, (double)t.q.max_angle);
+		printf("  %s\n", msg);
+		TEST_ASSERT(qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t.top.boundary_loops == 1 && t.top.genus == 0 && t.top.components == 1 && offz < 1e-12
+			&& err < TEST_BOUND(1e-9, 32) && near >= 16 && oncircle < 1e-6 && t.q.min_angle > (m ? 29.99 : 20), msg);
+		tg_free(&t);
+		qaws_mesh_3d_destroy(out);
+	}
+	qaws_shell_atlas_destroy(a);
+	for (i = 0; i < 4; i++)
+		qaws_curve_destroy(oc[i]);
+	qaws_curve_destroy(hole);
+	qaws_curve_destroy(disk);
+	qaws_surface_destroy(s[0]);
+	qaws_surface_destroy(s[1]);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* s = tg_patch();
@@ -741,6 +863,7 @@ int test_126_mesh_generate_main(void)
 	test_structured();
 	test_parametric();
 	test_restricted_delaunay();
+	test_trimmed();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

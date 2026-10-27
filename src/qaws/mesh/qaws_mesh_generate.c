@@ -655,7 +655,7 @@ static void mg_grid_uv(qaws_surface const* s, double const* dom, unsigned int nu
    at the larger principal curvature k, within [min_length, L]. Out: the vertices' (u, v) and the triangles,
    counter-clockwise in (u, v). */
 static qaws_status mg_param_face(qaws_surface const* s, double const* D, double const* uv, unsigned int nv, unsigned int npin, unsigned int const* tri0, unsigned int nt0,
-	double L, qaws_generate_desc const* desc, double** ouv, unsigned int* onv, unsigned int** otri, unsigned int* ont)
+	double L, qaws_generate_desc const* desc, double** ouv, unsigned int* onv, unsigned int** otri, unsigned int* ont, unsigned char** oborder)
 {
 	enum { GN = 64, GV = (GN + 1) * (GN + 1) };
 	unsigned int i, j, *tri = NULL, *pin = NULL;
@@ -779,6 +779,18 @@ static qaws_status mg_param_face(qaws_surface const* s, double const* D, double 
 		(*ouv)[2 * (size_t)i + 1] = (double)pos[3 * (size_t)i + 1];
 	}
 	qaws_mesh_3d_get_triangles(*otri, om);
+	*oborder = (unsigned char*)qaws_internal_malloc((size_t)*onv + 1);
+	if (!*oborder)
+	{
+		qaws_internal_free(*ouv);
+		qaws_internal_free(*otri);
+		*ouv = NULL;
+		*otri = NULL;
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (i = 0; i < *onv; i++)
+		(*oborder)[i] = (unsigned char)qaws_mesh_3d_is_boundary_vertex(om, i);
 	st = QAWS_STATUS_OK;
 done:
 	qaws_internal_free(x);
@@ -898,45 +910,251 @@ done:
 	return st;
 }
 
-/* PARAMETRIC: per face its boundary split in space, each side by equal steps of its length over the size (L, or with
-   tolerances the side curve's own chord and angle sizes from its curvature, within [min_length, L]: the same curve from
-   both faces of an edge, so the same points), the counts made the larger across shared edges; the polygon in (u, v)
-   fanned from the domain's centre and remeshed in the surface's metric with the boundary pinned (mg_param_face); every
-   vertex lifted, the boundary's welded where faces meet (shared edges, seams, poles). Untrimmed faces. */
+/* twice the signed area of (a, b, c) in (u, v) */
+static double mg_cross2(double const* a, double const* b, double const* c)
+{
+	return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+}
+
+/* segments (a, b) and (c, d) crossing at a point inside both (touching ends do not count) */
+static int mg_seg_cross(double const* a, double const* b, double const* c, double const* d)
+{
+	double d1 = mg_cross2(a, b, c), d2 = mg_cross2(a, b, d), d3 = mg_cross2(c, d, a), d4 = mg_cross2(c, d, b);
+	return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+/* The polygon of loops (vertices uv, 2 each; loop l the vertices [ls[l], ls[l + 1]), counter-clockwise for the outside and
+   clockwise for holes, the face on their left) triangulated: each hole bridged to the polygon from its rightmost vertex
+   to the nearest vertex it sees, then ears clipped (a convex corner with no vertex inside its triangle). Out: nt
+   counter-clockwise triangles of vertex indices (3 (n - 2 + 2 holes) at most). 0 when no outside loop or an ear is
+   missing (a self-crossing polygon). */
+static int mg_earclip(double const* uv, unsigned int const* ls, unsigned int nl, unsigned int* tri, unsigned int* nt)
+{
+	unsigned int n = ls[nl], *poly = NULL, *nxt = NULL, np = 0, l, outer = HM_NONE, k, *order = NULL, nh = 0, guard;
+	double best = 0;
+	int ok = 0;
+	*nt = 0;
+	poly = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 3 * (size_t)n + 4));
+	order = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nl + 1));
+	if (!poly || !order)
+		goto done;
+	/* the outside: the loop of largest positive area */
+	for (l = 0; l < nl; l++)
+	{
+		double a = 0;
+		for (k = ls[l]; k < ls[l + 1]; k++)
+		{
+			unsigned int k2 = k + 1 < ls[l + 1] ? k + 1 : ls[l];
+			a += uv[2 * (size_t)k] * uv[2 * (size_t)k2 + 1] - uv[2 * (size_t)k2] * uv[2 * (size_t)k + 1];
+		}
+		if (a > best)
+		{
+			best = a;
+			outer = l;
+		}
+	}
+	if (outer == HM_NONE)
+		goto done;
+	for (k = ls[outer]; k < ls[outer + 1]; k++)
+		poly[np++] = k;
+	/* the holes by their rightmost u, the rightmost first */
+	for (l = 0; l < nl; l++)
+		if (l != outer)
+			order[nh++] = l;
+	for (l = 0; l + 1 < nh; l++)
+	{
+		unsigned int m = l, q;
+		double um = -HUGE_VAL;
+		for (q = l; q < nh; q++)
+		{
+			double u = -HUGE_VAL;
+			for (k = ls[order[q]]; k < ls[order[q] + 1]; k++)
+				u = fmax(u, uv[2 * (size_t)k]);
+			if (u > um)
+			{
+				um = u;
+				m = q;
+			}
+		}
+		q = order[l];
+		order[l] = order[m];
+		order[m] = q;
+	}
+	for (l = 0; l < nh; l++)
+	{
+		unsigned int h = order[l], M = ls[h], bi = HM_NONE, q, z;
+		double bd = HUGE_VAL;
+		for (k = ls[h]; k < ls[h + 1]; k++)
+			if (uv[2 * (size_t)k] > uv[2 * (size_t)M])
+				M = k;
+		/* the nearest polygon vertex M sees: the segment crossing no edge of the polygon or of a hole */
+		for (q = 0; q < np; q++)
+		{
+			double const *a = uv + 2 * (size_t)M, *b = uv + 2 * (size_t)poly[q];
+			double d = (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]);
+			int clear = 1;
+			unsigned int g;
+			if (d >= bd)
+				continue;
+			for (z = 0; z < np && clear; z++)
+				clear = !mg_seg_cross(a, b, uv + 2 * (size_t)poly[z], uv + 2 * (size_t)poly[(z + 1) % np]);
+			for (g = l; g < nh && clear; g++)
+				for (z = ls[order[g]]; z < ls[order[g] + 1] && clear; z++)
+				{
+					unsigned int z2 = z + 1 < ls[order[g] + 1] ? z + 1 : ls[order[g]];
+					clear = !mg_seg_cross(a, b, uv + 2 * (size_t)z, uv + 2 * (size_t)z2);
+				}
+			if (clear)
+			{
+				bd = d;
+				bi = q;
+			}
+		}
+		if (bi == HM_NONE)
+			goto done;
+		/* (spliced: ..., V, M, the hole round from M, M, V, ...) */
+		{
+			unsigned int hn = ls[h + 1] - ls[h], ins = hn + 2, V = poly[bi];
+			memmove(poly + bi + 1 + ins, poly + bi + 1, sizeof(unsigned int) * (np - bi - 1));
+			for (z = 0; z <= hn; z++)
+				poly[bi + 1 + z] = ls[h] + (M - ls[h] + z) % hn;
+			poly[bi + 1 + hn + 1] = V;
+			np += ins;
+		}
+	}
+	/* ears */
+	nxt = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)np + 1));
+	if (!nxt)
+		goto done;
+	for (k = 0; k < np; k++)
+		nxt[k] = (k + 1) % np;
+	{
+		unsigned int cur = 0, left = np, prev = np - 1, tries = 0;
+		guard = 0;
+		while (left > 3 && guard++ < 8 * np * np + 64)
+		{
+			unsigned int i1 = nxt[cur], i2 = nxt[i1];
+			double const *A = uv + 2 * (size_t)poly[cur], *B = uv + 2 * (size_t)poly[i1], *C = uv + 2 * (size_t)poly[i2];
+			int ear = mg_cross2(A, B, C) > 0;
+			unsigned int q;
+			for (q = nxt[i2]; ear && q != cur; q = nxt[q])
+			{
+				double const* P = uv + 2 * (size_t)poly[q];
+				if (poly[q] == poly[cur] || poly[q] == poly[i1] || poly[q] == poly[i2])
+					continue;
+				if (mg_cross2(A, B, P) >= 0 && mg_cross2(B, C, P) >= 0 && mg_cross2(C, A, P) >= 0)
+					ear = 0;
+			}
+			if (ear)
+			{
+				tri[3 * (size_t)*nt] = poly[cur];
+				tri[3 * (size_t)*nt + 1] = poly[i1];
+				tri[3 * (size_t)*nt + 2] = poly[i2];
+				(*nt)++;
+				nxt[cur] = i2;
+				left--;
+				tries = 0;
+				continue;
+			}
+			prev = cur;
+			cur = nxt[cur];
+			if (++tries > left)
+				goto done;   /* (no ear left: the polygon crosses itself) */
+		}
+		(void)prev;
+		if (left == 3)
+		{
+			unsigned int i1 = nxt[cur], i2 = nxt[i1];
+			if (mg_cross2(uv + 2 * (size_t)poly[cur], uv + 2 * (size_t)poly[i1], uv + 2 * (size_t)poly[i2]) > 0)
+			{
+				tri[3 * (size_t)*nt] = poly[cur];
+				tri[3 * (size_t)*nt + 1] = poly[i1];
+				tri[3 * (size_t)*nt + 2] = poly[i2];
+				(*nt)++;
+			}
+		}
+	}
+	ok = 1;
+done:
+	qaws_internal_free(poly);
+	qaws_internal_free(nxt);
+	qaws_internal_free(order);
+	return ok;
+}
+
+/* a face's side's (u, v) at t: an untrimmed face's domain sides from D, a trimmed face's pieces from the shell */
+static void mg_side_point(mg_src const* src, double const* D, int trimmed, unsigned int f, unsigned int side, double t, double* uv)
+{
+	if (trimmed)
+		sh_face_side_point(src->shell, f, side, t, uv);
+	else
+		mg_side_uv(D, (int)side, t, uv);
+}
+
+/* PARAMETRIC: per face its boundary split in space, each side (a domain side, or a trim piece) by equal steps of its length
+   over the size (L, or with tolerances the side curve's own chord and angle sizes from its curvature, within
+   [min_length, L]: the same curve from both faces of an edge, so the same points), the counts made the larger across
+   shared edges; the boundary's loops in (u, v) triangulated (an untrimmed face's rectangle fanned from its centre, a
+   trimmed face's loops ear-clipped, holes bridged) and remeshed in the surface's metric with the boundary pinned
+   (mg_param_face); every vertex lifted, the border's welded where faces meet (shared edges, seams, poles). Trimmed faces
+   on surfaces closed in u or v: UNSUPPORTED_OPERATION. */
 static qaws_status mg_parametric(mg_src const* src, unsigned int nf, qaws_generate_desc const* desc, double L, qaws_mesh_3d** out_mesh,
 	qaws_mesh_report* rep)
 {
 	enum { K = 256 };
-	unsigned int *n = NULL, f, k, i, nv = 0, nc = 0, nface = 0, cap = 0, ccap = 0, fcap = 0, *fv = NULL, *fs = NULL, *fface = NULL, *slot = NULL, mask, nb[4];
-	int nbs[4], adaptive = desc->target_length == 0 && (desc->chord_tolerance > 0 || desc->angle_tolerance > 0);
+	unsigned int *n = NULL, *soff = NULL, *sfirst = NULL, f, k, i, nv = 0, nc = 0, nface = 0, cap = 0, ccap = 0, fcap = 0, *fv = NULL, *fs = NULL;
+	unsigned int *fface = NULL, *slot = NULL, mask, ns = 0;
+	int adaptive = desc->target_length == 0 && (desc->chord_tolerance > 0 || desc->angle_tolerance > 0);
 	double *dom = NULL, *W = NULL, *x = NULL, minstep = HUGE_VAL, cell, hmin = desc->min_length > 0 ? (double)desc->min_length : 1e-3 * L;
+	unsigned char* trimmed = NULL;
 	qaws_mesh_location* foot = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
-	n = (unsigned int*)qaws_internal_scratch_zalloc(4 * (size_t)nf + 4, sizeof(unsigned int));
+	soff = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nf + 2, sizeof(unsigned int));
+	sfirst = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nf + 1, sizeof(unsigned int));
+	trimmed = (unsigned char*)qaws_internal_scratch_zalloc((size_t)nf + 1, 1);
 	dom = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4, (size_t)nf + 1));
-	W = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4 * (size_t)nf + 4, K + 1));
-	if (!n || !dom || !W)
+	if (!soff || !sfirst || !trimmed || !dom)
 		goto done;
-	/* each side's weight sum_ds / h (the sizes from the side curve's turning between samples) and count */
+	/* the faces' sides */
 	for (f = 0; f < nf; f++)
 	{
 		qaws_surface const* s = mg_face(src, f);
 		qaws_range ur = qaws_surface_get_u_range(s), vr = qaws_surface_get_v_range(s);
-		if (src->shell && !sh_face_grid_sides(src->shell, f, nb, nbs))
+		unsigned int cnt = 4, nl;
+		unsigned int const* lf;
+		int per = 0;
+		if (src->shell)
 		{
-			st = QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (a trimmed face) */
-			goto done;
+			cnt = sh_face_sides(src->shell, f, &sfirst[f], &nl, &lf, &per);
+			trimmed[f] = sfirst[f] != 0;
+			if (per)
+			{
+				st = QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (trims across a seam) */
+				goto done;
+			}
 		}
 		dom[4 * (size_t)f] = (double)ur.min_value;
 		dom[4 * (size_t)f + 1] = (double)ur.max_value;
 		dom[4 * (size_t)f + 2] = (double)vr.min_value;
 		dom[4 * (size_t)f + 3] = (double)vr.max_value;
-		for (k = 0; k < 4; k++)
+		soff[f + 1] = soff[f] + cnt;
+	}
+	ns = soff[nf];
+	n = (unsigned int*)qaws_internal_scratch_zalloc((size_t)ns + 1, sizeof(unsigned int));
+	W = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), (size_t)ns + 1, K + 1));
+	if (!n || !W)
+		goto done;
+	/* each side's weight sum_ds / h (the sizes from the side curve's turning between samples) and count */
+	for (f = 0; f < nf; f++)
+	{
+		qaws_surface const* s = mg_face(src, f);
+		for (k = soff[f]; k < soff[f + 1]; k++)
 		{
-			double P[K + 1][3], hs[K + 1], len = 0, *w = W + (4 * (size_t)f + k) * (K + 1), uv[2];
+			double P[K + 1][3], hs[K + 1], len = 0, *w = W + (size_t)k * (K + 1), uv[2];
+			unsigned int side = sfirst[f] + (k - soff[f]);
 			for (i = 0; i <= K; i++)
 			{
-				mg_side_uv(dom + 4 * (size_t)f, (int)k, (double)i / K, uv);
+				mg_side_point(src, dom + 4 * (size_t)f, trimmed[f], f, side, (double)i / K, uv);
 				mg_at(s, uv[0], uv[1], P[i]);
 			}
 			for (i = 0; i <= K; i++)
@@ -975,29 +1193,30 @@ static qaws_status mg_parametric(mg_src const* src, unsigned int nf, qaws_genera
 				len += ds;
 				w[i] = w[i - 1] + 0.5 * ds * (1 / hs[i - 1] + 1 / hs[i]);
 			}
-			n[4 * f + k] = (unsigned int)fmin(65536, fmax(1, ceil(w[K] - 1e-9)));
+			n[k] = (unsigned int)fmin(65536, fmax(1, ceil(w[K] - 1e-9)));
 			if (len > 1e-12 * L)
-				minstep = fmin(minstep, len / n[4 * f + k]);
+				minstep = fmin(minstep, len / n[k]);
 		}
 	}
 	/* the counts the larger across shared edges (twice: chains of edges settle) */
-	for (k = 0; src->shell && k < 2; k++)
+	for (i = 0; src->shell && i < 2; i++)
 		for (f = 0; f < nf; f++)
-		{
-			unsigned int q;
-			sh_face_grid_sides(src->shell, f, nb, nbs);
-			for (q = 0; q < 4; q++)
-				if (nb[q] < nf && nbs[q] >= 0 && nbs[q] < 4)
-				{
-					unsigned int a = 4 * f + q, b = 4 * nb[q] + (unsigned int)nbs[q], m = n[a] > n[b] ? n[a] : n[b];
-					n[a] = n[b] = m;
-				}
-		}
-	/* the weld: boundary points only, a ten-thousandth of the finest boundary step */
+			for (k = soff[f]; k < soff[f + 1]; k++)
+			{
+				unsigned int nbf, side = sfirst[f] + (k - soff[f]), b, m;
+				int nbs;
+				sh_face_side_across(src->shell, f, side, &nbf, &nbs);
+				if (nbf >= nf || nbs < (int)sfirst[nbf] || nbs - (int)sfirst[nbf] >= (int)(soff[nbf + 1] - soff[nbf]))
+					continue;
+				b = soff[nbf] + (unsigned int)nbs - sfirst[nbf];
+				m = n[k] > n[b] ? n[k] : n[b];
+				n[k] = n[b] = m;
+			}
+	/* the weld: border points only, a ten-thousandth of the finest boundary step */
 	{
 		size_t nbp = 0;
-		for (i = 0; i < 4 * nf; i++)
-			nbp += n[i] + 1;
+		for (k = 0; k < ns; k++)
+			nbp += n[k] + 1;
 		for (mask = 1; mask < 2 * nbp + 2; mask <<= 1) {}
 		slot = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), mask));
 		if (!slot)
@@ -1010,50 +1229,75 @@ static qaws_status mg_parametric(mg_src const* src, unsigned int nf, qaws_genera
 	{
 		qaws_surface const* s = mg_face(src, f);
 		double const* D = dom + 4 * (size_t)f;
-		double *poly = NULL, *uv0 = NULL, *puv = NULL, eu = 1e-9 * (D[1] - D[0]), ev = 1e-9 * (D[3] - D[2]);
-		unsigned int np = 0, *t0 = NULL, n0 = 0, nt0 = 0, pnv = 0, pnt = 0, *pt = NULL, *pmap = NULL, t;
-		for (k = 0; k < 4; k++)
-			np += n[4 * f + k];
-		poly = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)np + 2));
-		if (!poly)
-			goto done;
-		/* the polygon counter-clockwise: sides 0 and 1 forward, 2 and 3 backward, each without its last point */
-		np = 0;
-		for (k = 0; k < 4; k++)
+		double *uv0 = NULL, *puv = NULL;
+		unsigned int np = 0, *t0 = NULL, n0 = 0, nt0 = 0, pnv = 0, pnt = 0, *pt = NULL, *pmap = NULL, t, nl = 1, *ls = NULL;
+		unsigned int const* lf = NULL;
+		unsigned char* pb = NULL;
+		int per;
+		if (trimmed[f])
+			sh_face_sides(src->shell, f, &k, &nl, &lf, &per);
+		for (k = soff[f]; k < soff[f + 1]; k++)
+			np += n[k];
+		uv0 = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)np + 2));
+		ls = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nl + 2));
+		t0 = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)np + 2 * (size_t)nl + 4));
+		if (!uv0 || !ls || !t0)
 		{
-			unsigned int m = n[4 * f + k], j, z;
-			double const* w = W + (4 * (size_t)f + k) * (K + 1);
-			for (j = 0; j < m; j++)
+			qaws_internal_free(uv0); qaws_internal_free(ls); qaws_internal_free(t0);
+			goto done;
+		}
+		/* the loops' points: an untrimmed face's sides 0 and 1 forward, 2 and 3 backward; a trimmed face's pieces in their
+		   loops (the face on their left); each side without its last point */
+		np = 0;
+		for (i = 0; i < nl; i++)
+		{
+			unsigned int s0 = trimmed[f] ? lf[i] : 0, s1 = trimmed[f] ? lf[i + 1] : 4, p;
+			ls[i] = np;
+			for (p = s0; p < s1; p++)
 			{
-				unsigned int jj = k < 2 ? j : m - j;
-				double target = w[K] * jj / m, tt, uv[2];
-				for (z = 0; z < K && w[z + 1] < target; z++) {}
-				tt = jj == 0 ? 0 : jj == m ? 1 : (z + (w[z + 1] > w[z] ? (target - w[z]) / (w[z + 1] - w[z]) : 0)) / K;
-				mg_side_uv(D, (int)k, tt, uv);
-				poly[2 * (size_t)np] = uv[0];
-				poly[2 * (size_t)np + 1] = uv[1];
-				np++;
+				unsigned int kk = soff[f] + p, m = n[kk], j, z, side = sfirst[f] + p;
+				int back = !trimmed[f] && p >= 2;
+				double const* w = W + (size_t)kk * (K + 1);
+				for (j = 0; j < m; j++)
+				{
+					unsigned int jj = back ? m - j : j;
+					double target = w[K] * jj / m, tt, uv[2];
+					for (z = 0; z < K && w[z + 1] < target; z++) {}
+					tt = jj == 0 ? 0 : jj == m ? 1 : (z + (w[z + 1] > w[z] ? (target - w[z]) / (w[z + 1] - w[z]) : 0)) / K;
+					mg_side_point(src, D, trimmed[f], f, side, tt, uv);
+					uv0[2 * (size_t)np] = uv[0];
+					uv0[2 * (size_t)np + 1] = uv[1];
+					np++;
+				}
 			}
 		}
-		/* the start: a fan from the domain's centre (the domain convex, its polygon's points kept: they are pinned) */
-		uv0 = poly;
-		uv0[2 * (size_t)np] = 0.5 * (D[0] + D[1]);
-		uv0[2 * (size_t)np + 1] = 0.5 * (D[2] + D[3]);
-		n0 = np + 1;
-		nt0 = np;
-		t0 = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)np + 1));
-		if (!t0)
+		ls[nl] = np;
+		if (!trimmed[f])
 		{
-			qaws_internal_free(poly);
-			goto done;
+			/* the start: a fan from the domain's centre (the rectangle convex, its points kept: they are pinned) */
+			uv0[2 * (size_t)np] = 0.5 * (D[0] + D[1]);
+			uv0[2 * (size_t)np + 1] = 0.5 * (D[2] + D[3]);
+			n0 = np + 1;
+			nt0 = np;
+			for (i = 0; i < np; i++)
+			{
+				t0[3 * (size_t)i] = np;
+				t0[3 * (size_t)i + 1] = i;
+				t0[3 * (size_t)i + 2] = (i + 1) % np;
+			}
 		}
-		for (i = 0; i < np; i++)
+		else
 		{
-			t0[3 * (size_t)i] = np;
-			t0[3 * (size_t)i + 1] = i;
-			t0[3 * (size_t)i + 2] = (i + 1) % np;
+			n0 = np;
+			if (!mg_earclip(uv0, ls, nl, t0, &nt0))
+			{
+				qaws_internal_free(uv0); qaws_internal_free(ls); qaws_internal_free(t0);
+				st = QAWS_STATUS_NOT_CONVERGED;   /* (a trim loop crossing itself) */
+				goto done;
+			}
 		}
-		st = mg_param_face(s, D, uv0, n0, np, t0, nt0, L, desc, &puv, &pnv, &pt, &pnt);
+		qaws_internal_free(ls);
+		st = mg_param_face(s, D, uv0, n0, np, t0, nt0, L, desc, &puv, &pnv, &pt, &pnt, &pb);
 		qaws_internal_free(uv0);
 		qaws_internal_free(t0);
 		if (st != QAWS_STATUS_OK)
@@ -1095,15 +1339,14 @@ static qaws_status mg_parametric(mg_src const* src, unsigned int nf, qaws_genera
 		pmap = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)pnv + 1));
 		if (!cap || !ccap || !fcap || !pmap)
 		{
-			qaws_internal_free(puv); qaws_internal_free(pt); qaws_internal_free(pmap);
+			qaws_internal_free(puv); qaws_internal_free(pt); qaws_internal_free(pmap); qaws_internal_free(pb);
 			goto done;
 		}
 		for (i = 0; i < pnv; i++)
 		{
 			double p[3], u = puv[2 * (size_t)i], v = puv[2 * (size_t)i + 1];
-			int side = fabs(u - D[0]) <= eu || fabs(u - D[1]) <= eu || fabs(v - D[2]) <= ev || fabs(v - D[3]) <= ev;
 			mg_at(s, u, v, p);
-			pmap[i] = mg_weld_point(x, foot, &nv, slot, mask, cell, p, f, u, v, side);
+			pmap[i] = mg_weld_point(x, foot, &nv, slot, mask, cell, p, f, u, v, pb[i]);
 		}
 		for (t = 0; t < pnt; t++)
 		{
@@ -1119,11 +1362,13 @@ static qaws_status mg_parametric(mg_src const* src, unsigned int nf, qaws_genera
 		qaws_internal_free(puv);
 		qaws_internal_free(pt);
 		qaws_internal_free(pmap);
+		qaws_internal_free(pb);
 	}
 	st = mg_assemble(x, foot, nv, fv, fs, fface, nface, out_mesh, rep);
 done:
-	qaws_internal_free(n); qaws_internal_free(dom); qaws_internal_free(W); qaws_internal_free(x); qaws_internal_free(foot);
-	qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(fface); qaws_internal_free(slot);
+	qaws_internal_free(n); qaws_internal_free(soff); qaws_internal_free(sfirst); qaws_internal_free(trimmed); qaws_internal_free(dom);
+	qaws_internal_free(W); qaws_internal_free(x); qaws_internal_free(foot); qaws_internal_free(fv); qaws_internal_free(fs);
+	qaws_internal_free(fface); qaws_internal_free(slot);
 	return st;
 }
 
@@ -1218,6 +1463,17 @@ static int mg_rd_flips(mg_rd* r)
 	return 1;
 }
 
+/* 1 when face F's border is its domain's sides (a point on it is held there), 0 for a trimmed face (snapped free) */
+static int mg_rd_on_side(mg_rd const* r, unsigned int F)
+{
+	unsigned int first = 0, nl;
+	unsigned int const* lf;
+	int per;
+	if (r->src->shell)
+		sh_face_sides(r->src->shell, F, &first, &nl, &lf, &per);
+	return first == 0;
+}
+
 /* the (u, v) of vertex v on face F: its footpoint when there, else snapped from the start (u0, v0) held on F's side */
 static void mg_rd_uv(mg_rd const* r, unsigned int v, unsigned int F, double u0, double v0, double* u, double* w)
 {
@@ -1231,7 +1487,7 @@ static void mg_rd_uv(mg_rd const* r, unsigned int v, unsigned int F, double u0, 
 	}
 	*u = u0;
 	*w = v0;
-	mg_snap(mg_face(r->src, F), m->x + 3 * (size_t)v, u, w, 1, y);
+	mg_snap(mg_face(r->src, F), m->x + 3 * (size_t)v, u, w, mg_rd_on_side(r, F), y);
 }
 
 /* a start on face F for a point of triangle f (its corners' footpoints on F, unwrapped across a seam) */
@@ -1279,7 +1535,7 @@ static unsigned int mg_rd_split_edge(mg_rd* r, unsigned int c)
 		int k;
 		for (k = 0; k < 3; k++)
 			mid[k] = 0.5 * (m->x[3 * (size_t)a + k] + m->x[3 * (size_t)b + k]);
-		mg_snap(s, mid, &u, &w, 1, x);
+		mg_snap(s, mid, &u, &w, mg_rd_on_side(r, F), x);
 	}
 	if (!hm_reserve(m, 1, 12, 4) || (v = hm_split_edge(m, c, 0.5, x, 1)) == HM_NONE)
 		return HM_NONE;

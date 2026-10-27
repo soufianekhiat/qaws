@@ -843,7 +843,8 @@ first fundamental form over the size squared, the size from the curvature
 with tolerances), its boundary split alike from both faces of an edge and
 pinned, then lifts every vertex onto the face: triangles exactly on the
 surface, isotropic in space (figure 78, second row). Triangles only;
-untrimmed faces.
+trimmed faces too (their loops ear-clipped with holes bridged; figure 80),
+but not on surfaces closed in u or v.
 
 `RESTRICTED_DELAUNAY` takes that mesh further: Delaunay by edge flips (never
 across features), then Chew and Ruppert refinement at circumcentres snapped
