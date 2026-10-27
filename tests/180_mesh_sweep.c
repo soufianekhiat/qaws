@@ -5,7 +5,9 @@
  *     segment, volume 3 exactly, one slab;
  *   - a thin box turned a quarter about the z axis: the annular sector's
  *     volume (pi / 4 (r1^2 - r0^2) times its height, and the boxes at both
- *     ends half outside it: 2 h), within the chords; with simplify the same
+ *     ends half outside it: 2 h), within the chords; ten times thicker (0.2)
+ *     and 0.6 high at tolerance 0.002 (32 slabs: its hulls' walls within
+ *     1e-5 of one another at the rim) closed and one piece; with simplify the same
  *     volume (to round-off) on fewer faces, still closed;
  *   - a small ball along a Hermite curve: a tube, its volume the ball's
  *     cross-section along the length plus the ball (within the polyhedra's
@@ -186,6 +188,26 @@ static void test_turn(void)
 		printf("  %s\n", msg);
 		TEST_ASSERT(st == QAWS_STATUS_OK && so && o && fabs(vs - v) < 1e-9 * v && qaws_mesh_3d_get_face_count(so) < qaws_mesh_3d_get_face_count(o) && rs.closed, msg);
 		qaws_mesh_3d_destroy(so);
+	}
+	{
+		/* ten times thicker, 32 slabs: sheets nearer than the Boolean's samples (each sample now brought within 0.4 of the first surface its ray meets) */
+		double hh = 0.1, rr1 = sqrt(4 + hh * hh), wt = 0.6 * (0.25 * SW_PI * (rr1 * rr1 - 1) + 2 * hh), vt;
+		qaws_mesh_3d *bt = sw_box(1, 2, -hh, hh, 0, 0.6), *ot = NULL;
+		qaws_sweep_desc dt;
+		qaws_sweep_report rt;
+		qaws_mesh_topology tp;
+		memset(&dt, 0, sizeof dt);
+		dt.tolerance = (qaws_scalar)0.002;
+		memset(&tp, 0, sizeof tp);
+		st = qaws_mesh_3d_sweep(&ot, &rt, bt, m, &dt);
+		vt = sw_volume(ot);
+		if (ot)
+			qaws_mesh_3d_get_topology(&tp, ot);
+		sprintf(msg, "a box 0.2 thick turned a quarter: %u slabs, closed %d, %u piece(s), volume %.5f (the sector %.5f)", rt.slabs, tp.closed, tp.components, vt, wt);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && ot && rt.slabs >= 32 && tp.closed && tp.components == 1 && fabs(vt - wt) < 0.01 * wt, msg);
+		qaws_mesh_3d_destroy(bt);
+		qaws_mesh_3d_destroy(ot);
 	}
 	qaws_mesh_3d_destroy(b);
 	qaws_mesh_3d_destroy(o);

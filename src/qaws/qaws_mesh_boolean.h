@@ -26,7 +26,8 @@
  * The operands are resolved together (qaws_mesh_resolve_intersections:
  * every crossing cut, the pieces conforming), then each patch (pieces joined
  * by edges of two faces, bounded by the cuts) is sampled once,
- * just in front of and behind it: the generalized winding numbers of A and
+ * just in front of and behind it (nearer than the first other surface along
+ * its normal): the generalized winding numbers of A and
  * B there (qaws_mesh_bvh.h, the operands' own triangles) say whether each
  * side is in the result. A piece between in and out is kept, turned so its
  * front faces out; the others are dropped. Where B lies on A (coplanar

@@ -80,6 +80,10 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Booleans: a patch's two samples (just in front of and behind it) are brought within 0.4 of the first other surface
+  their rays meet: sheets nearer than the samples' 1e-6 D (a turning box's hull walls within 1e-5 of one another at
+  its rim) put a sample on the wrong side and dropped a strip, leaving the result open (figure 60's thin box turned a
+  quarter: 127 pieces at 32 slabs, now closed). The operands' BVHs serve the rays and the winding numbers.
 - Decimation: corner attributes of every rule follow the collapses by wedges, interpolated by their rules (QUATERNION,
   ANGLE, colours and NEAREST were copied from the removed vertex: a swept tool's orientation bled from an earlier pose
   into its end corners); corners are matched to their wedges to round-off (a renormalized quaternion missed its own),

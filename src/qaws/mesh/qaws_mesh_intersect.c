@@ -2927,31 +2927,20 @@ static int sx_radix(unsigned long long* a, unsigned int n, unsigned int stride, 
 	return ok;
 }
 
-/* a mesh's faces fanned into triangles (caller frees) */
-static qaws_status sx_fan(qaws_mesh_3d_desc const* m, unsigned int** tri, unsigned int* count)
+/* a mesh's faces fanned into triangles, for its BVH */
+/* half the distance between patch i / 2's two samples (its offset) */
+static double sx_offset_of(qaws_scalar const* pts, unsigned int i)
 {
-	unsigned int f, k, off = 0, n = 0;
-	for (f = 0; f < m->face_count; f++)
-		n += (m->face_sizes ? m->face_sizes[f] : 3) - 2;
-	*tri = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)n + 1));
-	if (!*tri)
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	for (f = 0, n = 0; f < m->face_count; f++)
+	unsigned int pi = i / 2, k;
+	double s = 0;
+	for (k = 0; k < 3; k++)
 	{
-		unsigned int s = m->face_sizes ? m->face_sizes[f] : 3;
-		for (k = 1; k + 1 < s; k++, n++)
-		{
-			(*tri)[3 * (size_t)n] = m->face_vertices[off];
-			(*tri)[3 * (size_t)n + 1] = m->face_vertices[off + k];
-			(*tri)[3 * (size_t)n + 2] = m->face_vertices[off + k + 1];
-		}
-		off += s;
+		double d = (double)pts[6 * (size_t)pi + k] - (double)pts[6 * (size_t)pi + 3 + k];
+		s += d * d;
 	}
-	*count = n;
-	return QAWS_STATUS_OK;
+	return 0.5 * sqrt(s);
 }
 
-/* a mesh's faces fanned into triangles, for its BVH */
 static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri)
 {
 	qaws_mesh_bvh_desc d;
@@ -3804,12 +3793,71 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 		}
 		sx_cross(u, v, n);
 		l = sqrt(sx_dot(n, n));
-		/* off the piece by a tenth of its inradius, at most 1e-6 D: nearer than any other surface */
+		/* off the piece by a tenth of its inradius, at most 1e-6 D (nearer than any other surface, mostly: see below) */
 		dl = l > 0 ? fmin(0.1 * fat[t], 1e-6 * o.diag) / l : 0;
 		for (k = 0; k < 3; k++)
 		{
 			pts[6 * (size_t)i + k] = (qaws_scalar)(g[k] + dl * n[k]);
 			pts[6 * (size_t)i + 3 + k] = (qaws_scalar)(g[k] - dl * n[k]);
+		}
+	}
+	/* sheets nearer than that (overlapping sweeps lay walls within 1e-5 D of one another): each sample brought within 0.4 of
+	   the first surface its ray meets (from 1e-9 D off the piece, so not the piece itself) */
+	{
+		unsigned int rop;
+		for (rop = 0; rop < (two ? 2u : 1u); rop++)
+		{
+			qaws_scalar* org = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 6, (size_t)npatch + 1));
+			qaws_scalar* dir = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 6, (size_t)npatch + 1));
+			qaws_mesh_hit* rh = (qaws_mesh_hit*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_hit), 2 * (size_t)npatch + 1));
+			double e0 = 1e-9 * o.diag, far = 1e-6 * o.diag;
+			/* (the operand's BVH, kept for its winding numbers below) */
+			if (!org || !dir || !rh || sx_bvh(rop ? &bb : &ba, rop ? b : a, rop ? &tb : &ta) != QAWS_STATUS_OK)
+			{
+				qaws_internal_free(org); qaws_internal_free(dir); qaws_internal_free(rh);
+				goto oom;
+			}
+			for (i = 0; i < 2 * npatch; i++)
+			{
+				unsigned int pi = i / 2, s = i % 2;
+				double g[3], d[3], l2 = 0;
+				for (k = 0; k < 3; k++)
+				{
+					g[k] = 0.5 * ((double)pts[6 * (size_t)pi + k] + (double)pts[6 * (size_t)pi + 3 + k]);
+					d[k] = (double)pts[6 * (size_t)pi + 3 * s + k] - g[k];
+					l2 += d[k] * d[k];
+				}
+				l2 = sqrt(l2);
+				for (k = 0; k < 3; k++)
+				{
+					d[k] = l2 > 0 ? d[k] / l2 : 0;
+					org[3 * (size_t)i + k] = (qaws_scalar)(g[k] + e0 * d[k]);
+					dir[3 * (size_t)i + k] = (qaws_scalar)d[k];
+				}
+			}
+			st = qaws_mesh_bvh_ray(rh, rop ? bb : ba, org, dir, 2 * npatch, (qaws_scalar)far, 0, desc ? desc->executor : NULL);
+			for (i = 0; st == QAWS_STATUS_OK && i < 2 * npatch; i++)
+				if (rh[i].element != QAWS_MESH_NONE && sx_offset_of(pts, i) > 0)
+				{
+					unsigned int pi = i / 2, s = i % 2;
+					double g[3], d[3], lo = sx_offset_of(pts, i), want = 0.4 * ((double)rh[i].distance + e0);
+					if (want >= lo)
+						continue;
+					for (k = 0; k < 3; k++)
+					{
+						g[k] = 0.5 * ((double)pts[6 * (size_t)pi + k] + (double)pts[6 * (size_t)pi + 3 + k]);
+						d[k] = ((double)pts[6 * (size_t)pi + 3 * s + k] - g[k]) / lo;
+					}
+					/* (both samples brought in alike, so they stay about the piece's centre) */
+					for (k = 0; k < 3; k++)
+					{
+						pts[6 * (size_t)pi + 3 * s + k] = (qaws_scalar)(g[k] + want * d[k]);
+						pts[6 * (size_t)pi + 3 * (1 - s) + k] = (qaws_scalar)(g[k] - want * d[k]);
+					}
+				}
+			qaws_internal_free(org); qaws_internal_free(dir); qaws_internal_free(rh);
+			if (st != QAWS_STATUS_OK)
+				goto done;
 		}
 	}
 	/* the operands' winding numbers there, and B's patches lying on A (coplanar overlaps: A's pieces stand for both) */
@@ -3832,11 +3880,9 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 		{
 			/* few patches: the solid angles summed over the triangles, no BVH built (past about 2e6 solid angles the BVH's
 			   queries are cheaper: a rounded cube's 2,330 patches 250 ms to 80) */
-			st = sx_fan(a, &ta, &nta);
+			st = QAWS_STATUS_OK;   /* (ta and tb made with the BVHs above) */
 			if (st == QAWS_STATUS_OK)
 				st = sx_direct_winding(wa, NULL, a->positions, ta, nta, mid, 2 * npatch, 0, ex);
-			if (st == QAWS_STATUS_OK && two)
-				st = sx_fan(b, &tb, &ntb);
 			if (st == QAWS_STATUS_OK && two)
 				st = sx_direct_winding(wb, NULL, b->positions, tb, ntb, mid, 2 * npatch, 0, ex);
 			if (st == QAWS_STATUS_OK && two)
@@ -3849,9 +3895,7 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 		}
 		else
 		{
-			st = sx_bvh(&ba, a, &ta);
-			if (st == QAWS_STATUS_OK && two)
-				st = sx_bvh(&bb, b, &tb);
+			st = QAWS_STATUS_OK;   /* (the BVHs made above) */
 			if (st == QAWS_STATUS_OK)
 				st = qaws_mesh_bvh_winding_number(wa, ba, pts, 2 * npatch, ex);
 			if (st == QAWS_STATUS_OK && two)
