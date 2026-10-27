@@ -27,6 +27,13 @@ All notable changes to Qaws are documented here.
   wrappers), and `QAWS_UNITY_BUILD` builds one translation unit per
   precision.
 
+### Added
+
+- Sweeps of spins: a motion turning a whole turn or more about one axis, drifting under the tolerance a turn (a grinding
+  wheel, a drill), is swept as the body's solid of revolution along its drift (`qaws_sweep_report.turns`): passes over
+  the same places coincide instead of piling up hulls dozens deep. Attributes from the point the turn first brings to
+  each place. A torus 100/10 mm, 3 turns at 10 turns/s, carves its groove in 1.5 s (figure 68).
+
 ### Changed
 
 - Motions from two poses turn any number of turns: the angular velocities say how many (a quaternion only says where the

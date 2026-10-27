@@ -44,6 +44,24 @@
  * quad, so the result may pass the true sweep by about the slabs' turn times
  * the edge's length.
  *
+ * Spins: a rigid motion turning a whole turn or more about one axis (its
+ * angular velocity keeping its direction and sense) while moving at most the
+ * tolerance along any turn passes over the same places again and again: a
+ * grinding wheel, a drill. Each turn reaches every angle, so its sweep is
+ * the body's solid of revolution about the axis (through the body's origin
+ * at 0) swept along the drift (the translation, as above). The solid of
+ * revolution comes from the body's profile in the half plane of the axis:
+ * sliced across the axis between its vertex heights (a slice's topology
+ * holds between them), each slice's pieces give the distance range they
+ * cover (from 0 when the axis runs through them, out to their farthest
+ * point), joined into the profile (the union of those quads, exact integer
+ * clipping), then revolved with chords within the tolerance. Attributes
+ * come from the body's point the turn first brings to each place (the
+ * least angle behind it on its circle: the passes coincide, the first
+ * stands; a flat face across the circle its own point), directions turned
+ * by that angle; edge values do not survive the revolution (zeros). The
+ * report's turns says a spin was found.
+ *
  * A vertex motion must have the mesh's vertex count; the mesh's positions
  * are then ignored (the motion's at each time are used).
  *
@@ -76,6 +94,7 @@ typedef struct qaws_sweep_report
 	unsigned int front_faces;           /* summed over the slabs */
 	qaws_boolean_report boolean;
 	int closed;
+	qaws_scalar turns;                  /* a spin's turns, swept as its solid of revolution along its drift; 0 otherwise */
 } qaws_sweep_report;
 
 /* desc and report may be NULL. INVALID_ARGUMENT for a vertex motion of another vertex count. An empty result: OK and NULL. */

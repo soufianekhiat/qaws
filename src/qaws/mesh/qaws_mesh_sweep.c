@@ -6,6 +6,7 @@
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_mesh_sweep.h"
 #include "../qaws_mesh_decimate.h"
+#include "../qaws_clip64.h"
 #include "qaws_mesh_internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -958,6 +959,869 @@ done:
 	return st;
 }
 
+/* ---- spins: a body turning a whole turn or more about one axis while drifting at most the tolerance a turn passes over
+   the same places again and again. Its sweep is its solid of revolution about the axis (each turn reaches every angle)
+   swept along the drift; the solid of revolution is made from the body's profile in the half plane of the axis (height,
+   distance), the union over heights of each slice's pieces' distance ranges ---- */
+
+/* the motion a spin: rigid, its angular velocity keeping one direction u and sense, a whole turn or more, moving at most tol
+   along any turn; its turns (0: not a spin) */
+static double swp_spin(qaws_motion const* m, double tol, double* u)
+{
+	double total = 0, prev = 0, l;
+	unsigned int i, k, ns = 512;
+	qaws_motion_state s;
+	if (qaws_motion_is_per_vertex(m) || qaws_motion_evaluate(&s, m, (qaws_scalar)0.5) != QAWS_STATUS_OK)
+		return 0;
+	u[0] = (double)s.angular_velocity.x;
+	u[1] = (double)s.angular_velocity.y;
+	u[2] = (double)s.angular_velocity.z;
+	l = sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+	if (!(l > 0))
+		return 0;
+	for (k = 0; k < 3; k++)
+		u[k] /= l;
+	for (i = 0; i <= ns; i++)
+	{
+		double w[3], c[3], a, lw, v;
+		if (qaws_motion_evaluate(&s, m, (qaws_scalar)((double)i / ns)) != QAWS_STATUS_OK)
+			return 0;
+		w[0] = (double)s.angular_velocity.x;
+		w[1] = (double)s.angular_velocity.y;
+		w[2] = (double)s.angular_velocity.z;
+		lw = sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+		a = w[0] * u[0] + w[1] * u[1] + w[2] * u[2];
+		c[0] = w[1] * u[2] - w[2] * u[1];
+		c[1] = w[2] * u[0] - w[0] * u[2];
+		c[2] = w[0] * u[1] - w[1] * u[0];
+		v = sqrt((double)s.velocity.x * s.velocity.x + (double)s.velocity.y * s.velocity.y + (double)s.velocity.z * s.velocity.z);
+		if (!(a > 0) || sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]) > 1e-6 * lw || v * 2 * 3.14159265358979323846 / a > tol)
+			return 0;
+		if (i)
+			total += 0.5 * (prev + a) / ns;
+		prev = a;
+	}
+	return total >= 2 * 3.14159265358979323846 ? total / (2 * 3.14159265358979323846) : 0;
+}
+
+/* a slice's piece: the edge key it is known by (the least of its outer loop's), its distance range from the axis */
+typedef struct swp_rv_piece
+{
+	unsigned long long key;
+	double rmin, rmax;
+} swp_rv_piece;
+
+static int swp_rv_piece_cmp(void const* p, void const* q)
+{
+	unsigned long long a = ((swp_rv_piece const*)p)->key, b = ((swp_rv_piece const*)q)->key;
+	return a < b ? -1 : a > b;
+}
+
+static int swp_rv_u64_cmp(void const* p, void const* q)
+{
+	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
+	return a < b ? -1 : a > b;
+}
+
+/* point (x, y) in the polygon P (n points), even-odd */
+static int swp_rv_inside(double const* P, unsigned int n, double x, double y)
+{
+	unsigned int i, j;
+	int in = 0;
+	for (i = 0, j = n - 1; i < n; j = i++)
+		if ((P[2 * i + 1] > y) != (P[2 * j + 1] > y) && x < (P[2 * j] - P[2 * i]) * (y - P[2 * i + 1]) / (P[2 * j + 1] - P[2 * i + 1]) + P[2 * i])
+			in = !in;
+	return in;
+}
+
+/* the distance from the origin to segment p q */
+static double swp_rv_segdist(double const* p, double const* q)
+{
+	double d[2] = { q[0] - p[0], q[1] - p[1] }, l = d[0] * d[0] + d[1] * d[1], s = l > 0 ? -(p[0] * d[0] + p[1] * d[1]) / l : 0;
+	s = s < 0 ? 0 : s > 1 ? 1 : s;
+	return hypot(p[0] + s * d[0], p[1] + s * d[1]);
+}
+
+/* the slice at height h (no vertex there): its pieces into *out (grown), their count; Z, A, B the vertices' height and plane
+   coordinates. Scratch arrays grown as needed. -1 out of memory */
+static int swp_rv_slice(swp_rv_piece** out, unsigned int* capo, double h, double const* Z, double const* A, double const* B, unsigned int const* t,
+	unsigned int nt, unsigned long long** ends, unsigned int* cape, double** pts, unsigned int* capp, unsigned int** loop, unsigned int* capl)
+{
+	unsigned int f, ne = 0, i, nl = 0, np = 0, npc = 0, j;
+	unsigned char* used;
+	/* each crossing triangle's segment: its two crossed edges (keys), 2 ends a segment */
+	for (f = 0; f < nt; f++)
+	{
+		unsigned int k, c = 0;
+		for (k = 0; k < 3; k++)
+			c += Z[t[3 * (size_t)f + k]] > h;
+		if (c == 0 || c == 3)
+			continue;
+		if (ne + 2 > *cape)
+		{
+			unsigned int cap = 2 * *cape + 64;
+			unsigned long long* g = (unsigned long long*)qaws_internal_realloc(*ends, sizeof(unsigned long long) * 2 * (size_t)cap);
+			if (!g)
+				return -1;
+			*ends = g;
+			*cape = cap;
+		}
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int a = t[3 * (size_t)f + k], b = t[3 * (size_t)f + (k + 1) % 3];
+			if ((Z[a] > h) != (Z[b] > h))
+			{
+				unsigned long long key = a < b ? ((unsigned long long)a << 32 | b) : ((unsigned long long)b << 32 | a);
+				(*ends)[2 * (size_t)ne] = key;
+				(*ends)[2 * (size_t)ne + 1] = ne;   /* (the segment is ne / 2, its end ne % 2) */
+				ne++;
+			}
+		}
+	}
+	if (!ne)
+		return 0;
+	/* the loops: segments chained by their shared edge keys */
+	{
+		unsigned long long* sorted = (unsigned long long*)qaws_internal_malloc(sizeof(unsigned long long) * 2 * (size_t)ne);
+		unsigned int* mate = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * (size_t)ne);
+		used = (unsigned char*)qaws_internal_zalloc((size_t)ne / 2 + 1, 1);
+		if (!sorted || !mate || !used)
+		{
+			qaws_internal_free(sorted); qaws_internal_free(mate); qaws_internal_free(used);
+			return -1;
+		}
+		memcpy(sorted, *ends, sizeof(unsigned long long) * 2 * (size_t)ne);
+		qsort(sorted, ne, 2 * sizeof(unsigned long long), swp_rv_u64_cmp);
+		for (i = 0; i < ne; i++)
+			mate[i] = 0xFFFFFFFFu;
+		for (i = 0; i + 1 < ne; i++)
+			if (sorted[2 * (size_t)i] == sorted[2 * (size_t)i + 2])
+			{
+				mate[(unsigned int)sorted[2 * (size_t)i + 1]] = (unsigned int)sorted[2 * (size_t)i + 3];
+				mate[(unsigned int)sorted[2 * (size_t)i + 3]] = (unsigned int)sorted[2 * (size_t)i + 1];
+				i++;
+			}
+		for (i = 0; i < ne / 2; i++)
+		{
+			unsigned int e, start = np;
+			unsigned long long kmin = ~0ull;
+			if (used[i])
+				continue;
+			/* a loop from segment i: leave by its end 1, enter the mate's segment, leave by its other end */
+			e = 2 * i + 1;
+			for (;;)
+			{
+				unsigned long long key = (*ends)[2 * (size_t)e];
+				unsigned int a = (unsigned int)(key >> 32), b = (unsigned int)key, m2;
+				double s = (h - Z[a]) / (Z[b] - Z[a]);
+				used[e / 2] = 1;
+				if (np + 1 > *capp)
+				{
+					unsigned int cap = 2 * *capp + 64;
+					double* g = (double*)qaws_internal_realloc(*pts, sizeof(double) * 2 * (size_t)cap);
+					if (!g)
+					{
+						qaws_internal_free(sorted); qaws_internal_free(mate); qaws_internal_free(used);
+						return -1;
+					}
+					*pts = g;
+					*capp = cap;
+				}
+				(*pts)[2 * (size_t)np] = A[a] + s * (A[b] - A[a]);
+				(*pts)[2 * (size_t)np + 1] = B[a] + s * (B[b] - B[a]);
+				np++;
+				kmin = key < kmin ? key : kmin;
+				m2 = mate[e];
+				if (m2 == 0xFFFFFFFFu || used[m2 / 2])
+					break;   /* (closed, or an open chain on a mesh not closed) */
+				e = m2 ^ 1u;
+			}
+			if (nl + 1 > *capl)
+			{
+				unsigned int cap = 2 * *capl + 16;
+				unsigned int* g = (unsigned int*)qaws_internal_realloc(*loop, sizeof(unsigned int) * 4 * (size_t)cap);
+				if (!g)
+				{
+					qaws_internal_free(sorted); qaws_internal_free(mate); qaws_internal_free(used);
+					return -1;
+				}
+				*loop = g;
+				*capl = cap;
+			}
+			(*loop)[4 * (size_t)nl] = start;
+			(*loop)[4 * (size_t)nl + 1] = np - start;
+			(*loop)[4 * (size_t)nl + 2] = (unsigned int)(kmin >> 32);
+			(*loop)[4 * (size_t)nl + 3] = (unsigned int)kmin;
+			nl++;
+		}
+		qaws_internal_free(sorted); qaws_internal_free(mate); qaws_internal_free(used);
+	}
+	/* the pieces: each loop's depth (loops round it); an even one an outer loop, its holes the odd ones directly in it */
+	for (i = 0; i < nl; i++)
+	{
+		double const* P = *pts + 2 * (size_t)(*loop)[4 * (size_t)i];
+		unsigned int n = (*loop)[4 * (size_t)i + 1], depth = 0, k;
+		double rmin, rmax = 0;
+		int axis;
+		if (n < 3)
+			continue;
+		for (j = 0; j < nl; j++)
+			if (j != i && (*loop)[4 * (size_t)j + 1] >= 3 && swp_rv_inside(*pts + 2 * (size_t)(*loop)[4 * (size_t)j], (*loop)[4 * (size_t)j + 1], P[0], P[1]))
+				depth++;
+		if (depth & 1)
+			continue;
+		axis = swp_rv_inside(P, n, 0, 0);
+		rmin = HUGE_VAL;
+		for (k = 0; k < n; k++)
+		{
+			rmax = fmax(rmax, hypot(P[2 * k], P[2 * k + 1]));
+			rmin = fmin(rmin, swp_rv_segdist(P + 2 * k, P + 2 * ((k + 1) % n)));
+		}
+		/* its holes: the loops inside it one level deeper */
+		for (j = 0; j < nl; j++)
+		{
+			double const* H = *pts + 2 * (size_t)(*loop)[4 * (size_t)j];
+			unsigned int nh = (*loop)[4 * (size_t)j + 1], dh = 0, q;
+			if (j == i || nh < 3 || !swp_rv_inside(P, n, H[0], H[1]))
+				continue;
+			for (q = 0; q < nl; q++)
+				if (q != j && (*loop)[4 * (size_t)q + 1] >= 3 && swp_rv_inside(*pts + 2 * (size_t)(*loop)[4 * (size_t)q], (*loop)[4 * (size_t)q + 1], H[0], H[1]))
+					dh++;
+			if (dh != depth + 1)
+				continue;
+			if (swp_rv_inside(H, nh, 0, 0))
+				axis = 0;
+			for (q = 0; q < nh; q++)
+				rmin = fmin(rmin, swp_rv_segdist(H + 2 * q, H + 2 * ((q + 1) % nh)));
+		}
+		if (npc + 1 > *capo)
+		{
+			unsigned int cap = 2 * *capo + 16;
+			swp_rv_piece* g = (swp_rv_piece*)qaws_internal_realloc(*out, sizeof(swp_rv_piece) * (size_t)cap);
+			if (!g)
+				return -1;
+			*out = g;
+			*capo = cap;
+		}
+		(*out)[npc].key = (unsigned long long)(*loop)[4 * (size_t)i + 2] << 32 | (*loop)[4 * (size_t)i + 3];
+		(*out)[npc].rmin = axis ? 0 : rmin;
+		(*out)[npc].rmax = rmax;
+		npc++;
+	}
+	qsort(*out, npc, sizeof(swp_rv_piece), swp_rv_piece_cmp);
+	return (int)npc;
+}
+
+/* where a point of the solid of revolution comes from: per profile point the body's surface points on its circle (angle,
+   triangle, barycentric weights), flat triangles across it kept whole (any angle inside them is its own) */
+typedef struct swp_rv_src
+{
+	double th, w[3], slack;
+	unsigned int f;
+	int flat;
+} swp_rv_src;
+
+/* the body's points on the circle of height z0, radius r0 about the axis: into *src (grown), their count. -1 out of memory */
+static int swp_rv_sources(swp_rv_src** src, unsigned int* cap, double z0, double r0, double const* Z, double const* A, double const* B,
+	unsigned int const* t, unsigned int nt, double tz, double tol)
+{
+	unsigned int f, n = 0, k;
+	for (f = 0; f < nt; f++)
+	{
+		unsigned int v[3] = { t[3 * (size_t)f], t[3 * (size_t)f + 1], t[3 * (size_t)f + 2] };
+		double zl = fmin(Z[v[0]], fmin(Z[v[1]], Z[v[2]])), zh = fmax(Z[v[0]], fmax(Z[v[1]], Z[v[2]])), P[3][2], np = 0;
+		double cand[8][3];   /* (angle, slack, the point's s along the slice: unused) */
+		unsigned int nc = 0, q;
+		if (z0 < zl - tz || z0 > zh + tz)
+			continue;
+		if (n + 9 > *cap)
+		{
+			unsigned int c2 = 2 * *cap + 32;
+			swp_rv_src* g = (swp_rv_src*)qaws_internal_realloc(*src, sizeof(swp_rv_src) * (size_t)c2);
+			if (!g)
+				return -1;
+			*src = g;
+			*cap = c2;
+		}
+		if (zh - zl <= tz)
+		{
+			(*src)[n].f = f;
+			(*src)[n].flat = 1;
+			(*src)[n].slack = 0;
+			n++;
+		}
+		/* the slice's segment: where the edges meet the height (a vertex at it counts) */
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int a = v[k], b = v[(k + 1) % 3];
+			double za = Z[a], zb = Z[b];
+			if (fabs(za - z0) <= tz)
+			{
+				P[(unsigned int)np][0] = A[a];
+				P[(unsigned int)np][1] = B[a];
+				np += np < 3;
+			}
+			else if ((za - z0) * (zb - z0) < 0 && fabs(zb - z0) > tz)
+			{
+				double s = (z0 - za) / (zb - za);
+				P[(unsigned int)np][0] = A[a] + s * (A[b] - A[a]);
+				P[(unsigned int)np][1] = B[a] + s * (B[b] - B[a]);
+				np += np < 3;
+			}
+		}
+		/* the points of each edge of what was found at distance r0 (the nearest within tol when none is) */
+		for (k = 0; k < (unsigned int)np; k++)
+		{
+			double const *p = P[k], *qp = P[(k + 1) % (unsigned int)np];
+			double d[2] = { qp[0] - p[0], qp[1] - p[1] }, aa = d[0] * d[0] + d[1] * d[1], bb = 2 * (p[0] * d[0] + p[1] * d[1]),
+				cc = p[0] * p[0] + p[1] * p[1] - r0 * r0, disc = bb * bb - 4 * aa * cc;
+			int found = 0;
+			if (aa > 0 && disc >= 0)
+			{
+				double sq = sqrt(disc), s1 = (-bb - sq) / (2 * aa), s2 = (-bb + sq) / (2 * aa);
+				if (s1 >= -1e-12 && s1 <= 1 + 1e-12 && nc < 8)
+				{
+					cand[nc][0] = atan2(p[1] + s1 * d[1], p[0] + s1 * d[0]);
+					cand[nc++][1] = 0;
+					found = 1;
+				}
+				if (s2 >= -1e-12 && s2 <= 1 + 1e-12 && s2 - s1 > 1e-12 && nc < 8)
+				{
+					cand[nc][0] = atan2(p[1] + s2 * d[1], p[0] + s2 * d[0]);
+					cand[nc++][1] = 0;
+					found = 1;
+				}
+			}
+			if (!found && nc < 8)
+			{
+				double s = aa > 0 ? -bb / (2 * aa) : 0, x, y, sl;
+				s = s < 0 ? 0 : s > 1 ? 1 : s;
+				x = p[0] + s * d[0];
+				y = p[1] + s * d[1];
+				/* (the nearest of the segment to the circle: its foot, or an end) */
+				{
+					double r1 = hypot(p[0], p[1]), r2 = hypot(qp[0], qp[1]), rs = hypot(x, y);
+					double e1 = fabs(r1 - r0), e2 = fabs(r2 - r0), es = fabs(rs - r0);
+					if (e1 <= e2 && e1 <= es) { x = p[0]; y = p[1]; }
+					else if (e2 <= es) { x = qp[0]; y = qp[1]; }
+					sl = fmin(es, fmin(e1, e2));
+				}
+				if (sl <= tol)
+				{
+					cand[nc][0] = atan2(y, x);
+					cand[nc++][1] = sl;
+				}
+			}
+			if (np == 1)
+				break;
+		}
+		for (q = 0; q < nc; q++)
+		{
+			(*src)[n].f = f;
+			(*src)[n].flat = 0;
+			(*src)[n].th = cand[q][0];
+			(*src)[n].slack = cand[q][1];
+			n++;
+		}
+	}
+	return (int)n;
+}
+
+/* barycentric weights of x in the triangle a b c (3D, projected on its plane) */
+static void swp_rv_bary(double const* x, double const* a, double const* b, double const* c, double* w)
+{
+	double u[3], v[3], p[3], d00 = 0, d01 = 0, d11 = 0, d20 = 0, d21 = 0, den;
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+	{
+		u[k] = b[k] - a[k];
+		v[k] = c[k] - a[k];
+		p[k] = x[k] - a[k];
+		d00 += u[k] * u[k]; d01 += u[k] * v[k]; d11 += v[k] * v[k]; d20 += p[k] * u[k]; d21 += p[k] * v[k];
+	}
+	den = d00 * d11 - d01 * d01;
+	w[1] = den != 0 ? (d11 * d20 - d01 * d21) / den : 0;
+	w[2] = den != 0 ? (d00 * d21 - d01 * d20) / den : 0;
+	w[0] = 1 - w[1] - w[2];
+	for (k = 0; k < 3; k++)
+		w[k] = w[k] < 0 ? 0 : w[k];
+	den = w[0] + w[1] + w[2];
+	for (k = 0; k < 3; k++)
+		w[k] = den > 0 ? w[k] / den : 1.0 / 3;
+}
+
+/* the solid of revolution of the body (X: its vertices at 0, t its triangles) about the axis through o along u, its
+   attributes from the body's surface where the turn first brings it (the least angle behind each point: passes coincide,
+   the first stands), directions turned by that angle after the motion's rotation at 0 (R0) */
+static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, double const* X, unsigned int nv, unsigned int const* t,
+	unsigned int nt, double const* o, double const* u, double const* R0, double tol)
+{
+	double e1[3], e2[3], l, ext = 0, tz, q, rmaxall = 0;
+	double *Z = NULL, *A = NULL, *Bc = NULL, *hs = NULL, *pts = NULL, *prof = NULL, *vx = NULL, *alpha = NULL, *wsrc = NULL;
+	unsigned int i, k, nh = 0, *loop = NULL, capl = 0, capp = 0, cape = 0, capo[2] = { 0, 0 }, nquad = 0, capq = 0, nprof = 0, npath = 0;
+	unsigned int *pathoff = NULL, nvo = 0, nto = 0, *tri = NULL, *ring = NULL, N, *fsrc = NULL, capsrc = 0;
+	unsigned long long* ends = NULL;
+	swp_rv_piece* pc[2] = { NULL, NULL };
+	int64_t* quads = NULL;
+	qaws_path64* paths = NULL;
+	qaws_clip64_result* cr = NULL;
+	swp_rv_src* src = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	*out = NULL;
+	/* the frame: u, e1, e2 */
+	e1[0] = fabs(u[0]) < 0.9 ? 1 : 0;
+	e1[1] = fabs(u[0]) < 0.9 ? 0 : 1;
+	e1[2] = 0;
+	l = e1[0] * u[0] + e1[1] * u[1] + e1[2] * u[2];
+	for (k = 0; k < 3; k++)
+		e1[k] -= l * u[k];
+	l = sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+	for (k = 0; k < 3; k++)
+		e1[k] /= l;
+	e2[0] = u[1] * e1[2] - u[2] * e1[1];
+	e2[1] = u[2] * e1[0] - u[0] * e1[2];
+	e2[2] = u[0] * e1[1] - u[1] * e1[0];
+	Z = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv + 1));
+	A = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv + 1));
+	Bc = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv + 1));
+	hs = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nv + 1));
+	if (!Z || !A || !Bc || !hs)
+		goto done;
+	for (i = 0; i < nv; i++)
+	{
+		double d[3];
+		for (k = 0; k < 3; k++)
+			d[k] = X[3 * (size_t)i + k] - o[k];
+		Z[i] = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
+		A[i] = d[0] * e1[0] + d[1] * e1[1] + d[2] * e1[2];
+		Bc[i] = d[0] * e2[0] + d[1] * e2[1] + d[2] * e2[2];
+		ext = fmax(ext, fmax(fabs(Z[i]), hypot(A[i], Bc[i])));
+		rmaxall = fmax(rmaxall, hypot(A[i], Bc[i]));
+		hs[i] = Z[i];
+	}
+	if (!(ext > 0))
+		goto bad;
+	tz = 1e-12 * ext;
+	q = 1e-7 * ext;   /* (the profile's integer grid) */
+	qsort(hs, nv, sizeof(double), swp_cmp_double);
+	for (i = 0; i < nv; i++)
+		if (!nh || hs[i] - hs[nh - 1] > tz)
+			hs[nh++] = hs[i];
+	/* the profile's pieces: per gap between vertex heights its slices (the topology holds within one), each piece's distance
+	   range joined to the next slice's as a quad (height, distance), the gap's ends at the vertex heights */
+	for (i = 0; i + 1 < nh; i++)
+	{
+		double g = hs[i + 1] - hs[i];
+		unsigned int m = (unsigned int)ceil(g / (2 * tol)), s, cur = 0, np0 = 0;
+		double zprev = hs[i];
+		m = m < 1 ? 1 : m > 64 ? 64 : m;
+		for (s = 0; s <= m; s++)
+		{
+			double h = s == 0 ? hs[i] + 1e-7 * g : s == m ? hs[i + 1] - 1e-7 * g : hs[i] + g * s / m, zz = s == 0 ? hs[i] : s == m ? hs[i + 1] : h;
+			int npc = swp_rv_slice(&pc[cur], &capo[cur], h, Z, A, Bc, t, nt, &ends, &cape, &pts, &capp, &loop, &capl);
+			unsigned int a2 = 0, b2 = 0;
+			if (npc < 0)
+				goto done;
+			if (s > 0)
+				while (a2 < np0 && b2 < (unsigned int)npc)
+				{
+					swp_rv_piece const *p0 = pc[cur ^ 1] + a2, *p1 = pc[cur] + b2;
+					if (p0->key < p1->key)
+						a2++;
+					else if (p1->key < p0->key)
+						b2++;
+					else
+					{
+						int64_t* Q;
+						if (nquad + 1 > capq)
+						{
+							unsigned int c2 = 2 * capq + 64;
+							int64_t* gq = (int64_t*)qaws_internal_realloc(quads, sizeof(int64_t) * 8 * (size_t)c2);
+							if (!gq)
+								goto done;
+							quads = gq;
+							capq = c2;
+						}
+						Q = quads + 8 * (size_t)nquad++;
+						Q[0] = (int64_t)llround(zprev / q); Q[1] = (int64_t)llround(p0->rmin / q);
+						Q[2] = (int64_t)llround(zz / q);    Q[3] = (int64_t)llround(p1->rmin / q);
+						Q[4] = (int64_t)llround(zz / q);    Q[5] = (int64_t)llround(p1->rmax / q);
+						Q[6] = (int64_t)llround(zprev / q); Q[7] = (int64_t)llround(p0->rmax / q);
+						a2++;
+						b2++;
+					}
+				}
+			zprev = zz;
+			np0 = (unsigned int)npc;
+			cur ^= 1;
+		}
+	}
+	if (!nquad)
+		goto bad;
+	/* their union: the profile (outer paths and holes) */
+	paths = (qaws_path64*)qaws_internal_malloc(sizeof(qaws_path64) * (size_t)nquad);
+	if (!paths)
+		goto done;
+	for (i = 0; i < nquad; i++)
+	{
+		paths[i].points = quads + 8 * (size_t)i;
+		paths[i].point_count = 4;
+	}
+	{
+		qaws_clip64_desc cd;
+		unsigned int nr, tot = 0;
+		memset(&cd, 0, sizeof cd);
+		cd.subjects = paths;
+		cd.subject_count = nquad;
+		cd.clip_type = QAWS_CLIP_UNION;
+		cd.fill_rule = QAWS_FILL_NON_ZERO;
+		if ((st = qaws_clip64_execute(&cr, &cd)) != QAWS_STATUS_OK)
+			goto done;
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		nr = qaws_clip64_result_get_path_count(cr);
+		for (i = 0; i < nr; i++)
+		{
+			double const* p;
+			unsigned int n;
+			if (qaws_clip64_result_get_path_exact(&p, &n, cr, i) == QAWS_STATUS_OK)
+				tot += n;
+		}
+		prof = (double*)qaws_internal_malloc(sizeof(double) * 2 * ((size_t)tot + 1));
+		pathoff = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nr + 2));
+		if (!prof || !pathoff)
+			goto done;
+		for (i = 0; i < nr; i++)
+		{
+			double const* p;
+			unsigned int n, j;
+			if (qaws_clip64_result_get_path_exact(&p, &n, cr, i) != QAWS_STATUS_OK || n < 3)
+				continue;
+			pathoff[npath++] = nprof;
+			for (j = 0; j < n; j++)
+			{
+				prof[2 * (size_t)nprof] = p[2 * j] * q;
+				prof[2 * (size_t)nprof + 1] = p[2 * j + 1] * q <= 1e-6 * ext ? 0 : p[2 * j + 1] * q;   /* (on the axis) */
+				nprof++;
+			}
+		}
+		pathoff[npath] = nprof;
+	}
+	/* the revolution: N segments, the chords within tol of the widest circle; a profile point on the axis one vertex */
+	N = tol < rmaxall ? (unsigned int)ceil(3.14159265358979323846 / acos(1 - tol / rmaxall)) : 8;
+	N = N < 8 ? 8 : N > 2048 ? 2048 : N;
+	ring = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nprof + 1));
+	vx = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)nprof * N + 1));
+	tri = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 6 * ((size_t)nprof * N + 1));
+	alpha = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nprof * N + 1));
+	wsrc = (double*)qaws_internal_malloc(sizeof(double) * 3 * ((size_t)nprof * N + 1));
+	fsrc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nprof * N + 1));
+	if (!ring || !vx || !tri || !alpha || !wsrc || !fsrc)
+		goto done;
+	for (i = 0; i < nprof; i++)
+	{
+		double z = prof[2 * (size_t)i], r = prof[2 * (size_t)i + 1];
+		unsigned int nk = r > 0 ? N : 1, kk;
+		int ns = swp_rv_sources(&src, &capsrc, z, r, Z, A, Bc, t, nt, 1e-9 * ext, tol);
+		if (ns < 0)
+			goto done;
+		ring[i] = nvo;
+		for (kk = 0; kk < nk; kk++)
+		{
+			double th = 2 * 3.14159265358979323846 * kk / N, ct = cos(th), sn = sin(th), best = HUGE_VAL, bth = th, x[3];
+			unsigned int bf = 0xFFFFFFFFu, j;
+			for (k = 0; k < 3; k++)
+				vx[3 * (size_t)nvo + k] = o[k] + z * u[k] + r * (ct * e1[k] + sn * e2[k]);
+			/* the source: the body's point on this circle the turn brings here first (the least angle behind; a flat
+			   triangle holding this point itself) */
+			for (j = 0; j < (unsigned int)ns; j++)
+			{
+				double dlt;
+				if (src[j].flat)
+				{
+					unsigned int const* v = t + 3 * (size_t)src[j].f;
+					double P[3][2], pa = r * ct, pb = r * sn, s0, s1, s2;
+					unsigned int z2;
+					for (z2 = 0; z2 < 3; z2++)
+					{
+						P[z2][0] = A[v[z2]];
+						P[z2][1] = Bc[v[z2]];
+					}
+					s0 = (P[1][0] - P[0][0]) * (pb - P[0][1]) - (P[1][1] - P[0][1]) * (pa - P[0][0]);
+					s1 = (P[2][0] - P[1][0]) * (pb - P[1][1]) - (P[2][1] - P[1][1]) * (pa - P[1][0]);
+					s2 = (P[0][0] - P[2][0]) * (pb - P[2][1]) - (P[0][1] - P[2][1]) * (pa - P[2][0]);
+					if (!((s0 >= 0 && s1 >= 0 && s2 >= 0) || (s0 <= 0 && s1 <= 0 && s2 <= 0)))
+						continue;
+					dlt = 0;
+					if (dlt < best)
+					{
+						best = dlt;
+						bf = j;
+						bth = th;
+					}
+					continue;
+				}
+				dlt = fmod(th - src[j].th, 2 * 3.14159265358979323846);
+				if (dlt < 0)
+					dlt += 2 * 3.14159265358979323846;
+				if (dlt > 2 * 3.14159265358979323846 - 1e-9)
+					dlt = 0;
+				dlt += 1e-3 * src[j].slack / (r > 0 ? r : 1);   /* (the nearer of two at one angle) */
+				if (dlt < best)
+				{
+					best = dlt;
+					bf = j;
+					bth = src[j].th;
+				}
+			}
+			if (bf == 0xFFFFFFFFu)
+			{
+				/* (none: the nearest vertex of the body by height and distance) */
+				double bd = HUGE_VAL;
+				unsigned int bv = 0, ff;
+				for (j = 0; j < nv; j++)
+				{
+					double dd = (Z[j] - z) * (Z[j] - z) + (hypot(A[j], Bc[j]) - r) * (hypot(A[j], Bc[j]) - r);
+					if (dd < bd)
+					{
+						bd = dd;
+						bv = j;
+					}
+				}
+				for (ff = 0; ff < nt && t[3 * (size_t)ff] != bv && t[3 * (size_t)ff + 1] != bv && t[3 * (size_t)ff + 2] != bv; ff++)
+					;
+				fsrc[nvo] = ff < nt ? ff : 0;
+				for (k = 0; k < 3; k++)
+					wsrc[3 * (size_t)nvo + k] = ff < nt ? (t[3 * (size_t)ff + k] == bv) : 1.0 / 3;
+				alpha[nvo] = th - atan2(Bc[bv], A[bv]);
+			}
+			else
+			{
+				unsigned int f = src[bf].f;
+				for (k = 0; k < 3; k++)
+					x[k] = o[k] + z * u[k] + r * (cos(bth) * e1[k] + sin(bth) * e2[k]);
+				swp_rv_bary(x, X + 3 * (size_t)t[3 * (size_t)f], X + 3 * (size_t)t[3 * (size_t)f + 1], X + 3 * (size_t)t[3 * (size_t)f + 2], wsrc + 3 * (size_t)nvo);
+				fsrc[nvo] = f;
+				alpha[nvo] = th - bth;
+			}
+			nvo++;
+		}
+	}
+	/* the faces round each profile edge */
+	for (k = 0; k < npath; k++)
+	{
+		unsigned int a0 = pathoff[k], a1 = pathoff[k + 1];
+		for (i = a0; i < a1; i++)
+		{
+			unsigned int j = i + 1 < a1 ? i + 1 : a0, kk;
+			int ai = prof[2 * (size_t)i + 1] <= 0, aj = prof[2 * (size_t)j + 1] <= 0;
+			if (ai && aj)
+				continue;
+			for (kk = 0; kk < N; kk++)
+			{
+				unsigned int k1 = (kk + 1) % N, p0 = ring[i] + (ai ? 0 : kk), p1 = ring[i] + (ai ? 0 : k1), q0 = ring[j] + (aj ? 0 : kk), q1 = ring[j] + (aj ? 0 : k1);
+				if (!ai)
+				{
+					tri[3 * (size_t)nto] = p0; tri[3 * (size_t)nto + 1] = q0; tri[3 * (size_t)nto + 2] = p1;
+					nto++;
+				}
+				if (!aj)
+				{
+					tri[3 * (size_t)nto] = p1; tri[3 * (size_t)nto + 1] = q0; tri[3 * (size_t)nto + 2] = q1;
+					nto++;
+				}
+			}
+		}
+	}
+	{
+		/* outward: the signed volume */
+		double vol = 0;
+		for (i = 0; i < nto; i++)
+		{
+			double const *a = vx + 3 * (size_t)tri[3 * (size_t)i], *b = vx + 3 * (size_t)tri[3 * (size_t)i + 1], *c = vx + 3 * (size_t)tri[3 * (size_t)i + 2];
+			vol += a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
+		}
+		if (vol < 0)
+			for (i = 0; i < nto; i++)
+			{
+				unsigned int z2 = tri[3 * (size_t)i + 1];
+				tri[3 * (size_t)i + 1] = tri[3 * (size_t)i + 2];
+				tri[3 * (size_t)i + 2] = z2;
+			}
+	}
+	{
+		qaws_mesh_3d_desc md;
+		qaws_scalar* xs = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 3 * ((size_t)nvo + 1));
+		if (!xs)
+			goto done;
+		for (i = 0; i < 3 * nvo; i++)
+			xs[i] = (qaws_scalar)vx[i];
+		memset(&md, 0, sizeof md);
+		md.positions = xs;
+		md.vertex_count = nvo;
+		md.face_vertices = tri;
+		md.face_count = nto;
+		st = qaws_mesh_3d_create(out, &md);
+		qaws_internal_free(xs);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+	}
+	/* the attributes from their sources (vertex ones per corner, face ones from the first corner's source) */
+	{
+		unsigned int na = qaws_mesh_3d_get_attribute_count(mesh), nf = qaws_mesh_3d_get_face_count(mesh), nc = qaws_mesh_3d_get_corner_count(mesh), a;
+		unsigned int *fv = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nc + 1)), *fs = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nf + 1));
+		unsigned int *tf = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nt + 1)), *tc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * 3 * ((size_t)nt + 1));
+		size_t cmax = (size_t)(nv > nc ? (nv > nf ? nv : nf) : (nc > nf ? nc : nf)) + 1;
+		qaws_scalar* val = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 16 * cmax);
+		double* dv = (double*)qaws_internal_malloc(sizeof(double) * 16 * cmax);
+		qaws_scalar* sv = (qaws_scalar*)qaws_internal_malloc(sizeof(qaws_scalar) * 16 * (3 * (size_t)nto + (size_t)qaws_mesh_3d_get_edge_count(*out) + 1));
+		unsigned int j, c2;
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		if (!fv || !fs || !tf || !tc || !val || !dv || !sv)
+		{
+			qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(tf); qaws_internal_free(tc); qaws_internal_free(val); qaws_internal_free(dv); qaws_internal_free(sv);
+			goto done;
+		}
+		qaws_mesh_3d_get_faces(fv, fs, mesh);
+		for (i = 0, j = 0, k = 0; i < nf; k += fs[i++])
+			for (c2 = 0; c2 + 2 < fs[i]; c2++, j++)
+			{
+				tf[j] = i;
+				tc[3 * (size_t)j] = k;
+				tc[3 * (size_t)j + 1] = k + c2 + 1;
+				tc[3 * (size_t)j + 2] = k + c2 + 2;
+			}
+		st = QAWS_STATUS_OK;
+		for (a = 0; a < na && st == QAWS_STATUS_OK; a++)
+		{
+			qaws_attribute_desc d;
+			unsigned int n, id, cnt, e;
+			int dir;
+			qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
+			if (d.name && !strcmp(d.name, "source"))
+				continue;
+			n = d.components;
+			dir = d.rule == QAWS_ATTRIBUTE_NORMAL || d.rule == QAWS_ATTRIBUTE_TANGENT || d.rule == QAWS_ATTRIBUTE_VECTOR || (d.rule == QAWS_ATTRIBUTE_NORMALIZED && n == 3);
+			qaws_mesh_3d_get_attribute(val, mesh, a);
+			if (d.element == QAWS_MESH_EDGE)
+			{
+				/* (edge values do not survive the revolution: zeros) */
+				memset(sv, 0, sizeof(qaws_scalar) * n * (size_t)qaws_mesh_3d_get_edge_count(*out));
+				st = qaws_mesh_3d_add_attribute(&id, *out, sv, &d);
+				continue;
+			}
+			cnt = d.element == QAWS_MESH_VERTEX ? nv : d.element == QAWS_MESH_CORNER ? nc : nf;
+			for (e = 0; e < n * cnt; e++)
+				dv[e] = (double)val[e];
+			for (i = 0; i < (d.element == QAWS_MESH_FACE ? nto : 3 * nto); i++)
+			{
+				unsigned int v = d.element == QAWS_MESH_FACE ? tri[3 * (size_t)i] : tri[i], f = fsrc[v], pos[3];
+				double R[9], ca = cos(alpha[v]), sa = sin(alpha[v]), Ru[9], y[16];
+				qaws_scalar* o2 = sv + (size_t)n * i;
+				/* the rotation by alpha about u (Rodrigues), after R0 */
+				for (k = 0; k < 9; k++)
+				{
+					unsigned int r = k / 3, c = k % 3;
+					double kx[3][3] = { { 0, -u[2], u[1] }, { u[2], 0, -u[0] }, { -u[1], u[0], 0 } };
+					Ru[k] = (r == c) * ca + sa * kx[r][c] + (1 - ca) * u[r] * u[c];
+				}
+				for (k = 0; k < 9; k++)
+					R[k] = Ru[3 * (k / 3)] * R0[k % 3] + Ru[3 * (k / 3) + 1] * R0[3 + k % 3] + Ru[3 * (k / 3) + 2] * R0[6 + k % 3];
+				if (d.element == QAWS_MESH_FACE)
+					for (k = 0; k < n; k++)
+						y[k] = dv[(size_t)n * tf[f] + k];
+				else
+				{
+					for (k = 0; k < 3; k++)
+						pos[k] = d.element == QAWS_MESH_VERTEX ? fv[tc[3 * (size_t)f + k]] : tc[3 * (size_t)f + k];
+					hm_blend(y, dv, n, pos, wsrc + 3 * (size_t)v, 3, n, d.rule);
+				}
+				for (k = 0; k < n; k++)
+					o2[k] = (qaws_scalar)y[k];
+				if (dir)
+					for (k = 0; k < 3; k++)
+						o2[k] = (qaws_scalar)(R[3 * k] * y[0] + R[3 * k + 1] * y[1] + R[3 * k + 2] * y[2]);
+				if (d.rule == QAWS_ATTRIBUTE_QUATERNION)
+				{
+					qaws_scalar x4[4];
+					for (k = 0; k < 4; k++)
+						x4[k] = (qaws_scalar)y[k];
+					swp_compose(o2, x4, R);
+				}
+			}
+			if (d.element == QAWS_MESH_VERTEX)
+				d.element = QAWS_MESH_CORNER;
+			st = qaws_mesh_3d_add_attribute(&id, *out, sv, &d);
+		}
+		qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(tf); qaws_internal_free(tc); qaws_internal_free(val); qaws_internal_free(dv); qaws_internal_free(sv);
+	}
+	goto done;
+bad:
+	st = QAWS_STATUS_INVALID_ARGUMENT;
+done:
+	if (st != QAWS_STATUS_OK)
+	{
+		qaws_mesh_3d_destroy(*out);
+		*out = NULL;
+	}
+	qaws_clip64_result_destroy(cr);
+	qaws_internal_free(Z); qaws_internal_free(A); qaws_internal_free(Bc); qaws_internal_free(hs); qaws_internal_free(pts); qaws_internal_free(prof);
+	qaws_internal_free(vx); qaws_internal_free(alpha); qaws_internal_free(wsrc); qaws_internal_free(loop); qaws_internal_free(pathoff); qaws_internal_free(tri);
+	qaws_internal_free(ring); qaws_internal_free(fsrc); qaws_internal_free(ends); qaws_internal_free(pc[0]); qaws_internal_free(pc[1]); qaws_internal_free(quads);
+	qaws_internal_free(paths); qaws_internal_free(src);
+	return st;
+}
+
+/* a spin's sweep: the solid of revolution at 0 (features its creases sharper than half the body's softest), swept along
+   the drift (the translation from 0, no turn) */
+static qaws_status swp_spun(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, double const* X,
+	unsigned int nv, unsigned int const* t, unsigned int nt, double const* u, double tol, qaws_sweep_desc const* desc, double turns)
+{
+	qaws_motion_state s0, s1;
+	qaws_motion_pose p0, p1;
+	qaws_motion* drift = NULL;
+	qaws_mesh_3d* rev = NULL;
+	qaws_sweep_desc d2;
+	double o[3], R0[9];
+	unsigned int k;
+	qaws_status st;
+	if ((st = qaws_motion_evaluate(&s0, motion, 0)) != QAWS_STATUS_OK || (st = qaws_motion_evaluate(&s1, motion, 1)) != QAWS_STATUS_OK)
+		return st;
+	o[0] = (double)s0.position.x;
+	o[1] = (double)s0.position.y;
+	o[2] = (double)s0.position.z;
+	for (k = 0; k < 9; k++)
+		R0[k] = (double)s0.rotation[k];
+	if ((st = swp_revolve(&rev, mesh, X, nv, t, nt, o, u, R0, tol)) != QAWS_STATUS_OK)
+		return st;
+	if ((st = qaws_mesh_3d_detect_features(rev, (qaws_scalar)(0.5 * swp_feature_angle(mesh)), 0, 0)) != QAWS_STATUS_OK)
+	{
+		qaws_mesh_3d_destroy(rev);
+		return st;
+	}
+	memset(&p0, 0, sizeof p0);
+	memset(&p1, 0, sizeof p1);
+	p0.rotation[0] = p1.rotation[0] = 1;
+	p0.velocity = s0.velocity;
+	p1.velocity = s1.velocity;
+	p1.position.x = (qaws_scalar)((double)s1.position.x - o[0]);
+	p1.position.y = (qaws_scalar)((double)s1.position.y - o[1]);
+	p1.position.z = (qaws_scalar)((double)s1.position.z - o[2]);
+	if ((st = qaws_motion_create_poses(&drift, &p0, &p1, 0)) == QAWS_STATUS_OK)
+	{
+		if (desc)
+			d2 = *desc;
+		else
+			memset(&d2, 0, sizeof d2);
+		d2.tolerance = (qaws_scalar)tol;
+		st = qaws_mesh_3d_sweep(out, report, rev, drift, &d2);
+		if (report)
+			report->turns = (qaws_scalar)turns;
+	}
+	qaws_motion_destroy(drift);
+	qaws_mesh_3d_destroy(rev);
+	return st;
+}
+
 qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion,
 	qaws_sweep_desc const* desc)
 {
@@ -1010,6 +1874,15 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	for (k = 0; k < 3; k++) diag += (hi[k] - lo[k]) * (hi[k] - lo[k]);
 	diag = sqrt(diag);
 	tol = desc && desc->tolerance > 0 ? (double)desc->tolerance : 1e-3 * diag;
+	{
+		/* a spin (a whole turn or more about one axis, drifting under tol a turn): its solid of revolution swept along the drift */
+		double ax[3], turns = swp_spin(motion, tol, ax);
+		if (turns > 0)
+		{
+			st = swp_spun(out, report, mesh, motion, Xa, nv, t, nt, ax, tol, desc, turns);
+			goto done;
+		}
+	}
 	/* the slabs: [0, 1] halved until the chords' deviation (at the middle and quarters) is within tol */
 	{
 		double* stack = (double*)qaws_internal_scratch_malloc(sizeof(double) * 2 * (2 * (size_t)maxs + 2));

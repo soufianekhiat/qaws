@@ -14,6 +14,12 @@
  *     along x, the slot removed exactly (0.5); along an L of two moves, the
  *     removed volume by inclusion and exclusion (0.375), and the intersection
  *     (a separate Boolean) the same volume; stock = result + removed;
+ *   - a spin: a box beside the z axis turning two turns about it (one
+ *     motion, its turns counted from the angular velocities), drifting
+ *     under the tolerance: found a spin (2 turns), swept as its solid of
+ *     revolution, the annulus between the box's nearest and farthest
+ *     distances from the axis (volume within the chords' 2 tol of the
+ *     circumference), closed;
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -265,6 +271,37 @@ static void test_carving(void)
 	qaws_motion_destroy(slot); qaws_motion_destroy(la); qaws_motion_destroy(lb);
 }
 
+static void test_spin(void)
+{
+	double h = 0.5, r0 = 0.5, r1 = sqrt(1 + 0.25 * 0.25), want = SW_PI * (r1 * r1 - r0 * r0) * h, v, tol = 0.002;
+	qaws_mesh_3d *b = sw_box(0.5, 1, -0.25, 0.25, 0, h), *o = NULL;
+	qaws_motion_pose s, e;
+	qaws_motion* m = NULL;
+	qaws_sweep_desc d;
+	qaws_sweep_report r;
+	qaws_status st;
+	char msg[300];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;   /* (two whole turns: the same rotation at both ends) */
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(4 * SW_PI);
+	e.position.x = (qaws_scalar)0.001;
+	s.velocity.x = e.velocity.x = (qaws_scalar)0.001;
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)tol;
+	memset(&r, 0, sizeof r);
+	st = qaws_motion_create_poses(&m, &s, &e, 0);
+	if (st == QAWS_STATUS_OK)
+		st = qaws_mesh_3d_sweep(&o, &r, b, m, &d);
+	v = sw_volume(o);
+	sprintf(msg, "a spin (%.2f turns): volume %.5f (the annulus %.5f), %u faces, closed %d", (double)r.turns, v, want, o ? qaws_mesh_3d_get_face_count(o) : 0, r.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && fabs((double)r.turns - 2) < 1e-6 && fabs(v - want) < 2 * SW_PI * r1 * h * 2 * tol && r.closed, msg);
+	qaws_mesh_3d_destroy(b);
+	qaws_mesh_3d_destroy(o);
+	qaws_motion_destroy(m);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *c = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -290,6 +327,7 @@ int test_180_mesh_sweep_main(void)
 	test_turn();
 	test_tube();
 	test_carving();
+	test_spin();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
