@@ -11,7 +11,12 @@
  *     every face on the box face its "face" attribute names, the eight
  *     corners vertices, no vertex near an edge but off it, grids on the
  *     faces (irregular vertices only at the corners);
- *   - refusals: the reserved methods, no description, a negative length.
+ *   - STRUCTURED: the torus in quads, a grid (closed, genus 1, no irregular
+ *     vertex, on the torus exactly); with a chord tolerance, every cell's
+ *     centre within it of its corners' mean; the box shell in quads, its
+ *     faces' grids meeting (closed, genus 0, the 8 corners its only irregular
+ *     vertices); the patch in triangles;
+ *   - refusals: PARAMETRIC (reserved), no description, a negative length.
  *
  * By default the torus at 0.4 and the box at 0.25 (written at 0.25 and
  * 0.15, run so with QAWS_TEST_HEAVY=1).
@@ -363,6 +368,117 @@ static void test_box(void)
 		qaws_surface_destroy(box[i]);
 }
 
+/* STRUCTURED on one surface or a shell: the mesh read, checked by the caller */
+static qaws_mesh_3d* tg_structured(qaws_surface const* s, qaws_shell_atlas const* a, qaws_elements el, double L, double chord, tg_mesh* t)
+{
+	qaws_generate_desc d;
+	qaws_mesh_3d* m = NULL;
+	memset(&d, 0, sizeof d);
+	d.method = QAWS_GENERATE_STRUCTURED;
+	d.elements = el;
+	d.target_length = (qaws_scalar)L;
+	d.chord_tolerance = (qaws_scalar)chord;
+	if ((s ? qaws_mesh_generate_surface(&m, NULL, s, &d) : qaws_mesh_generate_shell(&m, NULL, a, &d)) == QAWS_STATUS_OK && m)
+		tg_read(m, t);
+	else
+		memset(t, 0, sizeof *t);
+	return m;
+}
+
+static void test_structured(void)
+{
+	static double const h[3] = { 1, 0.7, 0.5 };
+	qaws_surface *torus = tg_torus(2, 0.7), *patch = tg_patch(), *box[6];
+	qaws_shell_atlas* atlas = NULL;
+	qaws_mesh_3d* m;
+	tg_mesh t;
+	char msg[400];
+	unsigned int i;
+	double off = 0, err, chord = 0, pu, pv;
+	/* the torus, a grid */
+	m = tg_structured(torus, NULL, QAWS_ELEMENTS_QUADS, 0.4, 0, &t);
+	err = m ? tg_foot_error(&t, torus, NULL) : HUGE_VAL;
+	for (i = 0; m && i < t.nv; i++)
+	{
+		double const* q = t.x + 3 * i;
+		double rho = sqrt(q[0] * q[0] + q[1] * q[1]);
+		off = fmax(off, fabs(sqrt((rho - 2) * (rho - 2) + q[2] * q[2]) - 0.7));
+	}
+	sprintf(msg, "STRUCTURED torus: %u faces (%u quads), %u irregular, closed %d genus %u, off %.2e, footpoints %.2e, edges %.3g..%.3g", t.nf, t.q.quads,
+		t.q.irregular, t.top.closed, t.top.genus, off, err, (double)t.q.min_edge, (double)t.q.max_edge);
+	printf("  %s\n", msg);
+	TEST_ASSERT(m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.q.irregular == 0 && t.top.closed && t.top.genus == 1
+		&& off < TEST_BOUND(1e-9, 32) && err < TEST_BOUND(1e-9, 32) && t.q.max_edge < 0.42, msg);
+	if (m)
+		tg_free(&t);
+	qaws_mesh_3d_destroy(m);
+	/* to a chord tolerance: each quad's centre (by its corners' footpoints) on the torus near its corners' mean */
+	m = tg_structured(torus, NULL, QAWS_ELEMENTS_QUADS, 0, 0.01, &t);
+	pu = (double)qaws_surface_get_u_range(torus).max_value - (double)qaws_surface_get_u_range(torus).min_value;
+	pv = (double)qaws_surface_get_v_range(torus).max_value - (double)qaws_surface_get_v_range(torus).min_value;
+	for (i = 0; m && i < t.nf; i++)
+	{
+		unsigned int const* q = t.fv + 4 * i;
+		double mid[3] = { 0, 0, 0 }, u = 0, v = 0, y[3], dd = 0;
+		qaws_surface_eval_result e;
+		unsigned int k, z;
+		if (t.fs[i] != 4)
+			continue;
+		for (z = 0; z < 4; z++)
+		{
+			double du = (double)t.foot[q[z]].a - (double)t.foot[q[0]].a, dv = (double)t.foot[q[z]].b - (double)t.foot[q[0]].b;
+			/* (corners across the seam: their parameters brought next to the first's) */
+			du -= pu * floor(du / pu + 0.5);
+			dv -= pv * floor(dv / pv + 0.5);
+			u += 0.25 * ((double)t.foot[q[0]].a + du);
+			v += 0.25 * ((double)t.foot[q[0]].b + dv);
+			for (k = 0; k < 3; k++)
+				mid[k] += 0.25 * t.x[3 * q[z] + k];
+		}
+		memset(&e, 0, sizeof e);
+		qaws_surface_evaluate(&e, torus, (qaws_scalar)u, (qaws_scalar)v, QAWS_SURFACE_EVAL_POSITION);
+		y[0] = (double)e.position.x; y[1] = (double)e.position.y; y[2] = (double)e.position.z;
+		for (k = 0; k < 3; k++)
+			dd += (y[k] - mid[k]) * (y[k] - mid[k]);
+		chord = fmax(chord, sqrt(dd));
+	}
+	sprintf(msg, "STRUCTURED torus to a chord of 0.01: %u faces, closed %d, the cells' centres off their corners' mean by %.4f at most", t.nf,
+		t.top.closed, chord);
+	printf("  %s\n", msg);
+	TEST_ASSERT(m && t.top.closed && t.top.genus == 1 && t.q.quads == t.nf && chord <= 0.01 && chord > 0.001, msg);
+	if (m)
+		tg_free(&t);
+	qaws_mesh_3d_destroy(m);
+	/* the box shell */
+	tg_box(box, h);
+	qaws_shell_atlas_create(&atlas, (qaws_surface const* const*)box, 6, 0);
+	m = atlas ? tg_structured(NULL, atlas, QAWS_ELEMENTS_QUADS, 0.25, 0, &t) : NULL;
+	err = m ? tg_foot_error(&t, NULL, atlas) : HUGE_VAL;
+	sprintf(msg, "STRUCTURED box shell: %u faces (%u quads), %u irregular, closed %d genus %u, footpoints %.2e, edges %.3g..%.3g", t.nf, t.q.quads,
+		t.q.irregular, t.top.closed, t.top.genus, err, (double)t.q.min_edge, (double)t.q.max_edge);
+	printf("  %s\n", msg);
+	TEST_ASSERT(m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.quads == t.nf && t.q.irregular == 8 && t.top.closed && t.top.genus == 0
+		&& err < TEST_BOUND(1e-9, 32) && t.q.max_edge <= 0.25 + 1e-9, msg);
+	if (m)
+		tg_free(&t);
+	qaws_mesh_3d_destroy(m);
+	/* the patch in triangles */
+	m = tg_structured(patch, NULL, QAWS_ELEMENTS_TRIANGLES, 0.3, 0, &t);
+	err = m ? tg_foot_error(&t, patch, NULL) : HUGE_VAL;
+	sprintf(msg, "STRUCTURED patch in triangles: %u triangles, valid %d, one border %d, footpoints %.2e, angles %.3g..%.3g", t.nf,
+		m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK, t.top.boundary_loops, err, (double)t.q.min_angle, (double)t.q.max_angle);
+	printf("  %s\n", msg);
+	TEST_ASSERT(m && qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && t.q.triangles == t.nf && t.top.boundary_loops == 1 && err < TEST_BOUND(1e-9, 32), msg);
+	if (m)
+		tg_free(&t);
+	qaws_mesh_3d_destroy(m);
+	qaws_shell_atlas_destroy(atlas);
+	for (i = 0; i < 6; i++)
+		qaws_surface_destroy(box[i]);
+	qaws_surface_destroy(torus);
+	qaws_surface_destroy(patch);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* s = tg_patch();
@@ -391,6 +507,7 @@ int test_126_mesh_generate_main(void)
 	test_patch();
 	test_torus();
 	test_box();
+	test_structured();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

@@ -339,7 +339,9 @@ cheapest and most reused first:
    mf levels of symmetry 6 (mf_compat_orientation_n, mf_compat_index_n, a hexagonal lattice), qd_tri_extract reading
    triangles off the lattice steps (votes, each directed edge once, small holes fanned; line clusters from both sides
    merged, edges skipping a line cluster or crossing a crease dropped), 3 LOCAL passes to finish.
-3. **Generation:** PARAMETRIC, RESTRICTED_DELAUNAY, STRUCTURED.
+3. **Generation:** STRUCTURED done 2026-10-27 (mg_structured: grids per untrimmed face, sides by arc length, counts by
+   classes across shared edges, per-direction doubling to the tolerances; test 126, figure 78); PARAMETRIC,
+   RESTRICTED_DELAUNAY next.
 4. **Tetrahedra:** ENVELOPE (fTetWild-style), STUFFING (isosurface stuffing).
 5. **Hexahedra:** an octree.
 

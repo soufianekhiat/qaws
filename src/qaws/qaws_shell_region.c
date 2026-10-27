@@ -115,6 +115,21 @@ struct qaws_shell_atlas
 #define SH_REV(a, f, side) ((a)->rev[(a)->off[f] + (unsigned int)(side)])
 #define SH_VFACE(a, f, side) ((a)->vface[(a)->off[f] + (unsigned int)(side)])
 
+/* (internal, qaws_mesh_generate.c's STRUCTURED) an untrimmed face's four sides (0 v = v0, 1 u = u1, 2 v = v1, 3 u = u0):
+   the face across each (or none, past the faces) and its side there; 0 for a trimmed face */
+int sh_face_grid_sides(qaws_shell_atlas const* a, unsigned int f, unsigned int* nb, int* nbside)
+{
+	unsigned int s;
+	if (!a || f >= a->nf || SH_TRIMMED(a, f))
+		return 0;
+	for (s = 0; s < 4; s++)
+	{
+		nb[s] = SH_NB(a, f, s);
+		nbside[s] = SH_NBSIDE(a, f, s);
+	}
+	return 1;
+}
+
 static void sh_dom_uv(qaws_internal_sg_ctx const* c, int side, double s, double* uv)
 {
 	switch (side)

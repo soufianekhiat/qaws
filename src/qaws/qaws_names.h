@@ -1704,6 +1704,7 @@
 #define rv_trace QAWS_SFX(rv_trace)
 #define sf_create_scaled QAWS_SFX(sf_create_scaled)
 #define sf_eval QAWS_SFX(sf_eval)
+#define sh_face_grid_sides QAWS_SFX(sh_face_grid_sides)
 #define sm_csr_free QAWS_SFX(sm_csr_free)
 #define sm_label_cut QAWS_SFX(sm_label_cut)
 #define sm_laplacian QAWS_SFX(sm_laplacian)

@@ -830,8 +830,14 @@ Every vertex is then snapped onto its face's exact surface by Gauss-Newton:
 the output lies on the NURBS (or any `qaws_surface`) to rounding, its
 footpoints are the face and (u, v), and a face attribute `face` names each
 element's face. Border and crease vertices are held on their domain's side,
-corners on its corners. `PARAMETRIC`, `RESTRICTED_DELAUNAY` and
-`STRUCTURED` are reserved.
+corners on its corners.
+
+`STRUCTURED` lays an iso-parametric grid on each face instead: sides split
+at equal lengths (a shared edge alike from both faces), counts matched
+across edges, doubled per direction to meet chord or angle tolerances.
+Quads or triangles, exactly on the faces, no irregular vertex but at shell
+corners (figure 78). Trimmed faces are refused. `PARAMETRIC` and
+`RESTRICTED_DELAUNAY` are reserved.
 
 ### Curved elements
 

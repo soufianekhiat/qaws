@@ -62,6 +62,11 @@ typedef struct mi_mls
 	unsigned int v[3];
 } mi_mls;
 
+/* (qaws_shell_region.c, for the generator's STRUCTURED) an untrimmed face's four sides (0 v = v0, 1 u = u1, 2 v = v1, 3 u = u0):
+   the face across each (or none, past the faces) and its side there; 0 for a trimmed face */
+struct qaws_shell_atlas;
+int sh_face_grid_sides(struct qaws_shell_atlas const* a, unsigned int f, unsigned int* nb, int* nbside);
+
 typedef struct mi_tri
 {
 	double p[10][3];
