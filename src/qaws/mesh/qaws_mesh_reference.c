@@ -177,6 +177,9 @@ void qaws_mesh_reference_destroy(qaws_mesh_reference* r)
 	qaws_internal_free(r->seamk);
 	qaws_internal_free(r->loop);
 	qaws_internal_free(r->loopi);
+	qaws_internal_free(r->mls);
+	qaws_internal_free(r->mlsi);
+	qaws_internal_free(r->mlsd);
 	qaws_internal_free(r);
 }
 
@@ -276,6 +279,125 @@ static int mr_loop_gather(qaws_mesh_reference const* r, unsigned int t, unsigned
 	cnt[1] = ntl;
 	cnt[2] = ncl;
 	return 1;
+}
+
+/* MLS: the vertices' normals (the given ones, or their corners' averaged: creases rounded) and kernel radii (scale times the
+   mean length of their edges); per triangle its candidates, walked from its corners across edges while a vertex's kernel
+   reaches the triangle's box widened by its longest side */
+static qaws_status mr_mls_setup(qaws_mesh_reference* r, double const* cn, qaws_mesh_reference_desc const* desc)
+{
+	qaws_hm const* m = &r->mesh->hm;
+	unsigned int nv = m->nv, i, k, t, *off = NULL, *adj = NULL, *cnt = NULL, *stamp = NULL, *queue = NULL, cap = 0, used = 0;
+	double *nrm, *rad, *len = NULL, scale = desc && desc->mls_radius > 0 ? (double)desc->mls_radius : 2.5;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	r->mlsd = (double*)qaws_internal_zalloc(4 * (size_t)nv + 1, sizeof(double));
+	r->mls = (mi_mls*)qaws_internal_zalloc((size_t)r->nt + 1, sizeof(mi_mls));
+	off = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 2, sizeof(unsigned int));
+	cnt = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 1, sizeof(unsigned int));
+	stamp = (unsigned int*)qaws_internal_scratch_zalloc((size_t)nv + 1, sizeof(unsigned int));
+	queue = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nv + 1));
+	len = (double*)qaws_internal_scratch_zalloc((size_t)nv + 1, sizeof(double));
+	adj = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 6, (size_t)r->nt + 1));
+	if (!r->mlsd || !r->mls || !off || !cnt || !stamp || !queue || !len || !adj)
+		goto done;
+	nrm = r->mlsd;
+	rad = r->mlsd + 3 * (size_t)nv;
+	for (i = 0; i < m->nc; i++)
+		if (m->cf[i] != HM_NONE)
+			for (k = 0; k < 3; k++)
+				nrm[3 * (size_t)m->cv[i] + k] += desc && desc->normals ? (double)desc->normals[3 * (size_t)m->cv[i] + k] : cn[3 * (size_t)i + k];
+	for (i = 0; i < nv; i++)
+		mr_unit(nrm + 3 * (size_t)i);
+	/* edges per vertex (each triangle side from both ends: inner sides twice, the mean the same) */
+	for (t = 0; t < r->nt; t++)
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int a = r->tv[3 * t + k], b = r->tv[3 * t + (k + 1) % 3];
+			double const *pa = m->x + 3 * (size_t)a, *pb = m->x + 3 * (size_t)b;
+			double l = sqrt((pa[0] - pb[0]) * (pa[0] - pb[0]) + (pa[1] - pb[1]) * (pa[1] - pb[1]) + (pa[2] - pb[2]) * (pa[2] - pb[2]));
+			len[a] += l;
+			len[b] += l;
+			off[a + 1]++;
+			off[b + 1]++;
+		}
+	for (i = 0; i < nv; i++)
+		rad[i] = off[i + 1] ? scale * len[i] / off[i + 1] : 0;
+	for (i = 0; i < nv; i++)
+		off[i + 1] += off[i];
+	for (t = 0; t < r->nt; t++)
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int a = r->tv[3 * t + k], b = r->tv[3 * t + (k + 1) % 3];
+			adj[off[a] + cnt[a]++] = b;
+			adj[off[b] + cnt[b]++] = a;
+		}
+	for (t = 0; t < r->nt; t++)
+	{
+		double lo[3], hi[3], L = 0;
+		unsigned int head = 0, tail = 0, q;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int a = r->tv[3 * t + k], b = r->tv[3 * t + (k + 1) % 3];
+			double const *pa = m->x + 3 * (size_t)a, *pb = m->x + 3 * (size_t)b;
+			L = fmax(L, sqrt((pa[0] - pb[0]) * (pa[0] - pb[0]) + (pa[1] - pb[1]) * (pa[1] - pb[1]) + (pa[2] - pb[2]) * (pa[2] - pb[2])));
+		}
+		for (k = 0; k < 3; k++)
+		{
+			lo[k] = fmin(m->x[3 * (size_t)r->tv[3 * t] + k], fmin(m->x[3 * (size_t)r->tv[3 * t + 1] + k], m->x[3 * (size_t)r->tv[3 * t + 2] + k])) - L;
+			hi[k] = fmax(m->x[3 * (size_t)r->tv[3 * t] + k], fmax(m->x[3 * (size_t)r->tv[3 * t + 1] + k], m->x[3 * (size_t)r->tv[3 * t + 2] + k])) + L;
+		}
+		for (k = 0; k < 3; k++)
+			if (stamp[r->tv[3 * t + k]] != t + 1)
+			{
+				stamp[r->tv[3 * t + k]] = t + 1;
+				queue[tail++] = r->tv[3 * t + k];
+			}
+		while (head < tail)
+		{
+			unsigned int v = queue[head++];
+			for (q = off[v]; q < off[v + 1]; q++)
+			{
+				unsigned int w = adj[q];
+				double d2 = 0;
+				if (stamp[w] == t + 1)
+					continue;
+				stamp[w] = t + 1;
+				for (k = 0; k < 3; k++)
+				{
+					double c = m->x[3 * (size_t)w + k], e = c < lo[k] ? lo[k] - c : c > hi[k] ? c - hi[k] : 0;
+					d2 += e * e;
+				}
+				if (d2 < rad[w] * rad[w])
+					queue[tail++] = w;
+			}
+		}
+		if (used + tail > cap)
+		{
+			unsigned int nc2 = 2 * (used + tail) + 64, *g = (unsigned int*)qaws_internal_realloc(r->mlsi, qaws_internal_mul2(sizeof(unsigned int), nc2));
+			if (!g)
+				goto done;
+			r->mlsi = g;
+			cap = nc2;
+		}
+		memcpy(r->mlsi + used, queue, sizeof(unsigned int) * tail);
+		r->mls[t].ncand = tail;
+		r->mls[t].cand = NULL;
+		r->mls[t].x = m->x;
+		r->mls[t].nrm = nrm;
+		r->mls[t].rad = rad;
+		for (k = 0; k < 3; k++)
+			r->mls[t].v[k] = r->tv[3 * t + k];
+		/* (the pool's offset for now: the pointers once it stops moving) */
+		r->mls[t].cand = (unsigned int const*)(size_t)used;
+		used += tail;
+	}
+	for (t = 0; t < r->nt; t++)
+		r->mls[t].cand = r->mlsi + (size_t)r->mls[t].cand;
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(off); qaws_internal_free(cnt); qaws_internal_free(stamp); qaws_internal_free(queue); qaws_internal_free(len);
+	qaws_internal_free(adj);
+	return st;
 }
 
 /* SUBDIVISION: every triangle's neighbourhood into r->loop (two passes: sizes, then the pool) */
@@ -407,7 +529,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 	if ((unsigned int)kind > QAWS_INTERPOLANT_MLS)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (kind != QAWS_INTERPOLANT_PN && kind != QAWS_INTERPOLANT_LINEAR && kind != QAWS_INTERPOLANT_PHONG && kind != QAWS_INTERPOLANT_NAGATA && kind != QAWS_INTERPOLANT_G1 &&
-		kind != QAWS_INTERPOLANT_SUBDIVISION)
+		kind != QAWS_INTERPOLANT_SUBDIVISION && kind != QAWS_INTERPOLANT_MLS)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	r = (qaws_mesh_reference*)qaws_internal_zalloc(1, sizeof *r);
 	if (!r)
@@ -491,6 +613,8 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 	mr_crease_tangents(m, tan, has);
 	if (kind == QAWS_INTERPOLANT_SUBDIVISION && (st = mr_loop_rings(r)) != QAWS_STATUS_OK)
 		goto done;
+	if (kind == QAWS_INTERPOLANT_MLS && (st = mr_mls_setup(r, cn, desc)) != QAWS_STATUS_OK)
+		goto done;
 	/* patches and their boxes */
 	for (t = 0; t < nt; t++)
 	{
@@ -523,6 +647,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 			crease[e] = T[e];
 		}
 		r->patch[t].loop = r->loop ? &r->loop[t] : NULL;
+		r->patch[t].mls = r->mls ? &r->mls[t] : NULL;
 		mi_build(&r->patch[t], kind, P, N, crease);
 		for (k = 0; k < 3; k++)
 		{
@@ -539,6 +664,35 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 				if (v < lo[k]) lo[k] = v;
 				if (v > hi[k]) hi[k] = v;
 			}
+		if (r->mls)
+		{
+			/* (MLS: points sampled 4 x 4 over the triangle, widened by a tenth of its longest side) */
+			unsigned int ia, ib;
+			double L = 0;
+			for (ia = 0; ia <= 4; ia++)
+				for (ib = 0; ia + ib <= 4; ib++)
+				{
+					double y[3];
+					mi_eval(&r->patch[t], ia / 4.0, ib / 4.0, y, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+					for (k = 0; k < 3; k++)
+					{
+						r->box[t].lo[k] = fmin(r->box[t].lo[k], y[k]);
+						r->box[t].hi[k] = fmax(r->box[t].hi[k], y[k]);
+					}
+				}
+			for (k = 0; k < 3; k++)
+			{
+				double const *A = m->x + 3 * (size_t)r->tv[3 * t + k], *B = m->x + 3 * (size_t)r->tv[3 * t + (k + 1) % 3];
+				L = fmax(L, sqrt((A[0] - B[0]) * (A[0] - B[0]) + (A[1] - B[1]) * (A[1] - B[1]) + (A[2] - B[2]) * (A[2] - B[2])));
+			}
+			for (k = 0; k < 3; k++)
+			{
+				r->box[t].lo[k] -= 0.1 * L;
+				r->box[t].hi[k] += 0.1 * L;
+				lo[k] = fmin(lo[k], r->box[t].lo[k]);
+				hi[k] = fmax(hi[k], r->box[t].hi[k]);
+			}
+		}
 	}
 	r->extent = nt ? sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2])) : 1;
 	for (i = 0; i < m->nv; i++)

@@ -4,7 +4,8 @@
  * Alexa 2008) and NAGATA (Nagata 2005), quadratic and degree-elevated,
  * LINEAR (the flat triangle degree-elevated), G1 (Walton and Meek 1996:
  * PN's boundary curves, a quartic Gregory interior) and SUBDIVISION (the
- * Loop limit surface, creases by Hoppe et al.'s rules), evaluated with their
+ * Loop limit surface, creases by Hoppe et al.'s rules) and MLS (the implicit
+ * surface of the vertices and their normals), evaluated with their
  * derivatives, and the curvature of a normal field.
  */
 
@@ -287,12 +288,15 @@ static void mi_build_g1(mi_tri* t, double const* const* P, double const* const* 
 }
 
 static void mi_build_loop(mi_tri* t);
+static void mi_build_mls(mi_tri* t);
 
 void mi_build(mi_tri* t, qaws_interpolant kind, double const* const* P, double const* const* N, double const* const* crease)
 {
 	t->gregory = 0;
 	if (kind == QAWS_INTERPOLANT_SUBDIVISION)
 		mi_build_loop(t);
+	else if (kind == QAWS_INTERPOLANT_MLS)
+		mi_build_mls(t);
 	else if (kind == QAWS_INTERPOLANT_PHONG || kind == QAWS_INTERPOLANT_NAGATA)
 		mi_build_quadratic(t, kind, P, N, crease);
 	else if (kind == QAWS_INTERPOLANT_G1)
@@ -910,6 +914,293 @@ static void mi_build_loop(mi_tri* t)
 	memset(t->n, 0, sizeof t->n);
 }
 
+/* ---- MLS: the moving least squares surface of the vertices and their normals ----
+   f(x) the algebraic distance of x to the sphere fitted round it (APSS, Guennebaud and Gross 2007: mi_mls_field), each vertex
+   weighted (1 - |x - p_i|^2 / R_i^2)^4 inside R_i (compact support). A location's point is the flat
+   triangle's point moved along the corners' normals blended linearly onto f = 0 (Newton), its tangents by implicit
+   differentiation, its normal grad f / |grad f|, the normal's derivatives (I - n n^T) H x_a / |grad f| from f's Hessian H. */
+
+/* a value with its gradient and Hessian in x */
+typedef struct mj
+{
+	double v, g[3], h[3][3];
+} mj;
+
+static void mj_zero(mj* a)
+{
+	memset(a, 0, sizeof *a);
+}
+
+/* a += s b */
+static void mj_add(mj* a, mj const* b, double s)
+{
+	int j, k;
+	a->v += s * b->v;
+	for (j = 0; j < 3; j++)
+	{
+		a->g[j] += s * b->g[j];
+		for (k = 0; k < 3; k++)
+			a->h[j][k] += s * b->h[j][k];
+	}
+}
+
+static mj mj_mul(mj const* a, mj const* b)
+{
+	mj o;
+	int j, k;
+	o.v = a->v * b->v;
+	for (j = 0; j < 3; j++)
+	{
+		o.g[j] = a->v * b->g[j] + b->v * a->g[j];
+		for (k = 0; k < 3; k++)
+			o.h[j][k] = a->v * b->h[j][k] + b->v * a->h[j][k] + a->g[j] * b->g[k] + b->g[j] * a->g[k];
+	}
+	return o;
+}
+
+static mj mj_div(mj const* a, mj const* b)
+{
+	mj r;
+	int j, k;
+	double iv = 1 / b->v;
+	r.v = iv;
+	for (j = 0; j < 3; j++)
+	{
+		r.g[j] = -b->g[j] * iv * iv;
+		for (k = 0; k < 3; k++)
+			r.h[j][k] = 2 * b->g[j] * b->g[k] * iv * iv * iv - b->h[j][k] * iv * iv;
+	}
+	return mj_mul(a, &r);
+}
+
+/* f, its gradient g and Hessian H at x from the triangle's candidate vertices; 0 where no kernel reaches. APSS (Guennebaud
+   and Gross 2007): the algebraic sphere s(y) = u0 + u . y + u4 |y|^2 fitted at x, in coordinates centred at x, its gradient to
+   the normals by weighted least squares (u = sum~ n - 2 u4 sum~ p, u4 = 1/2 (sum w p.n - sum~ p . sum w n) / (sum w p.p -
+   sum~ p . sum w p), sum~ the weights normalized) and its value to the points (u0 = -u . sum~ p - u4 sum~ p.p); f(x) = u0,
+   exact on a sphere, carried with its derivatives in x (p = p_i - x moves with it) */
+static int mi_mls_field(mi_mls const* M, double const* x, double* f, double* g, double H[3][3])
+{
+	mj W, P[3], Nw[3], PN, PP, t, u4, uq[3], u0, Pt[3], Nt[3], num, den, a, b;
+	unsigned int c;
+	int j, k;
+	mj_zero(&W);
+	mj_zero(&PN);
+	mj_zero(&PP);
+	for (k = 0; k < 3; k++)
+	{
+		mj_zero(&P[k]);
+		mj_zero(&Nw[k]);
+	}
+	for (c = 0; c < M->ncand; c++)
+	{
+		unsigned int i = M->cand[c];
+		double const *p = M->x + 3 * (size_t)i, *nr = M->nrm + 3 * (size_t)i;
+		double R2 = M->rad[i] * M->rad[i], r[3], rho, om, p1, p2;
+		mj w, rk, rn, rr, q;
+		for (k = 0; k < 3; k++)
+			r[k] = p[k] - x[k];
+		rho = mi_dot(r, r) / R2;
+		if (rho >= 1)
+			continue;
+		om = 1 - rho;
+		p1 = -4 * om * om * om;
+		p2 = 12 * om * om;
+		/* w = (1 - rho)^4, rho = |p - x|^2 / R^2: grad rho = -2 r / R^2, its Hessian 2 I / R^2 */
+		w.v = om * om * om * om;
+		for (j = 0; j < 3; j++)
+		{
+			w.g[j] = p1 * -2 * r[j] / R2;
+			for (k = 0; k < 3; k++)
+				w.h[j][k] = p2 * 4 * r[j] * r[k] / (R2 * R2) + (j == k ? p1 * 2 / R2 : 0);
+		}
+		mj_add(&W, &w, 1);
+		for (k = 0; k < 3; k++)
+		{
+			mj_zero(&rk);
+			rk.v = r[k];
+			rk.g[k] = -1;
+			q = mj_mul(&w, &rk);
+			mj_add(&P[k], &q, 1);
+			mj_add(&Nw[k], &w, nr[k]);
+		}
+		mj_zero(&rn);
+		mj_zero(&rr);
+		rn.v = mi_dot(r, nr);
+		rr.v = mi_dot(r, r);
+		for (j = 0; j < 3; j++)
+		{
+			rn.g[j] = -nr[j];
+			rr.g[j] = -2 * r[j];
+			rr.h[j][j] = 2;
+		}
+		q = mj_mul(&w, &rn);
+		mj_add(&PN, &q, 1);
+		q = mj_mul(&w, &rr);
+		mj_add(&PP, &q, 1);
+	}
+	if (W.v <= 1e-300)
+		return 0;
+	for (k = 0; k < 3; k++)
+	{
+		Pt[k] = mj_div(&P[k], &W);
+		Nt[k] = mj_div(&Nw[k], &W);
+	}
+	num = PN;
+	den = PP;
+	for (k = 0; k < 3; k++)
+	{
+		t = mj_mul(&Pt[k], &Nw[k]);
+		mj_add(&num, &t, -1);
+		t = mj_mul(&Pt[k], &P[k]);
+		mj_add(&den, &t, -1);
+	}
+	if (fabs(den.v) <= 1e-300)
+		mj_zero(&u4);
+	else
+	{
+		u4 = mj_div(&num, &den);
+		u4.v *= 0.5;
+		for (j = 0; j < 3; j++)
+		{
+			u4.g[j] *= 0.5;
+			for (k = 0; k < 3; k++)
+				u4.h[j][k] *= 0.5;
+		}
+	}
+	mj_zero(&u0);
+	for (k = 0; k < 3; k++)
+	{
+		uq[k] = Nt[k];
+		t = mj_mul(&u4, &Pt[k]);
+		mj_add(&uq[k], &t, -2);
+		t = mj_mul(&uq[k], &Pt[k]);
+		mj_add(&u0, &t, -1);
+	}
+	a = mj_div(&PP, &W);
+	b = mj_mul(&u4, &a);
+	mj_add(&u0, &b, -1);
+	*f = u0.v;
+	for (j = 0; j < 3; j++)
+	{
+		g[j] = u0.g[j];
+		for (k = 0; k < 3; k++)
+			H[j][k] = u0.h[j][k];
+	}
+	return 1;
+}
+
+static void mi_eval_mls(mi_tri const* t, double a, double b, double* x, double* xa, double* xb, double* xaa, double* xab, double* xbb,
+	double* n, double* na, double* nb)
+{
+	mi_mls const* M = t->mls;
+	double const *P0 = M->x + 3 * (size_t)M->v[0], *P1 = M->x + 3 * (size_t)M->v[1], *P2 = M->x + 3 * (size_t)M->v[2];
+	double const *N0 = M->nrm + 3 * (size_t)M->v[0], *N1 = M->nrm + 3 * (size_t)M->v[1], *N2 = M->nrm + 3 * (size_t)M->v[2];
+	double q[3], d[3], qa[3], qb[3], da[3], db[3], y[3], f = 0, g[3] = { 0, 0, 0 }, H[3][3], s = 0, L = 0, ok = 0;
+	double ya[3], yb[3], u[3], gl;
+	int it, k, j;
+	memset(H, 0, sizeof H);
+	for (k = 0; k < 3; k++)
+	{
+		q[k] = (1 - a - b) * P0[k] + a * P1[k] + b * P2[k];
+		d[k] = (1 - a - b) * N0[k] + a * N1[k] + b * N2[k];
+		qa[k] = P1[k] - P0[k];
+		qb[k] = P2[k] - P0[k];
+		da[k] = N1[k] - N0[k];
+		db[k] = N2[k] - N0[k];
+	}
+	L = sqrt(fmax(mi_dot(qa, qa), mi_dot(qb, qb)));
+	/* f(q + s d) = 0 by Newton, each step at most half the triangle's longest side */
+	for (it = 0; it < 40; it++)
+	{
+		double gs, ds;
+		for (k = 0; k < 3; k++)
+			y[k] = q[k] + s * d[k];
+		if (!(ok = mi_mls_field(M, y, &f, g, H)))
+			break;
+		gs = mi_dot(g, d);
+		if (fabs(gs) < 1e-300)
+			break;
+		ds = -f / gs;
+		ds = ds > 0.5 * L ? 0.5 * L : ds < -0.5 * L ? -0.5 * L : ds;
+		s += ds;
+		if (fabs(ds) <= 1e-15 * (L + fabs(s)))
+			break;
+	}
+	for (k = 0; k < 3; k++)
+		y[k] = q[k] + s * d[k];
+	ok = ok && mi_mls_field(M, y, &f, g, H) && fabs(mi_dot(g, d)) > 1e-300;
+	if (!ok)
+	{
+		/* (no kernel reaches: the flat triangle, its normal the blended one) */
+		s = 0;
+		for (k = 0; k < 3; k++)
+		{
+			y[k] = q[k];
+			g[k] = d[k];
+		}
+		memset(H, 0, sizeof H);
+	}
+	{
+		double gs = mi_dot(g, d), sa = 0, sb = 0, va[3], vb[3];
+		for (k = 0; k < 3; k++)
+		{
+			va[k] = qa[k] + s * da[k];
+			vb[k] = qb[k] + s * db[k];
+		}
+		if (ok)
+		{
+			sa = -mi_dot(g, va) / gs;
+			sb = -mi_dot(g, vb) / gs;
+		}
+		for (k = 0; k < 3; k++)
+		{
+			ya[k] = va[k] + sa * d[k];
+			yb[k] = vb[k] + sb * d[k];
+		}
+	}
+	for (k = 0; k < 3; k++)
+	{
+		u[k] = g[k];
+		if (x) x[k] = y[k];
+		if (xa) xa[k] = ya[k];
+		if (xb) xb[k] = yb[k];
+		/* shortcut: MLS leaves the second derivatives 0 (no caller asks for them); differentiate the tangents if one does */
+		if (xaa) xaa[k] = 0;
+		if (xab) xab[k] = 0;
+		if (xbb) xbb[k] = 0;
+	}
+	gl = mi_unit(u);
+	if (n)
+		for (k = 0; k < 3; k++)
+			n[k] = u[k];
+	for (j = 0; j < 2; j++)
+	{
+		double* o = j ? nb : na;
+		double const* t2 = j ? yb : ya;
+		double h[3], w;
+		if (!o)
+			continue;
+		for (k = 0; k < 3; k++)
+			h[k] = H[k][0] * t2[0] + H[k][1] * t2[1] + H[k][2] * t2[2];
+		w = mi_dot(u, h);
+		for (k = 0; k < 3; k++)
+			o[k] = gl > 0 ? (h[k] - w * u[k]) / gl : 0;
+	}
+}
+
+/* the corners' points on the surface as p[0..2] (the flat triangle between them in the other slots: starting points) */
+static void mi_build_mls(mi_tri* t)
+{
+	static double const at[3][2] = { { 0, 0 }, { 1, 0 }, { 0, 1 } };
+	int c, k, q;
+	for (c = 0; c < 3; c++)
+		mi_eval_mls(t, at[c][0], at[c][1], t->p[c], NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+	for (q = 3; q < 10; q++)
+		for (k = 0; k < 3; k++)
+			t->p[q][k] = (mi_e3[q][0] * t->p[0][k] + mi_e3[q][1] * t->p[1][k] + mi_e3[q][2] * t->p[2][k]) / 3.0;
+	memset(t->n, 0, sizeof t->n);
+}
+
 void mi_eval(mi_tri const* t, double a, double b, double* x, double* xa, double* xb, double* xaa, double* xab, double* xbb,
 	double* n, double* na, double* nb)
 {
@@ -918,6 +1209,11 @@ void mi_eval(mi_tri const* t, double a, double b, double* x, double* xa, double*
 	if (t->loop)
 	{
 		mi_eval_loop(t, a, b, x, xa, xb, xaa, xab, xbb, n, na, nb);
+		return;
+	}
+	if (t->mls)
+	{
+		mi_eval_mls(t, a, b, x, xa, xb, xaa, xab, xbb, n, na, nb);
 		return;
 	}
 	if (t->gregory)

@@ -50,6 +50,18 @@ typedef struct mi_loop
 	unsigned int fixed;             /* per corner c: bit c a feature corner (fixed on a crease), bit 3 + c in one face only (fixed) */
 } mi_loop;
 
+/* MLS: the vertices with their normals and kernel radii, a triangle's candidates (the vertices whose kernels may reach it) and
+   its corners */
+typedef struct mi_mls
+{
+	double const* x;                /* 3 per vertex */
+	double const* nrm;              /* 3 per vertex, unit */
+	double const* rad;              /* per vertex: its kernel's radius */
+	unsigned int const* cand;
+	unsigned int ncand;
+	unsigned int v[3];
+} mi_mls;
+
 typedef struct mi_tri
 {
 	double p[10][3];
@@ -57,6 +69,7 @@ typedef struct mi_tri
 	int gregory;                    /* G1: p[0..8] the cubic boundary, the interior a quartic Gregory triangle */
 	mi_loop const* loop;            /* SUBDIVISION (set before mi_build): the Loop limit over the neighbourhood; p[0..2] the
 	                                   corners' limit points */
+	mi_mls const* mls;              /* MLS (set before mi_build): the implicit surface; p[0..2] the corners' points on it */
 } mi_tri;
 
 /* P: the corners; N: their unit normals; crease (per edge i, from corner i to
@@ -97,6 +110,9 @@ struct qaws_mesh_reference
 	unsigned int nseam;
 	mi_loop* loop;                  /* SUBDIVISION: per triangle its neighbourhood, in loopi */
 	unsigned int* loopi;
+	mi_mls* mls;                    /* MLS: per triangle its candidates, in mlsi; mlsd the vertices' normals (3 each) then radii */
+	unsigned int* mlsi;
+	double* mlsd;
 };
 
 /* an attribute seam across the edge of corners c and o (twins): corner or face values differing, edge values nonzero */

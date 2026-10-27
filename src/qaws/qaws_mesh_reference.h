@@ -60,8 +60,12 @@
  *            a vertex's location is its limit point). UNSUPPORTED_OPERATION
  *            past about 50 triangles round a vertex.
  *
- * MLS is reserved for a further interpolant
- * (UNSUPPORTED_OPERATION today).
+ *   MLS      the moving least squares surface of the vertices and their
+ *            normals (APSS, Guennebaud and Gross 2007: a sphere fitted round each point, exact on spheres), each vertex's
+ *            kernel mls_radius times its mean edge length: smooth, near the
+ *            vertices but not through them, noise and creases smoothed
+ *            (larger radii smooth more); a location's point the flat
+ *            triangle's moved along the blended normals onto it.
  *
  * Normals: given per vertex, or computed: the faces' normals round each
  * vertex weighted by their angles there, one normal per run of faces
@@ -109,6 +113,7 @@ typedef struct qaws_mesh_reference_desc
 	                                       values, nonzero edge values) are creases of the reference (its regions split there,
 	                                       computed normals too) and remembered as seams: a remesh on it keeps them as lines
 	                                       that are no features of its result (qaws_mesh_remesh's own reference does this) */
+	qaws_scalar mls_radius;             /* MLS: each vertex's kernel radius as a multiple of the mean length of its edges (0: 2.5) */
 } qaws_mesh_reference_desc;
 
 typedef struct qaws_mesh_reference qaws_mesh_reference;

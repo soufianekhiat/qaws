@@ -131,7 +131,23 @@ neighbours share their edge curve:
   split normals on each side, so they stay sharp without cracks; the border
   is a crease too.
 - `LINEAR`: the flat triangles, for meshes that are the truth.
-- `PHONG`, `NAGATA`, `G1`, `SUBDIVISION`, `MLS`: reserved.
+- `PHONG` (Boubekeur and Alexa 2008) and `NAGATA` (Nagata 2005): quadratic
+  patches from the corners' normals; NAGATA's edges leave both ends in their
+  tangent planes and follow a sphere closely.
+- `G1` (Walton and Meek 1996): PN's edges, a quartic Gregory interior whose
+  tangent planes agree across every edge; the normal is the surface's own.
+- `SUBDIVISION`: the Loop limit surface of the mesh, evaluated exactly (box
+  splines where regular, local subdivision elsewhere), with the creases and
+  corners of `qaws_mesh_3d_subdivide`. Not through the vertices: a vertex's
+  location is its limit point. Slower to evaluate than the others.
+- `MLS`: the moving least squares surface of the vertices and normals
+  (APSS, Guennebaud and Gross 2007), each vertex's kernel `mls_radius` times
+  its mean edge length (default 2.5). Smooths noise and creases, exact on
+  spheres.
+
+On an 80-triangle sphere the farthest points off it are: flat 0.087, PN
+0.014, PHONG 0.024, NAGATA 0.0054, G1 0.0125, SUBDIVISION 0.122 (it
+shrinks), MLS 0.0089 (figure 2).
 
 A location is a triangle and two barycentric coordinates. Curvatures come
 from the normal field's derivative (the shape operator). The PN patch, its

@@ -55,7 +55,7 @@ On branch `meshing`, one method per operator (the others reserved behind
 | Step | Landed | Reserved / next |
 |---|---|---|
 | Core | the corner store (`qaws_mesh_core.h`), `qaws_mesh_3d` over it: creation from arrays (non-manifold input split), edits with checks, features, attributes, footpoints, quality, topology, dual; `qaws_mesh_2d` held in it at z = 0 (`qaws_mesh_2d_get_mesh`), made from arrays and edited there | the planar mesher working in the store directly (it keeps its own arrays and mirrors them) |
-| References | PN (default) and LINEAR, creases, curvature, project, walk, attributes; Mathematica fixture | PHONG, NAGATA, G1, SUBDIVISION, MLS |
+| References | PN (default) and LINEAR, creases, curvature, project, walk, attributes; Mathematica fixture | (all done 2026-10-27: PHONG, NAGATA, G1, SUBDIVISION, MLS) |
 | Fields | size fields (uniform, curvature with tolerances and gradation, local feature size (shrinking balls, thickness and gaps, `cells_across`), vertices, callback, min); cross fields: LOCAL (Instant Meshes) and SMOOTHEST (Knoppel et al. 2013, n = 2, 4, 6, lines held, curvature_aligned) on a sparse LDL^T, indices; frame fields by a global spherical-harmonic solve (Ray et al. 2016), singular edges, combing | anisotropic metrics; meshable frame fields (singularity constraints) |
 | Remeshing | LOCAL (Botsch-Kobbelt as pmp, geometry-central and Mmgs refine it: ideal valences, size-weighted relaxation, needles and caps, Delaunay flips; angle bounds after Wang, Yan et al. 2019; a distance guard as Mmgs's hausd), CVT (restricted Voronoi, Lloyd then L-BFGS, creases locked), features, attribute transfer | FIELD_ALIGNED (6-RoSy, on the smoothest field and the flow); simplification |
 | Quads | INSTANT: Instant Meshes' fields or the smoothest global ones, whichever has fewer singularities; QuadriFlow's consistency by a min-cost flow, cones on lattice points; half cells paired, doublets removed; finishing by local quad operations and angle relaxation; quad-dominant or pure at the target spacing; GLOBAL: integer-grid map on the flow's integers, QEx extraction, INSTANT as fallback | PAIRING, SPLIT, LAYOUT (QuadWild); GLOBAL's own quantization |
@@ -330,8 +330,11 @@ Ideas noted (not ordered):
 Back on the meshing roadmap after the sweeps: the methods still reserved behind `method` (UNSUPPORTED_OPERATION), the
 cheapest and most reused first:
 
-1. **References:** PHONG (done 2026-10-27: Boubekeur and Alexa, a quadratic patch degree-elevated into the PN net; test
-   122), NAGATA (quadratic edge curves from the normals), then G1, SUBDIVISION and MLS.
+1. **References:** all done 2026-10-27 (test 122, figure 2): PHONG (Boubekeur and Alexa, a quadratic patch
+   degree-elevated into the PN net), NAGATA (quadratic edge curves from the normals), G1 (Walton-Meek boundary, quartic
+   Gregory interior, Chiyokura-Kimura cross tangents), SUBDIVISION (exact Loop limit: Stam's box splines, local
+   subdivision near extraordinary vertices and creases, against qaws_mesh_3d_subdivide's limit to 1e-15) and MLS (APSS
+   with value-gradient-Hessian jets; IMLS with normals was tried first and bulges outward on curved surfaces).
 2. **Remeshing:** FIELD_ALIGNED (Instant Meshes triangles, on the smoothest 6-RoSy field and the position flow).
 3. **Generation:** PARAMETRIC, RESTRICTED_DELAUNAY, STRUCTURED.
 4. **Tetrahedra:** ENVELOPE (fTetWild-style), STUFFING (isosurface stuffing).

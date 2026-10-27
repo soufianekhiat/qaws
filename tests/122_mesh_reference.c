@@ -17,6 +17,10 @@
  *     on an icosahedron, an icosphere, a cube and the cube with its creases,
  *     each vertex's location the same limit point, every limit point on the
  *     reference (projected), its limit normal the reference's (smooth ones);
+ *   - MLS on an icosphere: the patches meeting along their edges (positions
+ *     and normals), the normals across the tangents, curvatures near 1; on
+ *     the icosphere with noise, closer to the sphere than PN and the noisy
+ *     vertices, more so with a larger kernel;
  *   - projection against brute force (LINEAR and PN), and with a hint the
  *     sheet the hint is on, not a nearer one;
  *   - walking: straight on a plane across triangles, and round a prism
@@ -612,12 +616,12 @@ static void test_attributes_and_refusals(void)
 		qaws_mesh_location l;
 		qaws_status s1, s2;
 		memset(&dd, 0, sizeof dd);
-		dd.interpolant = QAWS_INTERPOLANT_MLS;
+		dd.interpolant = (qaws_interpolant)99;
 		s1 = qaws_mesh_reference_create(&bad, m, &dd);
 		l.patch = 100000; l.a = 0; l.b = 0;
 		s2 = r ? qaws_mesh_reference_evaluate(NULL, NULL, NULL, r, &l, 1) : QAWS_STATUS_OK;
-		sprintf(msg, "refusals: a reserved interpolant %s, a location off the triangles %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
-		TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && !bad && s2 == QAWS_STATUS_INVALID_ARGUMENT, msg);
+		sprintf(msg, "refusals: an unknown interpolant %s, a location off the triangles %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
+		TEST_ASSERT(s1 == QAWS_STATUS_INVALID_ARGUMENT && !bad && s2 == QAWS_STATUS_INVALID_ARGUMENT, msg);
 	}
 	qaws_mesh_reference_destroy(r);
 	qaws_mesh_3d_destroy(m);
@@ -716,6 +720,90 @@ static void test_subdivision(void)
 	qaws_mesh_3d_destroy(cube);
 }
 
+static double ts_off_sphere(qaws_mesh_reference const* r, unsigned int nt, double* kerr)
+{
+	unsigned int s = 11, i;
+	double e = 0;
+	for (i = 0; i < 700; i++)
+	{
+		qaws_mesh_location l = ts_loc(&s, nt);
+		qaws_scalar x[3], k[8];
+		qaws_mesh_reference_evaluate(x, NULL, k, r, &l, 1);
+		e = fmax(e, fabs(sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]) - 1));
+		if (kerr)
+			*kerr = fmax(*kerr, fmax(fabs(k[0] - 1), fabs(k[1] - 1)));
+	}
+	return e;
+}
+
+static void test_mls(void)
+{
+	ts_mesh t;
+	qaws_mesh_3d *m, *noisy;
+	qaws_mesh_reference *r, *rn, *rn4, *pn;
+	qaws_mesh_reference_desc d;
+	unsigned int i, nt, s = 3, tt;
+	double cmax = 0, nmax = 0, perp = 0, kerr = 0, eclean, enoisy = 0, epn, emls, emls4;
+	char msg[400];
+	ts_icosphere(&t, 3);
+	m = ts_make(&t);
+	r = ts_ref(m, QAWS_INTERPOLANT_MLS, NULL);
+	nt = r ? qaws_mesh_reference_get_triangle_count(r) : 0;
+	for (tt = 0; r && tt < 3 * nt; tt++)
+	{
+		unsigned int nb = r->ta[tt], u, ue, j;
+		if (nb == HM_NONE)
+			continue;
+		u = nb / 3;
+		ue = nb % 3;
+		for (j = 1; j < 4; j++)
+		{
+			double lam = j / 4.0, b1[3] = { 0, 0, 0 }, b2[3] = { 0, 0, 0 }, x1[3], x2[3], n1[3], n2[3], xa[3], xb[3];
+			b1[tt % 3] = 1 - lam; b1[(tt % 3 + 1) % 3] = lam;
+			b2[ue] = lam; b2[(ue + 1) % 3] = 1 - lam;
+			mi_eval(&r->patch[tt / 3], b1[1], b1[2], x1, xa, xb, NULL, NULL, NULL, n1, NULL, NULL);
+			mi_eval(&r->patch[u], b2[1], b2[2], x2, NULL, NULL, NULL, NULL, NULL, n2, NULL, NULL);
+			cmax = fmax(cmax, fabs(x1[0] - x2[0]) + fabs(x1[1] - x2[1]) + fabs(x1[2] - x2[2]));
+			nmax = fmax(nmax, fabs(n1[0] - n2[0]) + fabs(n1[1] - n2[1]) + fabs(n1[2] - n2[2]));
+			perp = fmax(perp, fabs(n1[0] * xa[0] + n1[1] * xa[1] + n1[2] * xa[2]) + fabs(n1[0] * xb[0] + n1[1] * xb[1] + n1[2] * xb[2]));
+		}
+	}
+	eclean = r ? ts_off_sphere(r, nt, &kerr) : 1;
+	sprintf(msg, "MLS, icosphere of %u triangles: patches meet along edges (positions %.2g, normals %.2g), normals across the tangents %.2g, "
+		"off the sphere %.3g, curvatures off 1 by %.3g", nt, cmax, nmax, perp, eclean, kerr);
+	printf("  %s\n", msg);
+	TEST_ASSERT(r && cmax < 1e-10 && nmax < 1e-8 && perp < 1e-10 && eclean < 0.01 && kerr < 0.1, msg);
+	/* noise: each vertex moved radially by up to 3 percent */
+	for (i = 0; i < t.nv; i++)
+	{
+		double f = 1 + 0.03 * (2 * ts_u(&s) - 1);
+		t.x[3 * i] *= f; t.x[3 * i + 1] *= f; t.x[3 * i + 2] *= f;
+		enoisy = fmax(enoisy, fabs(f - 1));
+	}
+	noisy = ts_make(&t);
+	rn = ts_ref(noisy, QAWS_INTERPOLANT_MLS, NULL);
+	pn = ts_ref(noisy, QAWS_INTERPOLANT_PN, NULL);
+	memset(&d, 0, sizeof d);
+	d.interpolant = QAWS_INTERPOLANT_MLS;
+	d.mls_radius = 4;
+	rn4 = NULL;
+	qaws_mesh_reference_create(&rn4, noisy, &d);
+	epn = pn ? ts_off_sphere(pn, nt, NULL) : 1;
+	emls = rn ? ts_off_sphere(rn, nt, NULL) : 1;
+	emls4 = rn4 ? ts_off_sphere(rn4, nt, NULL) : 1;
+	sprintf(msg, "MLS, icosphere with %.0f%% noise: off the sphere the vertices %.4f, PN %.4f, MLS %.4f, with a kernel of 4 edges %.4f", 100 * enoisy,
+		enoisy, epn, emls, emls4);
+	printf("  %s\n", msg);
+	TEST_ASSERT(rn && rn4 && emls < epn && emls4 < emls && emls4 < 0.65 * enoisy, msg);
+	qaws_mesh_reference_destroy(r);
+	qaws_mesh_reference_destroy(rn);
+	qaws_mesh_reference_destroy(rn4);
+	qaws_mesh_reference_destroy(pn);
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(noisy);
+	ts_free(&t);
+}
+
 int test_122_mesh_reference_main(void)
 {
 	g_pass = 0;
@@ -725,6 +813,7 @@ int test_122_mesh_reference_main(void)
 	test_sphere();
 	test_cylinder_and_cube();
 	test_subdivision();
+	test_mls();
 	test_projection();
 	test_walk();
 	test_attributes_and_refusals();
