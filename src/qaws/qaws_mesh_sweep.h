@@ -73,6 +73,11 @@
  * A vertex motion must have the mesh's vertex count; the mesh's positions
  * are then ignored (the motion's at each time are used).
  *
+ * The mesh should be closed: an open one (a box without its top) is swept as
+ * its faces are, its volume right, the result open where it is (repair it
+ * first, qaws_mesh_repair.h). A capped max_slabs leaves chords past the
+ * tolerance: the report's deviation says by how much.
+ *
  * The mesh's attributes are carried as qaws_mesh_3d_boolean carries them
  * (vertex ones come out per corner): each layer repeats the mesh's values, a
  * wall along its edge the front face's corners' there; directions (NORMAL,
