@@ -36,6 +36,12 @@
  *   - strict: a box [1, 2] x [-0.1, 0.1] x [0, 0.6] turned a quarter about z at tolerance 0.004 passes its true sweep (each
  *     vertex's least distance outside the box turned back, over 4000 angles) by 1.28 tolerances, with strict by at most
  *     the tolerance (0.64), on more slabs;
+ *   - generated attributes through a spin: the box beside z turning two turns, revolved: angle 4 pi times the time, index 0
+ *     (the first pass stands), orientation the turn by that angle about z, and each corner its source point turned by it
+ *     (within the chords and the drift);
+ *   - generated attributes by slabs: a box turned a quarter about z at tolerance 0.01: orientation the turn by its
+ *     angle, and each corner its source point turned by it within 3 tolerances (walls and cut faces
+ *     interpolate between their layers);
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -580,6 +586,132 @@ static void test_strict(void)
 	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(os);
 }
 
+/* a result corner's source point on the body (rest coordinates): face source_face's triangle, weights source_uv */
+static void sw_source_point(qaws_mesh_3d const* body, unsigned int face, double const* uv, double* p)
+{
+	unsigned int t[3], k;
+	qaws_vec3 a, b, c;
+	qaws_mesh_3d_get_triangle(t, body, face);
+	a = qaws_mesh_3d_get_vertex(body, t[0]);
+	b = qaws_mesh_3d_get_vertex(body, t[1]);
+	c = qaws_mesh_3d_get_vertex(body, t[2]);
+	for (k = 0; k < 3; k++)
+	{
+		double pa = k == 0 ? a.x : k == 1 ? a.y : a.z, pb = k == 0 ? b.x : k == 1 ? b.y : b.z, pc = k == 0 ? c.x : k == 1 ? c.y : c.z;
+		p[k] = (1 - uv[0] - uv[1]) * pa + uv[0] * pb + uv[1] * pc;
+	}
+}
+
+/* attribute name's values per corner of o (n each), or NULL */
+static qaws_scalar* sw_corner_values(qaws_mesh_3d const* o, char const* name, unsigned int n)
+{
+	unsigned int id;
+	qaws_scalar* v;
+	if (qaws_mesh_3d_find_attribute(&id, o, name) != QAWS_STATUS_OK)
+		return NULL;
+	v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n * (qaws_mesh_3d_get_corner_count(o) + 1));
+	qaws_mesh_3d_get_attribute(v, o, id);
+	return v;
+}
+
+static void test_spin_generate(void)
+{
+	qaws_mesh_3d *b = sw_box(0.5, 1, -0.25, 0.25, 0, 0.5), *o = NULL;
+	qaws_motion* m = sw_spin(0.001);
+	qaws_sweep_desc d;
+	qaws_sweep_report r;
+	qaws_scalar *tv = NULL, *av = NULL, *iv = NULL, *qv = NULL, *fv = NULL, *uv = NULL;
+	unsigned int i, nt = 0, idx = 0;
+	double wa = 0, wq = 0, wp = 0;
+	char msg[300];
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)0.002;
+	d.generate = QAWS_SWEEP_GENERATE_TIME | QAWS_SWEEP_GENERATE_ANGLE | QAWS_SWEEP_GENERATE_INDEX | QAWS_SWEEP_GENERATE_ORIENTATION | QAWS_SWEEP_GENERATE_SOURCE;
+	qaws_mesh_3d_sweep(&o, &r, b, m, &d);
+	if (o)
+	{
+		nt = qaws_mesh_3d_get_triangle_count(o);
+		tv = sw_corner_values(o, "time", 1); av = sw_corner_values(o, "angle", 1); iv = sw_corner_values(o, "index", 1);
+		qv = sw_corner_values(o, "orientation", 4); fv = sw_corner_values(o, "source_face", 1); uv = sw_corner_values(o, "source_uv", 2);
+	}
+	for (i = 0; tv && av && iv && qv && fv && uv && i < 3 * nt; i++)
+	{
+		unsigned int t3[3];
+		double sp[3], u2[2] = { uv[2 * i], uv[2 * i + 1] }, a = (double)av[i], x, y;
+		qaws_vec3 p;
+		qaws_mesh_3d_get_triangle(t3, o, i / 3);
+		p = qaws_mesh_3d_get_vertex(o, t3[i % 3]);
+		wa = fmax(wa, fabs(a - 4 * SW_PI * (double)tv[i]));
+		idx |= iv[i] != 0;
+		{
+			/* (q and -q one rotation) */
+			double sg = (double)qv[4 * i] * cos(a / 2) + (double)qv[4 * i + 3] * sin(a / 2) < 0 ? -1 : 1;
+			wq = fmax(wq, fabs(sg * (double)qv[4 * i] - cos(a / 2)) + fabs((double)qv[4 * i + 1]) + fabs((double)qv[4 * i + 2]) + fabs(sg * (double)qv[4 * i + 3] - sin(a / 2)));
+		}
+		sw_source_point(b, (unsigned int)lround((double)fv[i]), u2, sp);
+		x = cos(a) * sp[0] - sin(a) * sp[1];
+		y = sin(a) * sp[0] + cos(a) * sp[1];
+		wp = fmax(wp, sqrt(((double)p.x - x) * ((double)p.x - x) + ((double)p.y - y) * ((double)p.y - y) + ((double)p.z - sp[2]) * ((double)p.z - sp[2])));
+	}
+	sprintf(msg, "generated through a spin (%.2f turns): angle off 4 pi t by %.1e, an index past 0 %u, orientation off the turn by %.1e, corners off their turned source by %.4f",
+		(double)r.turns, wa, idx, wq, wp);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && tv && av && iv && qv && fv && uv && r.turns > 1.9 && wa < 1e-3 && !idx && wq < 1e-3 && wp < 0.005, msg);
+	free(tv); free(av); free(iv); free(qv); free(fv); free(uv);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
+}
+
+static void test_slab_generate(void)
+{
+	double tol = 0.01, wa = 0, wq = 0, wp = 0;
+	qaws_mesh_3d *b = sw_box(1, 2, -0.1, 0.1, 0, 0.6), *o = NULL;
+	qaws_motion_pose s, e;
+	qaws_motion* m = NULL;
+	qaws_sweep_desc d;
+	qaws_scalar *tv = NULL, *av = NULL, *qv = NULL, *fv = NULL, *uv = NULL;
+	unsigned int i, nt = 0;
+	char msg[300];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	e.rotation[0] = (qaws_scalar)cos(SW_PI / 4);
+	e.rotation[3] = (qaws_scalar)sin(SW_PI / 4);
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(SW_PI / 2);
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)tol;
+	d.generate = QAWS_SWEEP_GENERATE_TIME | QAWS_SWEEP_GENERATE_ANGLE | QAWS_SWEEP_GENERATE_ORIENTATION | QAWS_SWEEP_GENERATE_SOURCE;
+	qaws_mesh_3d_sweep(&o, NULL, b, m, &d);
+	if (o)
+	{
+		nt = qaws_mesh_3d_get_triangle_count(o);
+		tv = sw_corner_values(o, "time", 1); av = sw_corner_values(o, "angle", 1); qv = sw_corner_values(o, "orientation", 4);
+		fv = sw_corner_values(o, "source_face", 1); uv = sw_corner_values(o, "source_uv", 2);
+	}
+	for (i = 0; tv && av && qv && fv && uv && i < 3 * nt; i++)
+	{
+		unsigned int t3[3];
+		double sp[3], u2[2] = { uv[2 * i], uv[2 * i + 1] }, a = (double)av[i], x, y, sg;
+		qaws_vec3 p;
+		qaws_mesh_3d_get_triangle(t3, o, i / 3);
+		p = qaws_mesh_3d_get_vertex(o, t3[i % 3]);
+		wa = fmax(wa, fabs(a - 0.5 * SW_PI * (double)tv[i]));
+		sg = (double)qv[4 * i] * cos(a / 2) + (double)qv[4 * i + 3] * sin(a / 2) < 0 ? -1 : 1;
+		wq = fmax(wq, fabs(sg * (double)qv[4 * i] - cos(a / 2)) + fabs((double)qv[4 * i + 1]) + fabs((double)qv[4 * i + 2]) + fabs(sg * (double)qv[4 * i + 3] - sin(a / 2)));
+		sw_source_point(b, (unsigned int)lround((double)fv[i]), u2, sp);
+		x = cos(a) * sp[0] - sin(a) * sp[1];
+		y = sin(a) * sp[0] + cos(a) * sp[1];
+		wp = fmax(wp, sqrt(((double)p.x - x) * ((double)p.x - x) + ((double)p.y - y) * ((double)p.y - y) + ((double)p.z - sp[2]) * ((double)p.z - sp[2])));
+	}
+	sprintf(msg, "generated by slabs: angle off pi t / 2 by %.1e (a pose motion's rate is not even), orientation off the turn by %.1e, corners off their turned source by %.4f (tolerance %.2f)", wa, wq, wp, tol);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && tv && av && qv && fv && uv && wq < 1e-3 && wp < 3 * tol, msg);
+	free(tv); free(av); free(qv); free(fv); free(uv);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *c = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -609,6 +741,8 @@ int test_180_mesh_sweep_main(void)
 	test_spin_more();
 	test_spin_edges();
 	test_strict();
+	test_spin_generate();
+	test_slab_generate();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

@@ -393,7 +393,7 @@ static qaws_status swi_sources(swi_ctx* c, double const* x, size_t n, unsigned i
    it on the source's triangle or, when it lies on an edge or a corner of the shape (a wall an edge sweeps, a seam), on the
    triangle there whose normal at that time is nearest its own triangle's: one face's values on each side of a seam, the
    same point (so the same values) where they are continuous */
-static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d const* mesh)
+static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int generate)
 {
 	unsigned int nvo = qaws_mesh_3d_get_vertex_count(out), nto = qaws_mesh_3d_get_triangle_count(out), i, k, j;
 	qaws_scalar* xo = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nvo + 1));
@@ -510,6 +510,20 @@ static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d co
 		}
 	}
 	st = swp_carry(out, mesh, c->nt, src + nvo, w + 3 * (size_t)nvo, c->pv ? NULL : cR, 0);
+	if (st == QAWS_STATUS_OK && generate)
+	{
+		/* (each corner at its vertex's time) */
+		double* ct = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nto + 1));
+		if (!ct)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+		{
+			for (i = 0; i < 3 * nto; i++)
+				ct[i] = tb[tri[i]];
+			st = swp_generate(out, mesh, c->m, generate, c->nt, src + nvo, w + 3 * (size_t)nvo, ct);
+		}
+		qaws_internal_free(ct);
+	}
 done:
 	qaws_internal_free(xo); qaws_internal_free(tri); qaws_internal_free(X); qaws_internal_free(src); qaws_internal_free(w); qaws_internal_free(tb);
 	qaws_internal_free(cR); qaws_internal_free(tn); qaws_internal_free(vto); qaws_internal_free(vtl);
@@ -632,8 +646,8 @@ qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_repo
 	c.tie = 1e-9 * ext;
 	st = wt_contour_field(out_mesh, &info, swi_eval, &c, lo, hi, cell, res, 1.0);
 	report->closed = info.closed;
-	if (st == QAWS_STATUS_OK && *out_mesh && qaws_mesh_3d_get_attribute_count(mesh))
-		st = swi_attributes(&c, *out_mesh, mesh);
+	if (st == QAWS_STATUS_OK && *out_mesh && (qaws_mesh_3d_get_attribute_count(mesh) || (desc && desc->generate)))
+		st = swi_attributes(&c, *out_mesh, mesh, desc ? desc->generate : 0);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d_destroy(*out_mesh);

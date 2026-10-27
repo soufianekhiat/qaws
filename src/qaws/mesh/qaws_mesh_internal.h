@@ -13,6 +13,7 @@
 #include "../internal/qaws_internal_broadphase.h"
 #include "../internal/qaws_internal_ldlt.h"
 #include "../qaws_mesh_boolean.h"
+#include "../qaws_motion.h"
 
 /* qaws_mesh_boolean; one: edges inside flat regions turned only between pieces of one source face; out_turned (may be
    NULL, freed by the caller): per result face, 1 where it was turned over (qaws_internal_free; NULL on failure) */
@@ -317,6 +318,13 @@ typedef struct wt_cross
    from their first corner), weights on it and a rotation (9, NULL none); edges: out edges from points of one mesh edge take
    its values (else zeros) */
 qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* csrc, double const* cw, double const* cR, int edges);
+
+/* the generated attributes (qaws_sweep_desc.generate) onto out (qaws_mesh_sweep_generate.c): per out corner its time (ct), its
+   source triangle (of the mesh's nt) and weights */
+qaws_status swp_generate(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_motion const* motion, unsigned int flags, unsigned int nt,
+	unsigned int const* csrc, double const* cw, double const* ct);
+/* the time a rigid motion has turned by angle (radians, summed; 0 or 1 past its ends) */
+double swp_time_at_angle(qaws_motion const* m, double angle);
 
 /* a field to contour (wt_contour_field, qaws_mesh_offset.c): phi at n points (3 each), negative inside, and when grad is
    not NULL its gradient (3 each) */

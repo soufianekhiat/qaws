@@ -29,6 +29,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Generated sweep attributes: `qaws_sweep_desc.generate` ORs `qaws_sweep_generate` flags (`TIME`, `INDEX`, `ANGLE`,
+  `ORIENTATION`, `POSITION`, `VELOCITY`, `DISTANCE`, `SOURCE`), per corner from the time each place was swept and the
+  body's point that swept it, by slabs, spins and implicitly (tests 180, 184, figure 73).
 - `qaws_sweep_desc.strict`: slabs also halved until no edge twists by more than 4 tolerances over one, so an edge
   sliding along itself while turning passes the true sweep by the tolerance at most (a turned box: 0.64 tolerances where
   it was 1.28, on twice the slabs; test 180).
@@ -105,6 +108,9 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- Spins: the revolution's source points missed the profile's top and bottom heights (rounded to its integer grid, matched
+  within 1e-9) and fell back to the nearest vertex: attributes there came from the wrong point (0.059 off on a box's
+  inner rim); the angle behind kept within one turn.
 - Remeshing on a caller's reference keeps attribute seams as lines too: `qaws_mesh_reference_desc.seams` makes the
   reference's seams creases and remembers them (the remesh's own reference uses it); test 168 runs both references, the
   same result (no face across a seam).

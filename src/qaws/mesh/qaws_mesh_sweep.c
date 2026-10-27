@@ -684,7 +684,7 @@ done:
 }
 
 static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_mesh_3d_desc const* md,
-	unsigned int const* sof, unsigned int const* soc, unsigned int nv, double const* layer_t, unsigned int layers)
+	unsigned int const* sof, unsigned int const* soc, unsigned int nv, double const* layer_t, unsigned int layers, unsigned int generate)
 {
 	unsigned int na = qaws_mesh_3d_get_attribute_count(mesh), nf = qaws_mesh_3d_get_face_count(mesh), nc = qaws_mesh_3d_get_corner_count(mesh);
 	unsigned int nt = qaws_mesh_3d_get_triangle_count(mesh), a, i, j, k, *fv = NULL, *fs = NULL, *tf = NULL, *tc = NULL;
@@ -908,6 +908,72 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 		if (d.element == QAWS_MESH_VERTEX)
 			d.element = QAWS_MESH_CORNER;
 		st = qaws_mesh_3d_add_attribute(&id, *out, sv, &d);
+	}
+	if (st == QAWS_STATUS_OK && generate)
+	{
+		/* the generated ones: each soup corner at its layer's time, its source the mesh's corner it repeats, every corner of a
+		   soup face on one triangle (the one of its corners' holding most of its vertices; a vertex off it, of a flat group
+		   hulled as one, by its weights in that triangle's plane): interpolated across the face, the values stay its points */
+		size_t nsc = 3 * (size_t)md->face_count;
+		unsigned int* cs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), nsc + 1));
+		double* cw = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, nsc + 1));
+		double* ct = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), nsc + 1));
+		qaws_scalar* rx = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
+		unsigned int* mt = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + 1));
+		if (!cs || !cw || !ct || !rx || !mt)
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+		else
+		{
+			qaws_mesh_3d_get_positions(rx, mesh);
+			qaws_mesh_3d_get_triangles(mt, mesh);
+			for (i = 0; i < md->face_count; i++)
+			{
+				unsigned int best = soc[3 * (size_t)i] / 3, most = 0, q;
+				for (q = 0; q < 3; q++)
+				{
+					unsigned int tq = soc[3 * (size_t)i + q] / 3, held = 0;
+					for (k = 0; k < 3; k++)
+						for (j = 0; j < 3; j++)
+							held += mt[3 * (size_t)tq + j] == md->face_vertices[3 * (size_t)i + k] % nv;
+					if (held > most)
+					{
+						most = held;
+						best = tq;
+					}
+				}
+				for (k = 0; k < 3; k++)
+				{
+					size_t c = 3 * (size_t)i + k;
+					unsigned int v = md->face_vertices[c] % nv, layer = md->face_vertices[c] / nv;
+					cs[c] = best;
+					for (j = 0; j < 3 && mt[3 * (size_t)best + j] != v; j++)
+						;
+					if (j < 3)
+						for (q = 0; q < 3; q++)
+							cw[3 * c + q] = q == j;
+					else
+					{
+						/* (v's weights in the triangle's plane, unclamped: the flat group's other vertex) */
+						double a0[3], u[3], w[3], pp[3], d00 = 0, d01 = 0, d11 = 0, d20 = 0, d21 = 0, den;
+						for (q = 0; q < 3; q++)
+						{
+							a0[q] = (double)rx[3 * (size_t)mt[3 * (size_t)best] + q];
+							u[q] = (double)rx[3 * (size_t)mt[3 * (size_t)best + 1] + q] - a0[q];
+							w[q] = (double)rx[3 * (size_t)mt[3 * (size_t)best + 2] + q] - a0[q];
+							pp[q] = (double)rx[3 * (size_t)v + q] - a0[q];
+							d00 += u[q] * u[q]; d01 += u[q] * w[q]; d11 += w[q] * w[q]; d20 += pp[q] * u[q]; d21 += pp[q] * w[q];
+						}
+						den = d00 * d11 - d01 * d01;
+						cw[3 * c + 1] = den != 0 ? (d11 * d20 - d01 * d21) / den : 0;
+						cw[3 * c + 2] = den != 0 ? (d00 * d21 - d01 * d20) / den : 0;
+						cw[3 * c] = 1 - cw[3 * c + 1] - cw[3 * c + 2];
+					}
+					ct[c] = layer_t[layer < layers ? layer : layers - 1];
+				}
+			}
+			st = swp_generate(*out, mesh, motion, generate, nt, cs, cw, ct);
+		}
+		qaws_internal_free(cs); qaws_internal_free(cw); qaws_internal_free(ct); qaws_internal_free(rx); qaws_internal_free(mt);
 	}
 done:
 	if (st != QAWS_STATUS_OK)
@@ -1557,6 +1623,13 @@ static int swp_rv_sources(swp_rv_src** src, unsigned int* cap, double z0, double
 	return (int)n;
 }
 
+/* an angle behind, within one turn: [0, 2 pi) (the first pass) */
+static double swp_turn_behind(double a)
+{
+	a = fmod(a, 2 * 3.14159265358979323846);
+	return a < 0 ? a + 2 * 3.14159265358979323846 : a;
+}
+
 /* barycentric weights of x in the triangle a b c (3D, projected on its plane) */
 static void swp_rv_bary(double const* x, double const* a, double const* b, double const* c, double* w)
 {
@@ -1806,7 +1879,7 @@ done:
    attributes from the body's surface where the turn first brings it (the least angle behind each point: passes coincide,
    the first stands), directions turned by that angle after the motion's rotation at 0 (R0) */
 static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, double const* X, unsigned int nv, unsigned int const* t,
-	unsigned int nt, double const* o, double const* u, double const* R0, double tol, int symmetric_only)
+	unsigned int nt, double const* o, double const* u, double const* R0, double tol, int symmetric_only, qaws_motion const* motion, unsigned int generate)
 {
 	double e1[3], e2[3], l, ext = 0, tz, q, rmaxall = 0;
 	double *Z = NULL, *A = NULL, *Bc = NULL, *hs = NULL, *pts = NULL, *prof = NULL, *vx = NULL, *alpha = NULL, *wsrc = NULL;
@@ -2031,7 +2104,7 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 	{
 		double z = prof[2 * (size_t)i], r = prof[2 * (size_t)i + 1];
 		unsigned int nk = r > 0 ? N : 1, kk;
-		int ns = swp_rv_sources(&src, &capsrc, z, r, Z, A, Bc, t, nt, 1e-9 * ext, tol);
+		int ns = swp_rv_sources(&src, &capsrc, z, r, Z, A, Bc, t, nt, q, tol);   /* (heights within the profile's grid: it rounds them) */
 		if (ns < 0)
 			goto done;
 		ring[i] = nvo;
@@ -2102,7 +2175,7 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 				fsrc[nvo] = ff < nt ? ff : 0;
 				for (k = 0; k < 3; k++)
 					wsrc[3 * (size_t)nvo + k] = ff < nt ? (t[3 * (size_t)ff + k] == bv) : 1.0 / 3;
-				alpha[nvo] = th - atan2(Bc[bv], A[bv]);
+				alpha[nvo] = swp_turn_behind(th - atan2(Bc[bv], A[bv]));
 			}
 			else
 			{
@@ -2111,7 +2184,7 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 					x[k] = o[k] + z * u[k] + r * (cos(bth) * e1[k] + sin(bth) * e2[k]);
 				swp_rv_bary(x, X + 3 * (size_t)t[3 * (size_t)f], X + 3 * (size_t)t[3 * (size_t)f + 1], X + 3 * (size_t)t[3 * (size_t)f + 2], wsrc + 3 * (size_t)nvo);
 				fsrc[nvo] = f;
-				alpha[nvo] = th - bth;
+				alpha[nvo] = swp_turn_behind(th - bth);
 			}
 			nvo++;
 		}
@@ -2202,6 +2275,14 @@ static qaws_status swp_revolve(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, dou
 					cw[3 * (size_t)i + k] = wsrc[3 * (size_t)v + k];
 			}
 			st = swp_carry(*out, mesh, nt, cs, cw, cR, 1);
+			if (st == QAWS_STATUS_OK && generate)
+			{
+				/* (each corner's time: when the turn brought its source there, the angle behind it) */
+				double* ct = cR;
+				for (i = 0; i < 3 * nto; i++)
+					ct[i] = swp_time_at_angle(motion, alpha[tri[i]]);
+				st = swp_generate(*out, mesh, motion, generate, nt, cs, cw, ct);
+			}
 		}
 		qaws_internal_free(cs); qaws_internal_free(cw); qaws_internal_free(cR);
 	}
@@ -2242,7 +2323,7 @@ static qaws_status swp_spun(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_
 	o[2] = (double)s0.position.z;
 	for (k = 0; k < 9; k++)
 		R0[k] = (double)s0.rotation[k];
-	if ((st = swp_revolve(&rev, mesh, X, nv, t, nt, o, u, R0, tol, !slow && !(desc && desc->revolve_spins))) != QAWS_STATUS_OK)
+	if ((st = swp_revolve(&rev, mesh, X, nv, t, nt, o, u, R0, tol, !slow && !(desc && desc->revolve_spins), motion, desc ? desc->generate : 0)) != QAWS_STATUS_OK)
 		return st;
 	if ((st = qaws_mesh_3d_detect_features(rev, (qaws_scalar)(0.5 * swp_feature_angle(mesh)), 0, 0)) != QAWS_STATUS_OK)
 	{
@@ -2264,6 +2345,7 @@ static qaws_status swp_spun(qaws_mesh_3d** out, qaws_sweep_report* report, qaws_
 		else
 			memset(&d2, 0, sizeof d2);
 		d2.tolerance = (qaws_scalar)tol;
+		d2.generate = 0;   /* (the revolution's own: its first pass, not the drift's) */
 		st = qaws_mesh_3d_sweep(out, report, rev, drift, &d2);
 		if (report)
 			report->turns = (qaws_scalar)turns;
@@ -2519,7 +2601,7 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			qaws_mesh_3d* soup = NULL;
 			for (ns = 0; ns <= report->slabs; ns++)
 				times[ns] = ns < report->slabs ? times[2 * (size_t)ns] : times[2 * (size_t)ns - 1];   /* (each layer's time, in place) */
-			st = swp_soup(&soup, mesh, motion, &md, sof, soc, nv, times, report->slabs + 1);
+			st = swp_soup(&soup, mesh, motion, &md, sof, soc, nv, times, report->slabs + 1, desc ? desc->generate : 0);
 			if (st == QAWS_STATUS_OK)
 				st = cy_boolean(out, &report->boolean, (qaws_mesh_3d const* const*)&soup, 1, NULL, 0, QAWS_BOOLEAN_UNION, &id);
 			if (st == QAWS_STATUS_OK && *out)

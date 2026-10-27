@@ -7,6 +7,9 @@
  *     volumes within 2%;
  *   - a vertex motion (a box's top rising from 1 to 2): closed, volume 2 within 3%;
  *   - refusals: no mesh, a vertex motion of another count;
+ *   - generated attributes (qaws_sweep_desc.generate): the cube moved by (1, 1, 0) at a constant rate: velocity (1, 1, 0)
+ *     at every corner, distance sqrt 2 times the time, orientation the identity, and each corner its source point (its
+ *     source_face and source_uv on the cube) moved by (time, time, 0), within a cell;
  *   - attributes: the cube translated with its positions as a vertex attribute (each corner's value the source point: its
  *     z and x - y those of the corner, the translation along (1, 1, 0), within half a cell), each face's corners its side's
  *     number (a corner attribute: no value blended across the cube's edges, nine corners in ten their triangle's own side,
@@ -288,6 +291,84 @@ static void test_attributes(void)
 	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(ot);
 }
 
+/* a result corner's source point on the body (rest coordinates): face source_face's triangle, weights source_uv */
+static void si_source_point(qaws_mesh_3d const* body, unsigned int face, double const* uv, double* p)
+{
+	unsigned int t[3], k;
+	qaws_vec3 a, b, c;
+	qaws_mesh_3d_get_triangle(t, body, face);
+	a = qaws_mesh_3d_get_vertex(body, t[0]);
+	b = qaws_mesh_3d_get_vertex(body, t[1]);
+	c = qaws_mesh_3d_get_vertex(body, t[2]);
+	for (k = 0; k < 3; k++)
+	{
+		double pa = k == 0 ? a.x : k == 1 ? a.y : a.z, pb = k == 0 ? b.x : k == 1 ? b.y : b.z, pc = k == 0 ? c.x : k == 1 ? c.y : c.z;
+		p[k] = (1 - uv[0] - uv[1]) * pa + uv[0] * pb + uv[1] * pc;
+	}
+}
+
+/* attribute name's values per corner of o (n each), or NULL */
+static qaws_scalar* si_corner_values(qaws_mesh_3d const* o, char const* name, unsigned int n)
+{
+	unsigned int id;
+	qaws_scalar* v;
+	if (qaws_mesh_3d_find_attribute(&id, o, name) != QAWS_STATUS_OK)
+		return NULL;
+	v = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n * (qaws_mesh_3d_get_corner_count(o) + 1));
+	qaws_mesh_3d_get_attribute(v, o, id);
+	return v;
+}
+
+static void test_generate(void)
+{
+	qaws_mesh_3d *c = si_box(0, 1, 0, 1, 0, 1), *o = NULL;
+	qaws_motion* m = NULL;
+	qaws_motion_pose s, e;
+	qaws_sweep_desc d;
+	qaws_scalar *tv = NULL, *vv = NULL, *dv = NULL, *qv = NULL, *fv = NULL, *uv = NULL;
+	unsigned int i, k, nt = 0;
+	double wv = 0, wd = 0, wq = 0, wp = 0, cell = 3.0 / 24;
+	char msg[300];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	e.position.x = e.position.y = 1;
+	s.velocity = e.velocity = e.position;
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	memset(&d, 0, sizeof d);
+	d.resolution = 24;
+	d.generate = QAWS_SWEEP_GENERATE_TIME | QAWS_SWEEP_GENERATE_VELOCITY | QAWS_SWEEP_GENERATE_DISTANCE | QAWS_SWEEP_GENERATE_ORIENTATION | QAWS_SWEEP_GENERATE_SOURCE;
+	qaws_mesh_3d_sweep_implicit(&o, NULL, c, m, &d);
+	if (o)
+	{
+		nt = qaws_mesh_3d_get_triangle_count(o);
+		tv = si_corner_values(o, "time", 1); vv = si_corner_values(o, "velocity", 3); dv = si_corner_values(o, "distance", 1);
+		qv = si_corner_values(o, "orientation", 4); fv = si_corner_values(o, "source_face", 1); uv = si_corner_values(o, "source_uv", 2);
+	}
+	for (i = 0; tv && vv && dv && qv && fv && uv && i < 3 * nt; i++)
+	{
+		unsigned int t3[3];
+		double sp[3], u2[2] = { uv[2 * i], uv[2 * i + 1] }, t = (double)tv[i];
+		qaws_vec3 p;
+		qaws_mesh_3d_get_triangle(t3, o, i / 3);
+		p = qaws_mesh_3d_get_vertex(o, t3[i % 3]);
+		wv = fmax(wv, fabs((double)vv[3 * i] - 1) + fabs((double)vv[3 * i + 1] - 1) + fabs((double)vv[3 * i + 2]));
+		wd = fmax(wd, fabs((double)dv[i] - sqrt(2.0) * t));
+		wq = fmax(wq, fabs((double)qv[4 * i] - 1) + fabs((double)qv[4 * i + 1]) + fabs((double)qv[4 * i + 2]) + fabs((double)qv[4 * i + 3]));
+		si_source_point(c, (unsigned int)lround((double)fv[i]), u2, sp);
+		for (k = 0; k < 3; k++)
+			sp[k] += k < 2 ? t : 0;
+		wp = fmax(wp, sqrt(((double)p.x - sp[0]) * ((double)p.x - sp[0]) + ((double)p.y - sp[1]) * ((double)p.y - sp[1]) + ((double)p.z - sp[2]) * ((double)p.z - sp[2])));
+	}
+	sprintf(msg, "generated: velocity off (1, 1, 0) by %.1e, distance off sqrt 2 t by %.1e, orientation off the identity by %.1e, corners off their moved source by %.4f (cell %.4f)",
+		wv, wd, wq, wp, cell);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && tv && vv && dv && qv && fv && uv && wv < 1e-9 && wd < 1e-3 && wq < 1e-9 && wp < cell, msg);
+	free(tv); free(vv); free(dv); free(qv); free(fv); free(uv);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o);
+}
+
 int test_184_sweep_implicit_main(void)
 {
 	g_pass = 0;
@@ -296,6 +377,7 @@ int test_184_sweep_implicit_main(void)
 	test_rigid();
 	test_vertex_motion();
 	test_attributes();
+	test_generate();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

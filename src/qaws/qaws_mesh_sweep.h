@@ -99,6 +99,34 @@
  * itself (an envelope) traces no feature.
  */
 
+/* Attributes a sweep can add (qaws_sweep_desc.generate, ORed), per corner of the result, from the time its place was swept
+   (the first touch: the implicit sweep's least time, the revolution's first pass) and the body's point that swept it:
+     TIME         "time" (LINEAR): that time in [0, 1];
+     INDEX        "index" (NEAREST): the whole turns the body had made by then (a spin's pass);
+     ANGLE        "angle" (LINEAR): the angle it had turned by then (radians, summed over turns);
+     ORIENTATION  "orientation" (QUATERNION, w x y z): its rotation then;
+     POSITION     "pose_position" (LINEAR, 3): its translation then;
+     VELOCITY     "velocity" (VECTOR, 3): the point's velocity then;
+     DISTANCE     "distance" (LINEAR): the length its origin had travelled by then;
+     SOURCE       "source_face" (NEAREST): the body's face of that point, and "source_uv" (LINEAR, 2): the point's weights on
+                  the face's triangle's second and third corners (any of the body's values can be looked up from them).
+   A vertex motion has no turn, pose or origin: INDEX, ANGLE and DISTANCE 0, ORIENTATION the identity, POSITION 0 (its
+   VELOCITY the point's). A generated name replaces an attribute of that name on the body. */
+#ifndef QAWS_ENUM_QAWS_SWEEP_GENERATE
+#define QAWS_ENUM_QAWS_SWEEP_GENERATE
+typedef enum qaws_sweep_generate
+{
+	QAWS_SWEEP_GENERATE_TIME = 1,
+	QAWS_SWEEP_GENERATE_INDEX = 2,
+	QAWS_SWEEP_GENERATE_ANGLE = 4,
+	QAWS_SWEEP_GENERATE_ORIENTATION = 8,
+	QAWS_SWEEP_GENERATE_POSITION = 16,
+	QAWS_SWEEP_GENERATE_VELOCITY = 32,
+	QAWS_SWEEP_GENERATE_DISTANCE = 64,
+	QAWS_SWEEP_GENERATE_SOURCE = 128
+} qaws_sweep_generate;
+#endif
+
 typedef struct qaws_sweep_desc
 {
 	qaws_scalar tolerance;              /* the chords' largest deviation; 0: 1e-3 of the mesh's box diagonal */
@@ -112,6 +140,7 @@ typedef struct qaws_sweep_desc
 	                                       symmetric about its axis (a one-flute cutter: the result may pass the true sweep by up
 	                                       to the report's spin_drift); 0: such a spin is swept by slabs (slow) */
 	unsigned int resolution;            /* qaws_mesh_3d_sweep_implicit: cells along the result's box's longest side; 0: 64 */
+	unsigned int generate;              /* qaws_sweep_generate flags ORed: the attributes to add */
 	int strict;                         /* nonzero: slabs also halved until no edge twists by more than 4 tolerances over one (an
 	                                       edge sliding along itself while turning: its hull's notch, a quarter of the twist,
 	                                       within the tolerance), so the result passes the true sweep by about the tolerance

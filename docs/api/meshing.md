@@ -1782,6 +1782,21 @@ qaws_mesh_3d_sweep(&out, &r, mesh, m, &d);        /* the region the closed mesh 
 
 Figure 60 (key Y) shows a cube along a curve while turning, a ball's tube along a Hermite curve, a box turned a quarter, and a block carved by a ball tool along a curve and a straight slot (two moves).
 
+**Generated attributes.** `qaws_sweep_desc.generate` ORs `qaws_sweep_generate` flags; each adds named corner attributes from the time each place was swept (the first touch) and the body's point that swept it, for the slab sweep, spins and the implicit sweep alike:
+
+| Flag | Attribute | Value |
+|---|---|---|
+| `TIME` | `time` (LINEAR) | that time in [0, 1] |
+| `INDEX` | `index` (NEAREST) | the whole turns made by then (a spin's pass) |
+| `ANGLE` | `angle` (LINEAR) | the angle turned by then, radians, summed over turns |
+| `ORIENTATION` | `orientation` (QUATERNION) | the body's rotation then |
+| `POSITION` | `pose_position` (LINEAR, 3) | its translation then |
+| `VELOCITY` | `velocity` (VECTOR) | the swept point's velocity then |
+| `DISTANCE` | `distance` (LINEAR) | the length the body's origin had travelled |
+| `SOURCE` | `source_face` (NEAREST), `source_uv` (LINEAR, 2) | the body's face of that point and its weights on the face's triangle's second and third corners (by slabs, a point of a flat group hulled as one may weigh outside [0, 1]: still that point) |
+
+The angle and the distance come from the motion's turning and travelling speeds integrated over [0, 1] (2048 steps), so a pose motion's uneven rate is followed. A vertex motion has no pose: `INDEX`, `ANGLE`, `DISTANCE` and `POSITION` are 0 and `ORIENTATION` the identity; `VELOCITY` is the point's. Tests 180 and 184 check them against the geometry: each corner is its source point moved by the pose at its time (exactly on a spin's revolution, within 0.011 at tolerance 0.01 by slabs, within a cell implicitly), the orientation the turn by its angle, a constant velocity and `distance` = `time` × speed for a translation. Figure 73 (key `(`) colours sweeps by `time`, `angle` and `index`, and textures one through `source_face` and `source_uv`.
+
 **Attributes.** A sweep carries the mesh's attributes as the Booleans do (vertex ones come out per corner):
 - each layer of the soup repeats the mesh's values;
 - a wall takes, along its edge, the values of the front face's corners there; a wall lying in the plane of the face across that edge (a face sliding along itself: a cube's top moved sideways or turned in its plane) takes that face's values at the edge instead, its leading edge's as it passed (as the implicit sweep's first touch), where the side faces' hulls' top walls painted it with their colours before (test 181: all 117 upward faces of a cube swept along a curve while turning carry its top's values, 2 before);

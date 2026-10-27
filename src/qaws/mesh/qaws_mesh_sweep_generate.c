@@ -1,0 +1,273 @@
+/*
+ * Attributes a sweep generates (qaws_sweep_desc.generate): per result corner,
+ * from the time its place was swept and the body's point that swept it.
+ */
+
+#include "../internal/qaws_internal_memory.h"
+#include "../qaws_mesh_sweep.h"
+#include "qaws_mesh_internal.h"
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#define SG_STEPS 2048u   /* the motion's turned angle and travelled distance tabulated over [0, 1] */
+
+/* the turned angle and the travelled distance of a rigid motion at SG_STEPS + 1 times (trapezoids of the speeds) */
+static qaws_status sg_table(qaws_motion const* m, double* ang, double* dist)
+{
+	unsigned int i;
+	double wp = 0, vp = 0;
+	ang[0] = dist[0] = 0;
+	for (i = 0; i <= SG_STEPS; i++)
+	{
+		qaws_motion_state s;
+		double w, v;
+		qaws_status st = qaws_motion_evaluate(&s, m, (qaws_scalar)((double)i / SG_STEPS));
+		if (st != QAWS_STATUS_OK)
+			return st;
+		w = sqrt((double)s.angular_velocity.x * s.angular_velocity.x + (double)s.angular_velocity.y * s.angular_velocity.y + (double)s.angular_velocity.z * s.angular_velocity.z);
+		v = sqrt((double)s.velocity.x * s.velocity.x + (double)s.velocity.y * s.velocity.y + (double)s.velocity.z * s.velocity.z);
+		if (i)
+		{
+			ang[i] = ang[i - 1] + 0.5 * (w + wp) / SG_STEPS;
+			dist[i] = dist[i - 1] + 0.5 * (v + vp) / SG_STEPS;
+		}
+		wp = w;
+		vp = v;
+	}
+	return QAWS_STATUS_OK;
+}
+
+static double sg_at(double const* tab, double t)
+{
+	double x = fmin(fmax(t, 0), 1) * SG_STEPS;
+	unsigned int i = (unsigned int)x;
+	if (i >= SG_STEPS)
+		return tab[SG_STEPS];
+	return tab[i] + (x - i) * (tab[i + 1] - tab[i]);
+}
+
+double swp_time_at_angle(qaws_motion const* m, double angle)
+{
+	double* ang = (double*)qaws_internal_scratch_malloc(sizeof(double) * 2 * (SG_STEPS + 1));
+	double t = 0;
+	unsigned int lo = 0, hi = SG_STEPS;
+	if (!ang || sg_table(m, ang, ang + SG_STEPS + 1) != QAWS_STATUS_OK || !(ang[SG_STEPS] > 0))
+	{
+		qaws_internal_free(ang);
+		return 0;
+	}
+	if (angle >= ang[SG_STEPS])
+		t = 1;
+	else if (angle > 0)
+	{
+		while (hi - lo > 1)
+		{
+			unsigned int mid = (lo + hi) / 2;
+			if (ang[mid] <= angle)
+				lo = mid;
+			else
+				hi = mid;
+		}
+		t = (lo + (ang[hi] > ang[lo] ? (angle - ang[lo]) / (ang[hi] - ang[lo]) : 0)) / SG_STEPS;
+	}
+	qaws_internal_free(ang);
+	return t;
+}
+
+/* a rotation's quaternion (w x y z, w not negative) */
+static void sg_quat(double const* R, double* q)
+{
+	double tr = R[0] + R[4] + R[8], s;
+	unsigned int k;
+	if (tr > 0)
+	{
+		s = 2 * sqrt(tr + 1);
+		q[0] = s / 4; q[1] = (R[7] - R[5]) / s; q[2] = (R[2] - R[6]) / s; q[3] = (R[3] - R[1]) / s;
+	}
+	else if (R[0] > R[4] && R[0] > R[8])
+	{
+		s = 2 * sqrt(1 + R[0] - R[4] - R[8]);
+		q[0] = (R[7] - R[5]) / s; q[1] = s / 4; q[2] = (R[1] + R[3]) / s; q[3] = (R[2] + R[6]) / s;
+	}
+	else if (R[4] > R[8])
+	{
+		s = 2 * sqrt(1 + R[4] - R[0] - R[8]);
+		q[0] = (R[2] - R[6]) / s; q[1] = (R[1] + R[3]) / s; q[2] = s / 4; q[3] = (R[5] + R[7]) / s;
+	}
+	else
+	{
+		s = 2 * sqrt(1 + R[8] - R[0] - R[4]);
+		q[0] = (R[3] - R[1]) / s; q[1] = (R[2] + R[6]) / s; q[2] = (R[5] + R[7]) / s; q[3] = s / 4;
+	}
+	if (q[0] < 0)
+		for (k = 0; k < 4; k++)
+			q[k] = -q[k];
+}
+
+typedef struct sg_attr
+{
+	unsigned int flag;
+	char const* name;
+	unsigned int n;
+	qaws_attribute_rule rule;
+} sg_attr;
+
+static sg_attr const sg_list[] = {
+	{ QAWS_SWEEP_GENERATE_TIME, "time", 1, QAWS_ATTRIBUTE_LINEAR },
+	{ QAWS_SWEEP_GENERATE_INDEX, "index", 1, QAWS_ATTRIBUTE_NEAREST },
+	{ QAWS_SWEEP_GENERATE_ANGLE, "angle", 1, QAWS_ATTRIBUTE_LINEAR },
+	{ QAWS_SWEEP_GENERATE_ORIENTATION, "orientation", 4, QAWS_ATTRIBUTE_QUATERNION },
+	{ QAWS_SWEEP_GENERATE_POSITION, "pose_position", 3, QAWS_ATTRIBUTE_LINEAR },
+	{ QAWS_SWEEP_GENERATE_VELOCITY, "velocity", 3, QAWS_ATTRIBUTE_VECTOR },
+	{ QAWS_SWEEP_GENERATE_DISTANCE, "distance", 1, QAWS_ATTRIBUTE_LINEAR },
+	{ QAWS_SWEEP_GENERATE_SOURCE, "source_face", 1, QAWS_ATTRIBUTE_NEAREST },
+	{ QAWS_SWEEP_GENERATE_SOURCE, "source_uv", 2, QAWS_ATTRIBUTE_LINEAR }
+};
+
+static int sg_cmp_time(void const* a, void const* b, void const* ctx)
+{
+	double const* ct = (double const*)ctx;
+	double x = ct[*(unsigned int const*)a], y = ct[*(unsigned int const*)b];
+	return x < y ? -1 : x > y;
+}
+
+/* (qsort without a context: the times through a file-scope pointer would not be thread-safe, so an insertion-merge sort here) */
+static void sg_sort(unsigned int* idx, unsigned int* tmp, unsigned int n, double const* ct)
+{
+	unsigned int w, i;
+	for (i = 0; i < n; i++)
+		idx[i] = i;
+	for (w = 1; w < n; w *= 2)
+	{
+		for (i = 0; i < n; i += 2 * w)
+		{
+			unsigned int a = i, b = i + w < n ? i + w : n, ea = b, eb = i + 2 * w < n ? i + 2 * w : n, k = i;
+			while (a < ea || b < eb)
+				tmp[k++] = b >= eb || (a < ea && sg_cmp_time(&idx[a], &idx[b], ct) <= 0) ? idx[a++] : idx[b++];
+		}
+		memcpy(idx, tmp, sizeof(unsigned int) * n);
+	}
+}
+
+qaws_status swp_generate(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_motion const* motion, unsigned int flags, unsigned int nt,
+	unsigned int const* csrc, double const* cw, double const* ct)
+{
+	unsigned int nto = qaws_mesh_3d_get_triangle_count(out), nc = 3 * nto, nv = qaws_mesh_3d_get_vertex_count(mesh), nf = qaws_mesh_3d_get_face_count(mesh), a, i, k;
+	int pv = qaws_motion_is_per_vertex(motion);
+	double *tab = NULL, *val = NULL;
+	unsigned int *tri = NULL, *tf = NULL, *fs = NULL, *fv = NULL, *idx = NULL, *tmp = NULL;
+	qaws_scalar *x = NULL, *vel = NULL, *pos = NULL, *sv = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	double last = -1;
+	if (!flags)
+		return QAWS_STATUS_OK;
+	tab = (double*)qaws_internal_scratch_malloc(sizeof(double) * 2 * (SG_STEPS + 1));
+	val = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 16, (size_t)nc + 1));
+	tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nt + 1));
+	tf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nt + 1));
+	fs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	fv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)qaws_mesh_3d_get_corner_count(mesh) + 1));
+	idx = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)nc + 1));
+	x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
+	vel = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
+	pos = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
+	sv = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 4, (size_t)nc + 1));
+	if (!tab || !val || !tri || !tf || !fs || !fv || !idx || !x || !vel || !pos || !sv)
+		goto done;
+	tmp = idx + nc;
+	qaws_mesh_3d_get_triangles(tri, mesh);
+	qaws_mesh_3d_get_positions(x, mesh);
+	qaws_mesh_3d_get_faces(fv, fs, mesh);
+	/* (each triangle's face: faces fanned from their first corner) */
+	for (i = 0, k = 0; i < nf; i++)
+	{
+		unsigned int j;
+		for (j = 0; j + 2 < fs[i] && k < nt; j++)
+			tf[k++] = i;
+	}
+	if (!pv && (st = sg_table(motion, tab, tab + SG_STEPS + 1)) != QAWS_STATUS_OK)
+		goto done;
+	/* every value per corner, the corners in time order (a vertex motion's velocities evaluated once per time) */
+	sg_sort(idx, tmp, nc, ct);
+	for (i = 0; i < nc; i++)
+	{
+		unsigned int c = idx[i], f = csrc[c];
+		double t = ct[c], p[3] = { 0, 0, 0 }, R[9], T[3] = { 0, 0, 0 }, v[3] = { 0, 0, 0 }, q[4] = { 1, 0, 0, 0 }, angle = 0, d = 0;
+		double* o = val + 16 * (size_t)c;
+		for (k = 0; k < 9; k++)
+			R[k] = k % 4 == 0;
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int j;
+			for (j = 0; j < 3; j++)
+				p[j] += cw[3 * (size_t)c + k] * (double)x[3 * (size_t)tri[3 * (size_t)f + k] + j];
+		}
+		if (pv)
+		{
+			if (t != last && (st = qaws_motion_transform_points(pos, vel, motion, (qaws_scalar)t, NULL, nv)) != QAWS_STATUS_OK)
+				goto done;
+			last = t;
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int j;
+				for (j = 0; j < 3; j++)
+					v[j] += cw[3 * (size_t)c + k] * (double)vel[3 * (size_t)tri[3 * (size_t)f + k] + j];
+			}
+		}
+		else
+		{
+			qaws_motion_state s;
+			qaws_scalar pp[3] = { (qaws_scalar)p[0], (qaws_scalar)p[1], (qaws_scalar)p[2] }, wp[3], wv[3];
+			if ((st = qaws_motion_evaluate(&s, motion, (qaws_scalar)t)) != QAWS_STATUS_OK ||
+				(st = qaws_motion_transform_points(wp, wv, motion, (qaws_scalar)t, pp, 1)) != QAWS_STATUS_OK)
+				goto done;
+			for (k = 0; k < 9; k++)
+				R[k] = (double)s.rotation[k];
+			T[0] = s.position.x; T[1] = s.position.y; T[2] = s.position.z;
+			for (k = 0; k < 3; k++)
+				v[k] = (double)wv[k];
+			sg_quat(R, q);
+			angle = sg_at(tab, t);
+			d = sg_at(tab + SG_STEPS + 1, t);
+		}
+		o[0] = t;
+		o[1] = floor(angle / (2 * 3.14159265358979323846) + 1e-9);
+		o[2] = angle;
+		for (k = 0; k < 4; k++)
+			o[3 + k] = q[k];
+		for (k = 0; k < 3; k++)
+		{
+			o[7 + k] = T[k];
+			o[10 + k] = v[k];
+		}
+		o[13] = d;
+		o[14] = tf[f];
+		o[15] = 0;   /* (unused) */
+	}
+	st = QAWS_STATUS_OK;
+	for (a = 0; st == QAWS_STATUS_OK && a < sizeof sg_list / sizeof *sg_list; a++)
+	{
+		static unsigned int const at[9] = { 0, 1, 2, 3, 7, 10, 13, 14, 0 };
+		qaws_attribute_desc d;
+		unsigned int id, j;
+		if (!(flags & sg_list[a].flag))
+			continue;
+		for (i = 0; i < nc; i++)
+			for (j = 0; j < sg_list[a].n; j++)
+				/* (source_uv: the weights of the triangle's second and third corners) */
+				sv[(size_t)sg_list[a].n * i + j] = (qaws_scalar)(a == 8 ? cw[3 * (size_t)i + 1 + j] : val[16 * (size_t)i + at[a] + j]);
+		memset(&d, 0, sizeof d);
+		d.name = sg_list[a].name;
+		d.element = QAWS_MESH_CORNER;
+		d.components = sg_list[a].n;
+		d.rule = sg_list[a].rule;
+		if (qaws_mesh_3d_find_attribute(&id, out, d.name) == QAWS_STATUS_OK)
+			qaws_mesh_3d_remove_attribute(out, id);   /* (a generated one given back: the new values) */
+		st = qaws_mesh_3d_add_attribute(&id, out, sv, &d);
+	}
+done:
+	qaws_internal_free(tab); qaws_internal_free(val); qaws_internal_free(tri); qaws_internal_free(tf); qaws_internal_free(fs); qaws_internal_free(fv); qaws_internal_free(idx);
+	qaws_internal_free(x); qaws_internal_free(vel); qaws_internal_free(pos); qaws_internal_free(sv);
+	return st;
+}
