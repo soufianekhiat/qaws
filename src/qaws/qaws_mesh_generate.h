@@ -54,8 +54,18 @@
  *           its face; isotropic in space whatever the parametrization.
  *           Triangles only (UNSUPPORTED_OPERATION for quads); a shell's
  *           faces untrimmed.
- *   RESTRICTED_DELAUNAY  reserved (UNSUPPORTED_OPERATION today):
- *           Delaunay guarantees.
+ *   RESTRICTED_DELAUNAY  PARAMETRIC's mesh made Delaunay (edge flips,
+ *           never across a feature or border edge) and refined as Chew and
+ *           Ruppert do: a triangle with an angle under 30 degrees (but
+ *           between two feature edges), a circumradius over 0.8 of the size
+ *           or its centroid off the face by more than the chord tolerance
+ *           gets its circumcentre, snapped onto its face; a point
+ *           encroaching on a feature or border edge splits that edge at its
+ *           middle on its curve instead. On return every edge off the
+ *           features is Delaunay (its facing angles sum to pi at most) and
+ *           every angle is at least 30 degrees but the input's between
+ *           feature edges (at most 8 times the start's vertices added).
+ *           Triangles only; untrimmed faces.
  *
  * Sizes: a uniform target length, or adaptive by tolerances (the chord and
  * angle tolerances of qaws_curvature_size_desc, clamped and graded) read

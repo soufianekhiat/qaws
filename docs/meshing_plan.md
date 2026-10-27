@@ -342,7 +342,9 @@ cheapest and most reused first:
 3. **Generation:** STRUCTURED done 2026-10-27 (mg_structured: grids per untrimmed face, sides by arc length, counts by
    classes across shared edges, per-direction doubling to the tolerances; test 126, figure 78); PARAMETRIC done 2026-10-27 (mg_parametric: sides
    by their own curvature, a fan start remeshed by LOCAL in (u, v) with the first fundamental form as a metric sampled
-   on a 64 x 64 reference grid, boundary pinned; figure 78 second row); RESTRICTED_DELAUNAY next.
+   on a 64 x 64 reference grid, boundary pinned; figure 78 second row); RESTRICTED_DELAUNAY done 2026-10-27 (mg_delaunay: Lawson
+   flips, Chew/Ruppert circumcentre insertion snapped on the faces, encroached feature edges split on their curves; 30
+   degrees, Delaunay off the features; test 126, figure 78). Generation complete.
 4. **Tetrahedra:** ENVELOPE (fTetWild-style), STUFFING (isosurface stuffing).
 5. **Hexahedra:** an octree.
 

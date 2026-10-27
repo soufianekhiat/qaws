@@ -20,7 +20,11 @@
  *     torus and the box shell closed, every vertex on its face exactly, the
  *     edges near the target in space, angles fair; the patch to a chord
  *     tolerance, finer where it bends;
- *   - refusals: RESTRICTED_DELAUNAY (reserved), PARAMETRIC in quads, no
+ *   - RESTRICTED_DELAUNAY: the torus, the box shell and the patch to a chord
+ *     tolerance: closed (but the patch), every vertex on its face, no edge
+ *     off the features facing angles summing past pi (Delaunay), every
+ *     angle at least 30 degrees but between two feature edges (Chew);
+ *   - refusals: RESTRICTED_DELAUNAY and PARAMETRIC in quads, no
  *     description, a negative length.
  *
  * By default the torus at 0.4 and the box at 0.25 (written at 0.25 and
@@ -551,6 +555,125 @@ static void test_parametric(void)
 	qaws_surface_destroy(patch);
 }
 
+/* RESTRICTED_DELAUNAY's checks: the edges off the features whose facing angles sum past pi, the smallest angle not
+   between two feature edges */
+static void tg_delaunay_check(qaws_mesh_3d const* m, unsigned int* bad_edges, double* min_angle)
+{
+	unsigned int nt = qaws_mesh_3d_get_triangle_count(m), ne = qaws_mesh_3d_get_feature_edge_count(m), i, j, k, *t, *fe;
+	unsigned long long* key;
+	double* x;
+	qaws_scalar* p;
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m);
+	t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1));
+	fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (ne + 1));
+	key = (unsigned long long*)malloc(sizeof(unsigned long long) * 3 * (nt + 1));
+	x = (double*)malloc(sizeof(double) * 3 * (nv + 1));
+	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+	qaws_mesh_3d_get_triangles(t, m);
+	qaws_mesh_3d_get_feature_edges(fe, m);
+	qaws_mesh_3d_get_positions(p, m);
+	for (i = 0; i < 3 * nv; i++)
+		x[i] = (double)p[i];
+	*bad_edges = 0;
+	*min_angle = 180;
+	/* (each triangle's corners' angles; each edge's facing angle, keyed by its sorted ends) */
+	for (i = 0; i < nt; i++)
+		for (k = 0; k < 3; k++)
+		{
+			unsigned int a = t[3 * i + k], b = t[3 * i + (k + 1) % 3], c = t[3 * i + (k + 2) % 3], lo = a < b ? a : b, hi = a < b ? b : a, fa = 0, fb = 0;
+			double u[3], w[3], ang;
+			for (j = 0; j < 3; j++)
+			{
+				u[j] = x[3 * a + j] - x[3 * c + j];
+				w[j] = x[3 * b + j] - x[3 * c + j];
+			}
+			ang = acos(fmax(-1, fmin(1, (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / sqrt((u[0] * u[0] + u[1] * u[1] + u[2] * u[2]) * (w[0] * w[0] + w[1] * w[1] + w[2] * w[2])))));
+			/* (the angle at c is between edges c-a and c-b: kept off the bound when both are features) */
+			for (j = 0; j < ne; j++)
+			{
+				fa |= (fe[2 * j] == c && fe[2 * j + 1] == a) || (fe[2 * j] == a && fe[2 * j + 1] == c);
+				fb |= (fe[2 * j] == c && fe[2 * j + 1] == b) || (fe[2 * j] == b && fe[2 * j + 1] == c);
+			}
+			if (!(fa && fb))
+				*min_angle = fmin(*min_angle, ang * 180 / 3.14159265358979);
+			key[3 * i + k] = ((unsigned long long)lo << 32 | hi);
+			(void)ang;
+		}
+	for (i = 0; i < 3 * nt; i++)
+		for (j = i + 1; j < 3 * nt; j++)
+			if (key[i] == key[j])
+			{
+				unsigned int a = (unsigned int)(key[i] >> 32), b = (unsigned int)(key[i] & 0xffffffffu), q, feature = 0;
+				double s = 0;
+				unsigned int sides[2], z;
+				sides[0] = i;
+				sides[1] = j;
+				for (q = 0; q < ne; q++)
+					feature |= (fe[2 * q] == a && fe[2 * q + 1] == b) || (fe[2 * q] == b && fe[2 * q + 1] == a);
+				if (feature)
+					break;
+				for (z = 0; z < 2; z++)
+				{
+					unsigned int tri = sides[z] / 3, kk = sides[z] % 3, c = t[3 * tri + (kk + 2) % 3];
+					double u[3], w[3];
+					for (q = 0; q < 3; q++)
+					{
+						u[q] = x[3 * a + q] - x[3 * c + q];
+						w[q] = x[3 * b + q] - x[3 * c + q];
+					}
+					s += acos(fmax(-1, fmin(1, (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / sqrt((u[0] * u[0] + u[1] * u[1] + u[2] * u[2]) * (w[0] * w[0] + w[1] * w[1] + w[2] * w[2])))));
+				}
+				*bad_edges += s > 3.14159265358979 + 1e-9;
+				break;
+			}
+	free(t); free(fe); free(key); free(x); free(p);
+}
+
+static void test_restricted_delaunay(void)
+{
+	static double const h[3] = { 1, 0.7, 0.5 };
+	qaws_surface *torus = tg_torus(2, 0.7), *patch = tg_patch(), *box[6];
+	qaws_shell_atlas* atlas = NULL;
+	unsigned int i, bad;
+	double amin, err;
+	char msg[400];
+	tg_box(box, h);
+	qaws_shell_atlas_create(&atlas, (qaws_surface const* const*)box, 6, 0);
+	for (i = 0; i < 3; i++)
+	{
+		qaws_generate_desc d;
+		qaws_mesh_3d* m = NULL;
+		tg_mesh t;
+		char const* name = i == 0 ? "torus" : i == 1 ? "box shell" : "patch to a chord of 0.005";
+		memset(&d, 0, sizeof d);
+		d.method = QAWS_GENERATE_RESTRICTED_DELAUNAY;
+		d.target_length = (qaws_scalar)(i == 0 ? 0.3 : i == 1 ? 0.25 : 0);
+		d.chord_tolerance = (qaws_scalar)(i == 2 ? 0.005 : 0);
+		d.min_length = (qaws_scalar)(i == 2 ? 0.02 : 0);
+		d.max_length = (qaws_scalar)(i == 2 ? 0.3 : 0);
+		if ((i == 1 ? qaws_mesh_generate_shell(&m, NULL, atlas, &d) : qaws_mesh_generate_surface(&m, NULL, i ? patch : torus, &d)) != QAWS_STATUS_OK || !m)
+		{
+			sprintf(msg, "RESTRICTED_DELAUNAY %s: generated", name);
+			TEST_ASSERT(0, msg);
+			continue;
+		}
+		tg_read(m, &t);
+		err = tg_foot_error(&t, i == 1 ? NULL : i ? patch : torus, i == 1 ? atlas : NULL);
+		tg_delaunay_check(m, &bad, &amin);
+		sprintf(msg, "RESTRICTED_DELAUNAY %s: %u triangles, valid %d, closed %d, footpoints %.2e, %u edges not Delaunay, smallest angle %.2f",
+			name, t.nf, qaws_mesh_3d_validate(m) == QAWS_STATUS_OK, t.top.closed, err, bad, amin);
+		printf("  %s\n", msg);
+		TEST_ASSERT(qaws_mesh_3d_validate(m) == QAWS_STATUS_OK && (i == 2 || t.top.closed) && err < TEST_BOUND(1e-9, 32) && bad == 0 && amin >= 30 - 1e-6, msg);
+		tg_free(&t);
+		qaws_mesh_3d_destroy(m);
+	}
+	qaws_shell_atlas_destroy(atlas);
+	for (i = 0; i < 6; i++)
+		qaws_surface_destroy(box[i]);
+	qaws_surface_destroy(torus);
+	qaws_surface_destroy(patch);
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* s = tg_patch();
@@ -560,16 +683,16 @@ static void test_refusals(void)
 	char msg[200];
 	memset(&d, 0, sizeof d);
 	d.method = QAWS_GENERATE_RESTRICTED_DELAUNAY;
+	d.elements = QAWS_ELEMENTS_QUADS;
 	s1 = qaws_mesh_generate_surface(&out, NULL, s, &d);
 	d.method = QAWS_GENERATE_PARAMETRIC;
-	d.elements = QAWS_ELEMENTS_QUADS;
 	s4 = qaws_mesh_generate_surface(&out, NULL, s, &d);
 	d.elements = QAWS_ELEMENTS_TRIANGLES;
 	s2 = qaws_mesh_generate_surface(&out, NULL, s, NULL);
 	d.method = QAWS_GENERATE_REMESH;
 	d.target_length = (qaws_scalar)-1;
 	s3 = qaws_mesh_generate_surface(&out, NULL, s, &d);
-	sprintf(msg, "refusals: RESTRICTED_DELAUNAY %s, PARAMETRIC in quads %s, no description %s, a negative length %s", qaws_status_to_string(s1),
+	sprintf(msg, "refusals: RESTRICTED_DELAUNAY in quads %s, PARAMETRIC in quads %s, no description %s, a negative length %s", qaws_status_to_string(s1),
 		qaws_status_to_string(s4), qaws_status_to_string(s2),
 		qaws_status_to_string(s3));
 	TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && s4 == QAWS_STATUS_UNSUPPORTED_OPERATION && s2 == QAWS_STATUS_INVALID_ARGUMENT && s3 == QAWS_STATUS_INVALID_ARGUMENT && !out, msg);
@@ -586,6 +709,7 @@ int test_126_mesh_generate_main(void)
 	test_box();
 	test_structured();
 	test_parametric();
+	test_restricted_delaunay();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

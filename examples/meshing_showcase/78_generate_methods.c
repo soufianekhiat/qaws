@@ -7,7 +7,9 @@
  *   PARAMETRIC, below: each face's grid remeshed in (u, v) in the surface's
  *   metric (its first fundamental form over the size squared), lifted: the
  *   torus, the box shell (faces meeting on the grids' border nodes), the
- *   patch to a chord tolerance (sizes from its principal curvatures).
+ *   patch to a chord tolerance (sizes from its principal curvatures);
+ *   RESTRICTED_DELAUNAY, last: the same patch made Delaunay and refined
+ *   (Chew): every angle at least 30 degrees.
  */
 
 static qaws_mesh_3d* ms_gm_make(qaws_surface const* s, qaws_shell_atlas const* a, qaws_generate_method method, qaws_elements el, double L,
@@ -124,6 +126,24 @@ static void demo_generate_methods(void)
 			ms_draw(c, g, gold, NULL, 1, wire, 0.8);
 			printf("  parametric patch by chord: %u triangles, edges %.3f..%.3f, angles %.1f..%.1f\n", qaws_mesh_3d_get_face_count(g),
 				(double)rep.quality.min_edge, (double)rep.quality.max_edge, (double)rep.quality.min_angle, (double)rep.quality.max_angle);
+		}
+		qaws_mesh_3d_destroy(g);
+	}
+	{
+		qaws_generate_desc d;
+		g = NULL;
+		memset(&d, 0, sizeof d);
+		d.method = QAWS_GENERATE_RESTRICTED_DELAUNAY;
+		d.chord_tolerance = (qaws_scalar)0.003;
+		d.min_length = (qaws_scalar)0.02;
+		d.max_length = (qaws_scalar)0.25;
+		if (qaws_mesh_generate_surface(&g, &rep, wavy, &d) == QAWS_STATUS_OK && g)
+		{
+			sprintf(sub, "%u triangles, angles %.1f..%.1f", qaws_mesh_3d_get_face_count(g), (double)rep.quality.min_angle, (double)rep.quality.max_angle);
+			ms_panel(c, 1650, 640, 550, 640, g, 0.6, 0.65, "RESTRICTED_DELAUNAY", sub);
+			ms_draw(c, g, tint, NULL, 1, wire, 0.8);
+			printf("  delaunay patch: %u triangles, angles %.1f..%.1f\n", qaws_mesh_3d_get_face_count(g), (double)rep.quality.min_angle,
+				(double)rep.quality.max_angle);
 		}
 		qaws_mesh_3d_destroy(g);
 	}

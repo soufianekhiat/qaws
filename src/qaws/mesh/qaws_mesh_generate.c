@@ -319,6 +319,8 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 	qaws_mesh_report* rep);
 static qaws_status mg_parametric(mg_src const* src, unsigned int nf, qaws_generate_desc const* desc, double L, qaws_mesh_3d** out_mesh,
 	qaws_mesh_report* rep);
+static qaws_status mg_delaunay(mg_src const* src, unsigned int nf, qaws_generate_desc const* desc, double L, qaws_mesh_3d** out_mesh,
+	qaws_mesh_report* rep);
 
 /* the dense mesh's size: half the target, finer for an adaptive one with a small minimum */
 static double mg_dense_length(qaws_generate_desc const* desc, double L)
@@ -347,7 +349,7 @@ qaws_status qaws_mesh_generate_shell(qaws_mesh_3d** out_mesh, qaws_mesh_report* 
 	*out_mesh = NULL;
 	if (!shell || !mg_check(desc))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method == QAWS_GENERATE_RESTRICTED_DELAUNAY || (desc->method == QAWS_GENERATE_PARAMETRIC && desc->elements != QAWS_ELEMENTS_TRIANGLES))
+	if ((desc->method == QAWS_GENERATE_PARAMETRIC || desc->method == QAWS_GENERATE_RESTRICTED_DELAUNAY) && desc->elements != QAWS_ELEMENTS_TRIANGLES)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	memset(&rep, 0, sizeof rep);
 	st = qaws_shell_region_create_whole(&whole, shell);
@@ -360,12 +362,13 @@ qaws_status qaws_mesh_generate_shell(qaws_mesh_3d** out_mesh, qaws_mesh_report* 
 		st = QAWS_STATUS_INVALID_ARGUMENT;
 		goto done;
 	}
-	if (desc->method == QAWS_GENERATE_STRUCTURED || desc->method == QAWS_GENERATE_PARAMETRIC)
+	if (desc->method != QAWS_GENERATE_REMESH)
 	{
+		unsigned int nfc = qaws_shell_atlas_get_face_count(shell);
 		src.shell = shell;
 		src.one = NULL;
-		st = desc->method == QAWS_GENERATE_PARAMETRIC ? mg_parametric(&src, qaws_shell_atlas_get_face_count(shell), desc, L, out_mesh, &rep)
-			: mg_structured(&src, qaws_shell_atlas_get_face_count(shell), desc, L, out_mesh, &rep);
+		st = desc->method == QAWS_GENERATE_PARAMETRIC ? mg_parametric(&src, nfc, desc, L, out_mesh, &rep)
+			: desc->method == QAWS_GENERATE_RESTRICTED_DELAUNAY ? mg_delaunay(&src, nfc, desc, L, out_mesh, &rep) : mg_structured(&src, nfc, desc, L, out_mesh, &rep);
 		goto done;
 	}
 	/* the dense conformal mesh of the whole shell */
@@ -1124,6 +1127,394 @@ done:
 	return st;
 }
 
+/* ---- RESTRICTED_DELAUNAY: Delaunay refinement on the faces ----------------- */
+
+typedef struct mg_rd
+{
+	mg_src const* src;
+	qaws_hm* m;
+	unsigned int fa;            /* the "face" attribute */
+	double L, chord, cosmax;    /* the size, the distance bound, cos of the angle bound */
+	unsigned int* stack;        /* corners whose edges to check */
+	unsigned int ns, cap;
+} mg_rd;
+
+static unsigned int mg_rd_face(mg_rd const* r, unsigned int f)
+{
+	return (unsigned int)hm_attr_at(r->m, r->fa, f)[0];
+}
+
+static int mg_rd_fixed(qaws_hm const* m, unsigned int c)
+{
+	return m->co[c] == HM_NONE || (m->cflag[c] & HM_FEATURE);
+}
+
+/* the angle at corner c's vertex in its triangle, as its cosine */
+static double mg_rd_cos(qaws_hm const* m, unsigned int c)
+{
+	double const *a = m->x + 3 * (size_t)m->cv[c], *b = m->x + 3 * (size_t)hm_to(m, c), *p = m->x + 3 * (size_t)m->cv[hm_prev(m, c)];
+	double u[3], w[3], l;
+	int k;
+	for (k = 0; k < 3; k++)
+	{
+		u[k] = b[k] - a[k];
+		w[k] = p[k] - a[k];
+	}
+	l = sqrt(mg_dot(u, u) * mg_dot(w, w));
+	return l > 0 ? mg_dot(u, w) / l : 1;
+}
+
+/* edge c not Delaunay: the angles facing it sum past pi (its opposite corners' cosines summing below 0) */
+static int mg_rd_bad_edge(qaws_hm const* m, unsigned int c)
+{
+	unsigned int o = m->co[c];
+	if (mg_rd_fixed(m, c) || m->fn[m->cf[c]] != 3 || m->fn[m->cf[o]] != 3)
+		return 0;
+	/* (sin(a + b) < 0 for the angles a, b at the corners facing the edge) */
+	{
+		double ca = mg_rd_cos(m, hm_prev(m, c)), cb = mg_rd_cos(m, hm_prev(m, o));
+		double sa = sqrt(fmax(0, 1 - ca * ca)), sb = sqrt(fmax(0, 1 - cb * cb));
+		return sa * cb + ca * sb < -1e-12;
+	}
+}
+
+static int mg_rd_push(mg_rd* r, unsigned int c)
+{
+	if (r->ns == r->cap)
+	{
+		unsigned int nc = 2 * r->cap + 64, *s = (unsigned int*)qaws_internal_realloc(r->stack, qaws_internal_mul2(sizeof(unsigned int), nc));
+		if (!s)
+			return 0;
+		r->stack = s;
+		r->cap = nc;
+	}
+	r->stack[r->ns++] = c;
+	return 1;
+}
+
+/* Lawson's flips until the stack's edges are Delaunay (each flip's two new outer edges checked in turn) */
+static int mg_rd_flips(mg_rd* r)
+{
+	qaws_hm* m = r->m;
+	unsigned int guard = 0;
+	while (r->ns && guard++ < 1000000)
+	{
+		unsigned int c = r->stack[--r->ns], o, f1, f2, q;
+		if (c >= m->nc || m->cf[c] == HM_NONE || !mg_rd_bad_edge(m, c) || !hm_can_flip(m, c))
+			continue;
+		o = m->co[c];
+		f1 = m->cf[c];
+		f2 = m->cf[o];
+		if (!hm_flip(m, c))
+			continue;
+		/* (the four outer edges of the two triangles) */
+		for (q = m->fc[f1]; q < m->fc[f1] + 3; q++)
+			if (!mg_rd_push(r, q))
+				return 0;
+		for (q = m->fc[f2]; q < m->fc[f2] + 3; q++)
+			if (!mg_rd_push(r, q))
+				return 0;
+	}
+	return 1;
+}
+
+/* the (u, v) of vertex v on face F: its footpoint when there, else snapped from the start (u0, v0) held on F's side */
+static void mg_rd_uv(mg_rd const* r, unsigned int v, unsigned int F, double u0, double v0, double* u, double* w)
+{
+	qaws_hm const* m = r->m;
+	double y[3];
+	if (m->foot[v].patch == F)
+	{
+		*u = (double)m->foot[v].a;
+		*w = (double)m->foot[v].b;
+		return;
+	}
+	*u = u0;
+	*w = v0;
+	mg_snap(mg_face(r->src, F), m->x + 3 * (size_t)v, u, w, 1, y);
+}
+
+/* a start on face F for a point of triangle f (its corners' footpoints on F, unwrapped across a seam) */
+static void mg_rd_start(mg_rd const* r, unsigned int f, unsigned int F, double const* p, double* u, double* v)
+{
+	qaws_hm const* m = r->m;
+	qaws_shell_point dv[3];
+	unsigned int tv[3] = { 0, 1, 2 }, k;
+	double w[3] = { 1, 1, 1 };
+	for (k = 0; k < 3; k++)
+	{
+		qaws_mesh_location l = m->foot[m->cv[m->fc[f] + k]];
+		dv[k].face = l.patch;
+		dv[k].uv.x = l.a;
+		dv[k].uv.y = l.b;
+	}
+	mg_start(mg_face(r->src, F), dv, tv, w, 3, F, p, u, v);
+}
+
+/* feature or border edge c split at its middle on its curve (the face's side or crease), the new vertex's footpoint
+   there; its fans' edges flipped to Delaunay. HM_NONE on failure */
+static unsigned int mg_rd_split_edge(mg_rd* r, unsigned int c)
+{
+	qaws_hm* m = r->m;
+	unsigned int f = m->cf[c], F = mg_rd_face(r, f), a = m->cv[c], b = hm_to(m, c), v, q;
+	qaws_surface const* s = mg_face(r->src, F);
+	qaws_range ur = qaws_surface_get_u_range(s), vr = qaws_surface_get_v_range(s);
+	double su = (double)ur.max_value - (double)ur.min_value, sv = (double)vr.max_value - (double)vr.min_value, u0, v0, ua, va, ub, vb, u, w, x[3];
+	mg_rd_start(r, f, F, m->x + 3 * (size_t)a, &u0, &v0);
+	mg_rd_uv(r, a, F, u0, v0, &ua, &va);
+	mg_rd_uv(r, b, F, u0, v0, &ub, &vb);
+	/* (across a seam: b within half a period of a) */
+	if (ub - ua > 0.5 * su) ub -= su;
+	if (ua - ub > 0.5 * su) ub += su;
+	if (vb - va > 0.5 * sv) vb -= sv;
+	if (va - vb > 0.5 * sv) vb += sv;
+	u = 0.5 * (ua + ub);
+	w = 0.5 * (va + vb);
+	if (u < (double)ur.min_value) u += su;
+	if (u > (double)ur.max_value) u -= su;
+	if (w < (double)vr.min_value) w += sv;
+	if (w > (double)vr.max_value) w -= sv;
+	{
+		double mid[3];
+		int k;
+		for (k = 0; k < 3; k++)
+			mid[k] = 0.5 * (m->x[3 * (size_t)a + k] + m->x[3 * (size_t)b + k]);
+		mg_snap(s, mid, &u, &w, 1, x);
+	}
+	if (!hm_reserve(m, 1, 12, 4) || (v = hm_split_edge(m, c, 0.5, x, 1)) == HM_NONE)
+		return HM_NONE;
+	m->foot[v].patch = F;
+	m->foot[v].a = (qaws_scalar)u;
+	m->foot[v].b = (qaws_scalar)w;
+	for (q = m->vc[v]; q != HM_NONE; q = hm_round(m, v, q))
+		if (!mg_rd_push(r, hm_next(m, q)))
+			return HM_NONE;
+	return mg_rd_flips(r) ? v : HM_NONE;
+}
+
+/* the triangle's corner whose edge is the first feature or border edge whose diametral ball holds y (within the
+   triangle and its neighbours'), or HM_NONE */
+static unsigned int mg_rd_encroached(qaws_hm const* m, unsigned int f, double const* y)
+{
+	unsigned int c, k;
+	for (k = 0; k < 4; k++)
+	{
+		unsigned int g = k == 0 ? f : m->co[m->fc[f] + k - 1] == HM_NONE ? HM_NONE : m->cf[m->co[m->fc[f] + k - 1]];
+		if (g == HM_NONE || m->fn[g] != 3)
+			continue;
+		for (c = m->fc[g]; c < m->fc[g] + 3; c++)
+		{
+			double const *a = m->x + 3 * (size_t)m->cv[c], *b = m->x + 3 * (size_t)hm_to(m, c);
+			double mid[3], d2 = 0, r2 = 0;
+			int q;
+			if (!mg_rd_fixed(m, c))
+				continue;
+			for (q = 0; q < 3; q++)
+			{
+				mid[q] = 0.5 * (a[q] + b[q]);
+				d2 += (y[q] - mid[q]) * (y[q] - mid[q]);
+				r2 += 0.25 * (a[q] - b[q]) * (a[q] - b[q]);
+			}
+			if (d2 < r2 * (1 - 1e-9))
+				return c;
+		}
+	}
+	return HM_NONE;
+}
+
+/* the triangle holding y (projected on each triangle's plane), walked from f; *wall: a feature or border edge the walk
+   would cross (HM_NONE when found) */
+static unsigned int mg_rd_locate(qaws_hm const* m, unsigned int f, double const* y, unsigned int* wall)
+{
+	unsigned int steps, prev = HM_NONE;
+	*wall = HM_NONE;
+	for (steps = 0; steps < 1000; steps++)
+	{
+		unsigned int c0 = m->fc[f], k, worst = HM_NONE;
+		double const* P[3];
+		double nrm[3], e1[3], e2[3], bw[3], best = -1e-12, area;
+		for (k = 0; k < 3; k++)
+			P[k] = m->x + 3 * (size_t)m->cv[c0 + k];
+		for (k = 0; k < 3; k++)
+		{
+			e1[k] = P[1][k] - P[0][k];
+			e2[k] = P[2][k] - P[0][k];
+		}
+		nrm[0] = e1[1] * e2[2] - e1[2] * e2[1];
+		nrm[1] = e1[2] * e2[0] - e1[0] * e2[2];
+		nrm[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		area = mg_dot(nrm, nrm);
+		if (!(area > 0))
+			return HM_NONE;
+		/* (barycentrics: the sub-triangles' signed areas; the edge opposite corner k is corner k + 1's) */
+		for (k = 0; k < 3; k++)
+		{
+			double const *A = P[(k + 1) % 3], *B = P[(k + 2) % 3];
+			double a1[3], a2[3], cr[3];
+			int q;
+			for (q = 0; q < 3; q++)
+			{
+				a1[q] = B[q] - A[q];
+				a2[q] = y[q] - A[q];
+			}
+			cr[0] = a1[1] * a2[2] - a1[2] * a2[1];
+			cr[1] = a1[2] * a2[0] - a1[0] * a2[2];
+			cr[2] = a1[0] * a2[1] - a1[1] * a2[0];
+			bw[k] = mg_dot(cr, nrm) / area;
+			if (bw[k] < best)
+			{
+				best = bw[k];
+				worst = c0 + (k + 1) % 3;
+			}
+		}
+		if (worst == HM_NONE)
+			return f;
+		if (mg_rd_fixed(m, worst))
+		{
+			*wall = worst;
+			return HM_NONE;
+		}
+		if (m->cf[m->co[worst]] == prev && steps > 2)
+			return f;   /* (oscillating on a bend: this one) */
+		prev = f;
+		f = m->cf[m->co[worst]];
+		if (m->fn[f] != 3)
+			return HM_NONE;
+	}
+	return HM_NONE;
+}
+
+/* triangle f's state: 0 good, else bad (an angle under the bound away from two feature edges meeting, its circumradius
+   over 0.8 of the size, its centre off the face by more than the chord); its circumcentre */
+static int mg_rd_bad(mg_rd const* r, unsigned int f, double* cc)
+{
+	qaws_hm const* m = r->m;
+	unsigned int c0 = m->fc[f], k;
+	double const *A = m->x + 3 * (size_t)m->cv[c0], *B = m->x + 3 * (size_t)m->cv[c0 + 1], *C = m->x + 3 * (size_t)m->cv[c0 + 2];
+	double u[3], v[3], n[3], uu, vv, nn, t1[3], t2[3], R2;
+	int bad = 0;
+	for (k = 0; k < 3; k++)
+	{
+		u[k] = B[k] - A[k];
+		v[k] = C[k] - A[k];
+	}
+	n[0] = u[1] * v[2] - u[2] * v[1]; n[1] = u[2] * v[0] - u[0] * v[2]; n[2] = u[0] * v[1] - u[1] * v[0];
+	uu = mg_dot(u, u);
+	vv = mg_dot(v, v);
+	nn = mg_dot(n, n);
+	if (!(nn > 0))
+		return 0;
+	t1[0] = n[1] * u[2] - n[2] * u[1]; t1[1] = n[2] * u[0] - n[0] * u[2]; t1[2] = n[0] * u[1] - n[1] * u[0];
+	t2[0] = v[1] * n[2] - v[2] * n[1]; t2[1] = v[2] * n[0] - v[0] * n[2]; t2[2] = v[0] * n[1] - v[1] * n[0];
+	for (k = 0; k < 3; k++)
+		cc[k] = A[k] + (vv * t1[k] + uu * t2[k]) / (2 * nn);
+	R2 = (cc[0] - A[0]) * (cc[0] - A[0]) + (cc[1] - A[1]) * (cc[1] - A[1]) + (cc[2] - A[2]) * (cc[2] - A[2]);
+	if (R2 > 0.64 * r->L * r->L)
+		bad = 1;
+	for (k = 0; k < 3 && !bad; k++)
+	{
+		unsigned int c = c0 + k;
+		/* (an angle between two feature or border edges is the input's: kept) */
+		if (mg_rd_cos(m, c) > r->cosmax && !(mg_rd_fixed(m, c) && mg_rd_fixed(m, hm_prev(m, c))))
+			bad = 1;
+	}
+	if (!bad && r->chord > 0)
+	{
+		double g[3], uv0, vv0, y[3];
+		unsigned int F = mg_rd_face(r, f);
+		for (k = 0; k < 3; k++)
+			g[k] = (A[k] + B[k] + C[k]) / 3;
+		mg_rd_start(r, f, F, g, &uv0, &vv0);
+		mg_snap(mg_face(r->src, F), g, &uv0, &vv0, 0, y);
+		bad = (y[0] - g[0]) * (y[0] - g[0]) + (y[1] - g[1]) * (y[1] - g[1]) + (y[2] - g[2]) * (y[2] - g[2]) > r->chord * r->chord;
+	}
+	return bad;
+}
+
+/* RESTRICTED_DELAUNAY: the PARAMETRIC mesh made Delaunay (Lawson's flips, never across a feature or border edge) and
+   refined as Chew (1993) and Ruppert do: a bad triangle's circumcentre snapped onto its face and inserted (its fans
+   flipped back to Delaunay); one encroaching a feature or border edge's diametral ball, or behind one, splits that edge
+   at its middle on its curve instead. The angle bound 30 degrees but between two feature edges, the size 0.8 L of
+   circumradius, the chord tolerance at the centroid; at most 8 times the start's vertices added. */
+static qaws_status mg_delaunay(mg_src const* src, unsigned int nf, qaws_generate_desc const* desc, double L, qaws_mesh_3d** out_mesh,
+	qaws_mesh_report* rep)
+{
+	qaws_mesh_3d* out = NULL;
+	mg_rd r;
+	unsigned int f, c, added = 0, limit, pass;
+	qaws_status st = mg_parametric(src, nf, desc, L, &out, rep);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	memset(&r, 0, sizeof r);
+	r.src = src;
+	r.m = &out->hm;
+	r.L = L;
+	r.chord = (double)desc->chord_tolerance;
+	r.cosmax = cos(30 * 3.14159265358979323846 / 180);
+	if (qaws_mesh_3d_find_attribute(&r.fa, out, "face") != QAWS_STATUS_OK)
+	{
+		qaws_mesh_3d_destroy(out);
+		return QAWS_STATUS_INTERNAL_ERROR;
+	}
+	limit = 8 * r.m->nv + 64;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	for (c = 0; c < r.m->nc; c++)
+		if (r.m->cf[c] != HM_NONE && !mg_rd_push(&r, c))
+			goto done;
+	if (!mg_rd_flips(&r))
+		goto done;
+	for (pass = 0; pass < 64; pass++)
+	{
+		unsigned int nb = 0;
+		for (f = 0; f < r.m->nf && added < limit; f++)
+		{
+			double cc[3], u, v, y[3];
+			unsigned int F, g, wall = HM_NONE, enc, nv;
+			if (r.m->fn[f] != 3 || r.m->fc[f] == HM_NONE || !mg_rd_bad(&r, f, cc))
+				continue;
+			nb++;
+			F = mg_rd_face(&r, f);
+			mg_rd_start(&r, f, F, cc, &u, &v);
+			mg_snap(mg_face(src, F), cc, &u, &v, 0, y);
+			enc = mg_rd_encroached(r.m, f, y);
+			g = enc == HM_NONE ? mg_rd_locate(r.m, f, y, &wall) : HM_NONE;
+			if (enc == HM_NONE && g == HM_NONE)
+				enc = wall;
+			if (enc != HM_NONE)
+			{
+				if (mg_rd_split_edge(&r, enc) == HM_NONE)
+					goto done;
+				added++;
+				continue;
+			}
+			if (g == HM_NONE || mg_rd_face(&r, g) != F)
+				continue;
+			if (!hm_reserve(r.m, 1, 6, 2) || (nv = hm_split_face(r.m, g, y)) == HM_NONE)
+				goto done;
+			r.m->foot[nv].patch = F;
+			r.m->foot[nv].a = (qaws_scalar)u;
+			r.m->foot[nv].b = (qaws_scalar)v;
+			for (c = r.m->vc[nv]; c != HM_NONE; c = hm_round(r.m, nv, c))
+				if (!mg_rd_push(&r, hm_next(r.m, c)))
+					goto done;
+			if (!mg_rd_flips(&r))
+				goto done;
+			added++;
+		}
+		if (!nb || added >= limit)
+			break;
+	}
+	hm_compact(r.m);
+	qaws_mesh_3d_measure_quality(&rep->quality, out);
+	*out_mesh = out;
+	out = NULL;
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(r.stack);
+	qaws_mesh_3d_destroy(out);
+	return st;
+}
+
 /* STRUCTURED: per face an iso-parametric grid, its counts made the same across shared sides and opposite sides (classes of
    face directions joined), each class's count its sides' longest length over L; with tolerances (no target) the classes
    of faces whose cells miss them (the surface at a cell's centre off its corners' mean by more than the chord tolerance,
@@ -1391,7 +1782,7 @@ qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out_mesh, qaws_mesh_report
 	*out_mesh = NULL;
 	if (!surface || !mg_check(desc))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (desc->method == QAWS_GENERATE_RESTRICTED_DELAUNAY || (desc->method == QAWS_GENERATE_PARAMETRIC && desc->elements != QAWS_ELEMENTS_TRIANGLES))
+	if ((desc->method == QAWS_GENERATE_PARAMETRIC || desc->method == QAWS_GENERATE_RESTRICTED_DELAUNAY) && desc->elements != QAWS_ELEMENTS_TRIANGLES)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	memset(&rep, 0, sizeof rep);
 	/* no length given: a 30th of the square root of the area, from a coarse pass */
@@ -1413,9 +1804,10 @@ qaws_status qaws_mesh_generate_surface(qaws_mesh_3d** out_mesh, qaws_mesh_report
 	}
 	src.shell = NULL;
 	src.one = surface;
-	if (desc->method == QAWS_GENERATE_STRUCTURED || desc->method == QAWS_GENERATE_PARAMETRIC)
+	if (desc->method != QAWS_GENERATE_REMESH)
 	{
-		st = desc->method == QAWS_GENERATE_PARAMETRIC ? mg_parametric(&src, 1, desc, L, out_mesh, &rep) : mg_structured(&src, 1, desc, L, out_mesh, &rep);
+		st = desc->method == QAWS_GENERATE_PARAMETRIC ? mg_parametric(&src, 1, desc, L, out_mesh, &rep)
+			: desc->method == QAWS_GENERATE_RESTRICTED_DELAUNAY ? mg_delaunay(&src, 1, desc, L, out_mesh, &rep) : mg_structured(&src, 1, desc, L, out_mesh, &rep);
 		if (st == QAWS_STATUS_OK && out_report)
 			*out_report = rep;
 		return st;

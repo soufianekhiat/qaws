@@ -843,7 +843,13 @@ first fundamental form over the size squared, the size from the curvature
 with tolerances), its boundary split alike from both faces of an edge and
 pinned, then lifts every vertex onto the face: triangles exactly on the
 surface, isotropic in space (figure 78, second row). Triangles only;
-untrimmed faces. `RESTRICTED_DELAUNAY` is reserved.
+untrimmed faces.
+
+`RESTRICTED_DELAUNAY` takes that mesh further: Delaunay by edge flips (never
+across features), then Chew and Ruppert refinement at circumcentres snapped
+onto the faces (encroached feature edges split on their curves), so every
+edge off the features is Delaunay and every angle is at least 30 degrees but
+the input's own between feature edges (figure 78).
 
 ### Curved elements
 
