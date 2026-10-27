@@ -1833,6 +1833,8 @@ Figure 72 (key *): the turned box swept by slabs, then implicit (grid 48) colour
 
 `qaws_mesh_3d_first_self_contact(&report, mesh, motion, &desc)`: a mesh against itself under a vertex motion (a cloth folding, a strip curling, parts of one mesh closing on each other). The same search, the mesh its own obstacle, over the pairs of its triangles sharing no vertex (vertices at one position at 0 count as one, so unwelded seams are neighbours too), each pair once; `face` and `obstacle_face` are both its triangles. Triangles crossing at 0 give 0; a rigid motion keeps every distance, so no contact past 0. Neighbours are never tested: a fold within one vertex's ring of triangles is missed (refine the mesh there).
 
+Both run the moving mesh's triangles in 64 shares through `desc.executor` when one is given (the BVH's queries are thread-safe; each share has its own candidates and findings): the first contact is the earliest share's, the collected pairs sorted, so the reports are the same bit for bit on any executor (test 183 runs its shares backwards). Their temporaries come from the thread's scratch allocator.
+
 Test 183 (tolerance 1e-4):
 - a ball of radius 0.5 falling 3 from 2 onto a slab: contact in [0.499985, 0.500000] (exactly 0.5 at its pole), at (0, 0, 0);
 - a cube shot 10 along x through a wall 0.001 thick: [0.189999, 0.190002] (0.19); beside the wall, none;

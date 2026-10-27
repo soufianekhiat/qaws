@@ -20,7 +20,9 @@
  *     a ring: x(s, t) = (1 - t) s + t r sin(s / r) is a graph over x while dx/ds = 1 - t + t cos(s / r) > 0, so before
  *     0.5, and pinches at s = pi r at 0.5: the first contact just past 0.5, between triangles sharing no vertex; the
  *     boxes and the strip move each vertex on its chord at a constant rate, so their times are exact (0.8; the strip's
- *     0.5008967, as a brute force over a grid of 1e-6 bisected finds, triangles 38 and 42).
+ *     0.5008967, as a brute force over a grid of 1e-6 bisected finds, triangles 38 and 42);
+ *   - through an executor running the shares of the triangles backwards, one at a time: the same reports, bit for bit (a
+ *     rod turning into a moving wall, two cubes exactly, a strip pinching onto itself).
  */
 
 #include "test_common.h"
@@ -316,6 +318,75 @@ static void test_self(void)
 	qaws_mesh_3d_destroy(two); qaws_mesh_3d_destroy(box); qaws_mesh_3d_destroy(strip);
 }
 
+/* an executor running the chunks backwards, one at a time: results must not depend on the order */
+static void ct_backwards(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx)
+{
+	unsigned int k;
+	(void)user;
+	for (k = count; k-- > 0;)
+		task(ctx, k, k + 1);
+}
+
+static int ct_same(qaws_contact_report const* a, qaws_contact_report const* b)
+{
+	return a->contact == b->contact && a->exact == b->exact && a->time == b->time && a->time_upper == b->time_upper && a->face == b->face &&
+		a->obstacle_face == b->obstacle_face && a->point.x == b->point.x && a->point.y == b->point.y && a->point.z == b->point.z;
+}
+
+static void test_executor(void)
+{
+	qaws_contact_report r[6];
+	qaws_sweep_desc d;
+	qaws_batch_executor ex;
+	qaws_mesh_3d *a = ct_box(-0.1, 0.1, -0.1, 0.1, -0.1, 0.1), *b = ct_box(2.9, 3.1, -0.1, 0.1, -0.1, 0.1), *rod = ct_box(0, 1, -0.01, 0.01, -0.01, 0.01),
+		*wall = ct_box(-2, 2, 0.8, 0.9, -1, 1), *strip;
+	qaws_motion *ma = ct_line(0, 0, 0, 2, 0, 0), *mb = ct_line(0, 0, 0, -2, 0, 0), *mrod = NULL, *mwall = ct_line(0, 0, 0, 0, -0.4, 0), *mc = NULL;
+	qaws_motion_pose s, e;
+	qaws_scalar *c0, *c1, *cv;
+	unsigned int n = 48, i, k;
+	double rad = 2 / (2 * 3.14159265358979323846 * 1.15);
+	char msg[300];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	e.rotation[0] = (qaws_scalar)cos(3.14159265358979323846 / 4);
+	e.rotation[3] = (qaws_scalar)sin(3.14159265358979323846 / 4);
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(3.14159265358979323846 / 2);
+	qaws_motion_create_poses(&mrod, &s, &e, 0);
+	c0 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (n + 1));
+	c1 = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (n + 1));
+	cv = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (n + 1));
+	strip = ct_strip(n, 2, c0);
+	for (i = 0; i < 2 * (n + 1); i++)
+	{
+		double an = (double)c0[3 * i] / rad;
+		c1[3 * i] = (qaws_scalar)(rad * sin(an));
+		c1[3 * i + 1] = c0[3 * i + 1];
+		c1[3 * i + 2] = (qaws_scalar)(rad * (1 - cos(an)));
+		for (k = 0; k < 3; k++)
+			cv[3 * i + k] = c1[3 * i + k] - c0[3 * i + k];
+	}
+	qaws_motion_create_vertices(&mc, c0, c1, cv, cv, NULL, NULL, 2 * (n + 1), 0);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)1e-4;
+	for (k = 0; k < 2; k++)
+	{
+		ex.parallel_for = ct_backwards;
+		ex.user = NULL;
+		d.executor = k ? &ex : NULL;
+		qaws_mesh_3d_first_contact(&r[3 * k], rod, mrod, wall, mwall, &d);
+		qaws_mesh_3d_first_contact(&r[3 * k + 1], a, ma, b, mb, &d);
+		qaws_mesh_3d_first_self_contact(&r[3 * k + 2], strip, mc, &d);
+	}
+	sprintf(msg, "through an executor backwards: the rod [%.6f, %.6f] same %d, the cubes %.17g same %d, the strip %.17g same %d", (double)r[3].time,
+		(double)r[3].time_upper, ct_same(&r[0], &r[3]), (double)r[4].time, ct_same(&r[1], &r[4]), (double)r[5].time, ct_same(&r[2], &r[5]));
+	printf("  %s\n", msg);
+	TEST_ASSERT(r[0].contact && r[1].contact && r[2].contact && ct_same(&r[0], &r[3]) && ct_same(&r[1], &r[4]) && ct_same(&r[2], &r[5]), msg);
+	free(c0); free(c1); free(cv);
+	qaws_motion_destroy(ma); qaws_motion_destroy(mb); qaws_motion_destroy(mrod); qaws_motion_destroy(mwall); qaws_motion_destroy(mc);
+	qaws_mesh_3d_destroy(a); qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(rod); qaws_mesh_3d_destroy(wall); qaws_mesh_3d_destroy(strip);
+}
+
 int test_183_mesh_contact_main(void)
 {
 	g_pass = 0;
@@ -325,6 +396,7 @@ int test_183_mesh_contact_main(void)
 	test_more();
 	test_both_moving();
 	test_self();
+	test_executor();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

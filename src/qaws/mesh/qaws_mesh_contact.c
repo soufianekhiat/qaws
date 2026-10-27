@@ -34,11 +34,8 @@ typedef struct cc_ctx
 	unsigned int* bel;
 	qaws_scalar* bpos;              /* 2 onv positions */
 	double *OA, *OB;                /* the obstacle's positions at the step's ends */
-	unsigned int* cand;             /* scratch: box query results */
-	unsigned int capc;
-	unsigned int* seen;             /* per obstacle triangle: the stamp it was last met with */
-	unsigned int stamp;
 	double eps;
+	qaws_batch_executor const* ex;  /* the shares of the triangles through it; NULL: this thread */
 	unsigned long long tests;
 	unsigned long long* pairs;      /* with collect: the touching pairs (mesh triangle << 32 | obstacle triangle) */
 	unsigned int npairs, cappairs;
@@ -168,41 +165,49 @@ static int cc_in_prism(double const* q, double const (*P)[3])
 	return cc_in_tet(q, P[0], P[1], P[2], P[3]) || cc_in_tet(q, P[1], P[2], P[3], P[4]) || cc_in_tet(q, P[2], P[3], P[4], P[5]);
 }
 
-/* the obstacle's triangles whose prisms' boxes meet lo hi (each once): into c->cand, their count; ~0u on allocation failure */
-static unsigned int cc_query(cc_ctx* c, double const* lo, double const* hi)
+/* a share of the moving mesh's triangles tested on one thread: its candidates, counts and findings */
+typedef struct cc_part
+{
+	cc_ctx* c;
+	double const *A, *B;            /* the mesh at the step's ends */
+	unsigned int i0, i1;            /* its triangles */
+	unsigned int* cand;
+	unsigned int capc;
+	unsigned long long tests;
+	unsigned long long* pairs;      /* with collect */
+	unsigned int npairs, cappairs;
+	int r;                          /* 1 found, 0 none, -1 allocation */
+	unsigned int f, g;
+	double p[3];
+} cc_part;
+
+/* the obstacle's triangles whose prisms' boxes meet lo hi (each once, ascending: the BVH's elements): into w->cand, their
+   count; ~0u on allocation failure */
+static unsigned int cc_query(cc_part* w, double const* lo, double const* hi)
 {
 	qaws_scalar l[3], h[3];
-	unsigned int n = 0, k, m = 0;
+	unsigned int n = 0, k;
 	for (k = 0; k < 3; k++)
 	{
-		l[k] = (qaws_scalar)(lo[k] - c->eps);
-		h[k] = (qaws_scalar)(hi[k] + c->eps);
+		l[k] = (qaws_scalar)(lo[k] - w->c->eps);
+		h[k] = (qaws_scalar)(hi[k] + w->c->eps);
 	}
 	for (;;)
 	{
-		qaws_status st = qaws_mesh_bvh_query_box(c->cand, &n, c->bvh, l, h, c->capc);
-		if (st == QAWS_STATUS_OK && n <= c->capc)
-			break;
+		qaws_status st = qaws_mesh_bvh_query_box(w->cand, &n, w->c->bvh, l, h, w->capc);
+		if (st == QAWS_STATUS_OK && n <= w->capc)
+			return n;
 		if (st != QAWS_STATUS_OK && st != QAWS_STATUS_BUFFER_TOO_SMALL)
 			return ~0u;
 		{
-			unsigned int cap = n > 2 * c->capc ? n : 2 * c->capc + 64;
-			unsigned int* g = (unsigned int*)cc_grow(c->cand, qaws_internal_mul2(sizeof(unsigned int), cap));
+			unsigned int cap = n > 2 * w->capc ? n : 2 * w->capc + 64;
+			unsigned int* g = (unsigned int*)cc_grow(w->cand, qaws_internal_mul2(sizeof(unsigned int), cap));
 			if (!g)
 				return ~0u;
-			c->cand = g;
-			c->capc = cap;
+			w->cand = g;
+			w->capc = cap;
 		}
 	}
-	/* (a prism's 8 triangles share its element: each once) */
-	c->stamp++;
-	for (k = 0; k < n; k++)
-		if (c->seen[c->cand[k]] != c->stamp)
-		{
-			c->seen[c->cand[k]] = c->stamp;
-			c->cand[m++] = c->cand[k];
-		}
-	return m;
 }
 
 /* the point of triangle a b c nearest p (Ericson's regions) */
@@ -235,14 +240,19 @@ static void cc_closest(double const* p, double const* a, double const* b, double
 	for (k = 0; k < 3; k++) o[k] = a[k] + v * ab[k] + w * ac[k];
 }
 
-/* does any triangle's swept prism between positions A and B meet one of the obstacle's (at c->OA, c->OB): their borders
-   crossing, or a corner of one inside the other? the first found into *f, *g, *p (with collect: every touching pair into
-   c->pairs, 1 when any). -1 on allocation failure */
-static int cc_touch(cc_ctx* c, double const* A, double const* B, unsigned int* f, unsigned int* g, double* p)
+/* does any of the part's triangles' swept prisms between positions A and B meet one of the obstacle's (at c->OA, c->OB):
+   their borders crossing, or a corner of one inside the other? the first found into w->f, g, p (with collect: every touching
+   pair into w->pairs, 1 when any). -1 on allocation failure */
+static int cc_touch_part(cc_part* w)
 {
+	cc_ctx* c = w->c;
+	double const *A = w->A, *B = w->B;
+	unsigned int* f = &w->f;
+	unsigned int* g = &w->g;
+	double* p = w->p;
 	unsigned int i;
 	int still = c->o.m == NULL, found = 0;
-	for (i = 0; i < c->a.nt; i++)
+	for (i = w->i0; i < w->i1; i++)
 	{
 		double P[6][3], lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, T[8][3][3];
 		unsigned int k, j, q, nc, nT;
@@ -253,11 +263,11 @@ static int cc_touch(cc_ctx* c, double const* A, double const* B, unsigned int* f
 				lo[j] = fmin(lo[j], P[k][j]);
 				hi[j] = fmax(hi[j], P[k][j]);
 			}
-		if ((nc = cc_query(c, lo, hi)) == ~0u)
+		if ((nc = cc_query(w, lo, hi)) == ~0u)
 			return -1;
 		for (q = 0; q < nc; q++)
 		{
-			unsigned int o = c->cand[q], z, w, nU, hit = 0;
+			unsigned int o = w->cand[q], z, y, nU, hit = 0;
 			double Q[6][3], U[8][3][3];
 			static unsigned int const ip[3] = { 0, 1, 2 }, iq[3] = { 3, 4, 5 };
 			if (c->self)
@@ -273,10 +283,10 @@ static int cc_touch(cc_ctx* c, double const* A, double const* B, unsigned int* f
 			}
 			nU = cc_prism(c->OA, still ? c->OA : c->OB, c->o.t, o, Q, U);
 			for (z = 0; z < nT && !hit; z++)
-				for (w = 0; w < nU && !hit; w++)
+				for (y = 0; y < nU && !hit; y++)
 				{
-					c->tests++;
-					hit = rp_tri_tri_at((double const(*)[3])T[z], (double const(*)[3])U[w], ip, iq);
+					w->tests++;
+					hit = rp_tri_tri_at((double const(*)[3])T[z], (double const(*)[3])U[y], ip, iq);
 				}
 			/* (a corner inside the other's prism: one smaller than the other's step) */
 			for (k = 0; k < (still ? 3u : 6u) && !hit; k++)
@@ -287,16 +297,16 @@ static int cc_touch(cc_ctx* c, double const* A, double const* B, unsigned int* f
 				continue;
 			if (c->collect)
 			{
-				if (c->npairs + 1 > c->cappairs)
+				if (w->npairs + 1 > w->cappairs)
 				{
-					unsigned int cap = 2 * c->cappairs + 64;
-					unsigned long long* gp = (unsigned long long*)cc_grow(c->pairs, qaws_internal_mul2(sizeof(unsigned long long), cap));
+					unsigned int cap = 2 * w->cappairs + 64;
+					unsigned long long* gp = (unsigned long long*)cc_grow(w->pairs, qaws_internal_mul2(sizeof(unsigned long long), cap));
 					if (!gp)
 						return -1;
-					c->pairs = gp;
-					c->cappairs = cap;
+					w->pairs = gp;
+					w->cappairs = cap;
 				}
-				c->pairs[c->npairs++] = (unsigned long long)i << 32 | o;
+				w->pairs[w->npairs++] = (unsigned long long)i << 32 | o;
 				found = 1;
 				continue;
 			}
@@ -322,6 +332,100 @@ static int cc_touch(cc_ctx* c, double const* A, double const* B, unsigned int* f
 		}
 	}
 	return found;
+}
+
+#define CC_PARTS 64u   /* shares of the triangles (fixed: the results do not depend on the executor) */
+
+static void cc_part_task(void* ctx, unsigned int begin, unsigned int end)
+{
+	cc_part* parts = (cc_part*)ctx;
+	unsigned int k;
+	for (k = begin; k < end; k++)
+		parts[k].r = cc_touch_part(&parts[k]);
+}
+
+static int cc_cmp_u64(void const* a, void const* b)
+{
+	unsigned long long x = *(unsigned long long const*)a, y = *(unsigned long long const*)b;
+	return x < y ? -1 : x > y;
+}
+
+/* cc_touch_part over all the mesh's triangles in CC_PARTS shares, through the executor when there is one (else in order,
+   stopping at the first share that finds one): the first found is the earliest share's, the collected pairs sorted; -1 on
+   allocation failure */
+static int cc_touch(cc_ctx* c, double const* A, double const* B, unsigned int* f, unsigned int* g, double* p)
+{
+	unsigned int n = c->a.nt < CC_PARTS ? c->a.nt : CC_PARTS, k, step, total = 0;
+	cc_part* parts;
+	int r = 0;
+	if (!n)
+		return 0;
+	parts = (cc_part*)qaws_internal_scratch_zalloc(n, sizeof(cc_part));
+	if (!parts)
+		return -1;
+	step = (c->a.nt + n - 1) / n;
+	for (k = 0; k < n; k++)
+	{
+		parts[k].c = c;
+		parts[k].A = A;
+		parts[k].B = B;
+		parts[k].i0 = k * step < c->a.nt ? k * step : c->a.nt;
+		parts[k].i1 = (k + 1) * step < c->a.nt ? (k + 1) * step : c->a.nt;
+	}
+	if (c->ex && c->ex->parallel_for)
+		c->ex->parallel_for(c->ex->user, n, cc_part_task, parts);
+	else
+		for (k = 0; k < n; k++)
+		{
+			parts[k].r = cc_touch_part(&parts[k]);
+			if (parts[k].r && !c->collect)
+				break;
+		}
+	for (k = 0; k < n; k++)
+	{
+		c->tests += parts[k].tests;
+		total += parts[k].npairs;
+		if (parts[k].r < 0)
+			r = -1;
+		else if (parts[k].r > 0 && r == 0)
+		{
+			r = 1;
+			if (!c->collect)
+			{
+				*f = parts[k].f;
+				*g = parts[k].g;
+				memcpy(p, parts[k].p, sizeof parts[k].p);
+				break;
+			}
+		}
+	}
+	if (r >= 0 && c->collect && total)
+	{
+		/* (the shares' pairs into the context's list, in order) */
+		unsigned long long* gp = total > c->cappairs ? (unsigned long long*)cc_grow(c->pairs, qaws_internal_mul2(sizeof(unsigned long long), total)) : c->pairs;
+		if (!gp)
+			r = -1;
+		else
+		{
+			if (total > c->cappairs)
+				c->cappairs = total;
+			c->pairs = gp;
+			for (k = 0; k < n; k++)
+			{
+				if (parts[k].npairs)
+					memcpy(c->pairs + c->npairs, parts[k].pairs, sizeof(unsigned long long) * parts[k].npairs);
+				c->npairs += parts[k].npairs;
+			}
+			qsort(c->pairs, c->npairs, sizeof(unsigned long long), cc_cmp_u64);
+		}
+	}
+	for (k = 0; k < n; k++)
+	{
+		qaws_internal_free(parts[k].cand);
+		qaws_internal_free(parts[k].pairs);
+	}
+	qaws_internal_free(parts);
+	return r;
 }
 
 /* the solid angle sum of the triangles T (vertices X) seen from p over 4 pi: 1 inside a closed surface, 0 outside */
@@ -1156,8 +1260,8 @@ static qaws_status cc_contact(qaws_contact_report* report, qaws_mesh_3d const* m
 	c.bpos = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 6 * (size_t)c.o.nv + 1));
 	c.bsim = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 24 * (size_t)c.o.nt + 1));
 	c.bel = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 8 * (size_t)c.o.nt + 1));
-	c.seen = (unsigned int*)qaws_internal_scratch_zalloc((size_t)c.o.nt + 1, sizeof(unsigned int));
-	if (!X0 || !X1 || !Xm || !O0 || !O1 || !Om || !c.OA || !c.OB || !c.bpos || !c.bsim || !c.bel || !c.seen)
+	c.ex = desc ? desc->executor : NULL;
+	if (!X0 || !X1 || !Xm || !O0 || !O1 || !Om || !c.OA || !c.OB || !c.bpos || !c.bsim || !c.bel)
 		goto done;
 	/* the obstacle's prisms in its BVH: per triangle its two caps and its sides' halves over the positions at both ends */
 	for (i = 0; i < c.o.nt; i++)
@@ -1437,7 +1541,7 @@ done:
 	cc_body_free(&c.o);
 	qaws_internal_free(X0); qaws_internal_free(X1); qaws_internal_free(Xm); qaws_internal_free(O0); qaws_internal_free(O1); qaws_internal_free(Om);
 	qaws_internal_free(c.OA); qaws_internal_free(c.OB); qaws_internal_free(c.bpos); qaws_internal_free(c.bsim); qaws_internal_free(c.bel);
-	qaws_internal_free(c.seen); qaws_internal_free(c.cand); qaws_internal_free(c.pairs); qaws_internal_free(times); qaws_internal_free(c.vid);
+	qaws_internal_free(c.pairs); qaws_internal_free(times); qaws_internal_free(c.vid);
 	return st;
 }
 

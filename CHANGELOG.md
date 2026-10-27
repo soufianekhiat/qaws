@@ -34,7 +34,8 @@ All notable changes to Qaws are documented here.
   `qaws_mesh_bvh_create_view`, `qaws_mesh_bvh_refit_view`, `qaws_motion_create_vertices_borrowed` (each vertex on
   its chord between two frames of the host's buffer, read at each evaluation: exact contact times); no staging copy, no
   allocation per frame (`qaws_mesh_bvh_refit` now refits in place too). Test 185, `docs/api/mesh_view.md`.
-  Contact detection and the sweeps take their temporaries from the thread's scratch allocator.
+  Contact detection and the sweeps take their temporaries from the thread's scratch allocator; contact detection runs
+  through `qaws_sweep_desc.executor` (64 shares of the triangles, the same reports on any executor).
 - Implicit sweeps: `qaws_mesh_3d_sweep_implicit`, the swept solid as the level set of the least over time of the moving
   shape's signed distance, sampled in time (bounding spheres pruning, golden sections refining a rigid motion's time),
   dual contoured on a grid (`qaws_sweep_desc.resolution`); any motion, smooth, within a cell of the explicit sweep

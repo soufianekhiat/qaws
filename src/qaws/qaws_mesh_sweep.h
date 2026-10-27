@@ -101,7 +101,8 @@ typedef struct qaws_sweep_desc
 	int simplify;                       /* nonzero: the vertices in flat regions and on straight creases the overlapping slabs
 	                                       leave removed (each collapse within a thousandth of the tolerance), the flat regions
 	                                       then turned toward Delaunay: far fewer faces, the shape, features and attributes kept */
-	qaws_batch_executor const* executor;   /* the Boolean's pair tests and samples through it; NULL: this thread */
+	qaws_batch_executor const* executor;   /* the Boolean's pair tests and samples, contact detection's shares of triangles and
+	                                          the implicit sweep's queries through it; NULL: this thread */
 	int revolve_spins;                  /* nonzero: a spin drifting past the tolerance a turn is revolved even when the body is not
 	                                       symmetric about its axis (a one-flute cutter: the result may pass the true sweep by up
 	                                       to the report's spin_drift); 0: such a spin is swept by slabs (slow) */
