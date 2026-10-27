@@ -29,6 +29,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Attribute promotion (`qaws_mesh_promote.h`, after Houdini's Attribute Promote): `qaws_mesh_3d_promote_attribute` moves
+  an attribute between vertices, corners, faces and edges by MAXIMUM, MINIMUM, AVERAGE (by its rule), MODE, MEDIAN, SUM,
+  SUM_OF_SQUARES, RMS, FIRST or LAST, with a piece attribute, an index attribute, a new name; `qaws_mesh_3d_reduce_attribute`
+  over the whole mesh. Test 186, figure 75, `docs/api/mesh_promote.md`.
 - Attribute tracks: `qaws_sweep_desc.tracks` animate the body's vertex, corner or face attributes by keys over the motion;
   each place of the sweep takes the value at the time it was swept, blended between keys by the attribute's rule (tests
   180, 184, figure 74).

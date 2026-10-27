@@ -199,6 +199,7 @@ extern int test_182_volume_attributes_main(void);
 extern int test_183_mesh_contact_main(void);
 extern int test_184_sweep_implicit_main(void);
 extern int test_185_mesh_view_main(void);
+extern int test_186_mesh_promote_main(void);
 
 /* Test registry */
 typedef struct {
@@ -393,6 +394,7 @@ static test_suite const g_test_suites[] = {
 	{"183_mesh_contact", test_183_mesh_contact_main},
 	{"184_sweep_implicit", test_184_sweep_implicit_main},
 	{"185_mesh_view", test_185_mesh_view_main},
+	{"186_mesh_promote", test_186_mesh_promote_main},
 };
 
 int main(void) {

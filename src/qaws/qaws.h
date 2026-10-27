@@ -114,6 +114,7 @@
 #include "qaws_motion.h"
 #include "qaws_mesh_sweep.h"
 #include "qaws_mesh_view.h"
+#include "qaws_mesh_promote.h"
 #include "qaws_alloc.h"
 #include "qaws_inline.h"
 #include "qaws_diff.h"
