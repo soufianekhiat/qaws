@@ -349,7 +349,8 @@ cheapest and most reused first:
    Labelle-Shewchuk warping, Dompierre prisms; test 127, figure 79) and ENVELOPE (tt_envelope: clean input kept or
    watertight contour refined to half the envelope, LOCAL within half the envelope on a LINEAR reference, DELAUNAY,
    improve; test 127, figure 79).
-5. **Hexahedra:** an octree.
+5. **Hexahedra:** an octree: deferred 2026-10-28 (an adaptive all-hex octree needs 3-refinement transition templates, whose face
+   template we could not derive or find with coordinates, or a dual hybrid octree; GRID gives uniform all-hex meanwhile).
 
 ### Attributes through Booleans and sweeps (2026-10-26)
 
