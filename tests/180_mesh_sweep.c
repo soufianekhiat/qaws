@@ -33,6 +33,9 @@
  *     the drift;
  *   - edge values through a spin: the 64-gon cylinder with 7 on its two rims' edges, spun two turns: its revolution's
  *     edges carrying 7 are the two rim circles (their length 2 pi r each, within the chords), every other edge 0;
+ *   - strict: a box [1, 2] x [-0.1, 0.1] x [0, 0.6] turned a quarter about z at tolerance 0.004 passes its true sweep (each
+ *     vertex's least distance outside the box turned back, over 4000 angles) by 1.28 tolerances, with strict by at most
+ *     the tolerance (0.64), on more slabs;
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -527,6 +530,56 @@ static void test_spin_edges(void)
 	qaws_mesh_3d_destroy(cyl); qaws_mesh_3d_destroy(o);
 }
 
+/* how far the sweep's vertices lie outside the box [1, 2] x [-h, h] turned about z by 0 to a quarter */
+static double sw_past_turned(qaws_mesh_3d const* o, double h)
+{
+	unsigned int nv = o ? qaws_mesh_3d_get_vertex_count(o) : 0, i, k;
+	double worst = 0;
+	for (i = 0; i < nv; i++)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(o, i);
+		double best = 1e9;
+		for (k = 0; k <= 4000; k++)
+		{
+			double th = 0.5 * SW_PI * k / 4000, c = cos(th), s = sin(th), x = c * p.x + s * p.y, y = -s * p.x + c * p.y;
+			double dx = fmax(fmax(1 - x, x - 2), 0), dy = fmax(fabs(y) - h, 0);
+			best = fmin(best, sqrt(dx * dx + dy * dy));
+		}
+		worst = fmax(worst, best);
+	}
+	return worst;
+}
+
+static void test_strict(void)
+{
+	double tol = 0.004, plain, strict;
+	qaws_mesh_3d *b = sw_box(1, 2, -0.1, 0.1, 0, 0.6), *o = NULL, *os = NULL;
+	qaws_motion_pose s, e;
+	qaws_motion* m = NULL;
+	qaws_sweep_desc d;
+	qaws_sweep_report r, rs;
+	char msg[300];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	e.rotation[0] = (qaws_scalar)cos(SW_PI / 4);
+	e.rotation[3] = (qaws_scalar)sin(SW_PI / 4);
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(SW_PI / 2);
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)tol;
+	qaws_mesh_3d_sweep(&o, &r, b, m, &d);
+	d.strict = 1;
+	qaws_mesh_3d_sweep(&os, &rs, b, m, &d);
+	plain = sw_past_turned(o, 0.1);
+	strict = sw_past_turned(os, 0.1);
+	sprintf(msg, "strict: plain past the true sweep by %.2f tolerances (%u slabs), strict by %.2f (%u slabs), closed %d", plain / tol, r.slabs, strict / tol, rs.slabs, rs.closed);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && os && plain > tol && strict <= tol && rs.slabs > r.slabs && rs.closed, msg);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(os);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *c = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -555,6 +608,7 @@ int test_180_mesh_sweep_main(void)
 	test_spin();
 	test_spin_more();
 	test_spin_edges();
+	test_strict();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

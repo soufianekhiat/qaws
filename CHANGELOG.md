@@ -29,6 +29,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `qaws_sweep_desc.strict`: slabs also halved until no edge twists by more than 4 tolerances over one, so an edge
+  sliding along itself while turning passes the true sweep by the tolerance at most (a turned box: 0.64 tolerances where
+  it was 1.28, on twice the slabs; test 180).
 - Meshes from host buffers (`qaws_mesh_view.h`): `qaws_mesh_view` (positions f32 or f64 at any stride or planar,
   16- or 32-bit indices with a stride), `qaws_mesh_3d_create_from_view`, `qaws_mesh_3d_set_positions_from_view`,
   `qaws_mesh_bvh_create_view`, `qaws_mesh_bvh_refit_view`, `qaws_motion_create_vertices_borrowed` (each vertex on

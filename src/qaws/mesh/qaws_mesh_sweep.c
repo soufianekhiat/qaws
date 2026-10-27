@@ -2378,6 +2378,25 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			}
 			if (st != QAWS_STATUS_OK)
 				break;
+			if (desc && desc->strict)
+				for (i = 0; i < 3 * nt; i++)
+				{
+					/* an edge's twist over the slab: its quad's hull passes the true sweep by up to a quarter of it (the fourth corner
+					   from the plane of the other three) */
+					unsigned int u0 = t[i], v0 = t[i % 3 == 2 ? i - 2 : i + 1];
+					double const *pa = Xa + 3 * (size_t)u0, *pb = Xa + 3 * (size_t)v0, *qa = Xb + 3 * (size_t)u0, *qb = Xb + 3 * (size_t)v0;
+					double e[3], g[3], w[3], n[3], ln;
+					for (k = 0; k < 3; k++)
+					{
+						e[k] = pb[k] - pa[k];
+						g[k] = qa[k] - pa[k];
+						w[k] = qb[k] - pa[k];
+					}
+					n[0] = e[1] * g[2] - e[2] * g[1]; n[1] = e[2] * g[0] - e[0] * g[2]; n[2] = e[0] * g[1] - e[1] * g[0];
+					ln = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+					if (ln > 0)
+						dev = fmax(dev, 0.25 * fabs(n[0] * w[0] + n[1] * w[1] + n[2] * w[2]) / ln);
+				}
 			if (dev > tol && ns < maxs)
 			{
 				stack[nsk++] = 0.5 * (a + b);

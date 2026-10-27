@@ -42,7 +42,7 @@
  * with it. Curved motions are within the tolerance (the chords); where an
  * edge slides along itself while turning, the hull fills the notch of its
  * quad, so the result may pass the true sweep by about the slabs' turn times
- * the edge's length.
+ * the edge's length (desc.strict bounds it by the tolerance, on more slabs).
  *
  * Spins: a rigid motion turning a whole turn or more about one axis (its
  * angular velocity keeping its direction and sense) passes over the same
@@ -112,6 +112,10 @@ typedef struct qaws_sweep_desc
 	                                       symmetric about its axis (a one-flute cutter: the result may pass the true sweep by up
 	                                       to the report's spin_drift); 0: such a spin is swept by slabs (slow) */
 	unsigned int resolution;            /* qaws_mesh_3d_sweep_implicit: cells along the result's box's longest side; 0: 64 */
+	int strict;                         /* nonzero: slabs also halved until no edge twists by more than 4 tolerances over one (an
+	                                       edge sliding along itself while turning: its hull's notch, a quarter of the twist,
+	                                       within the tolerance), so the result passes the true sweep by about the tolerance
+	                                       at most; many more slabs where long edges turn (max_slabs still caps them) */
 } qaws_sweep_desc;
 
 typedef struct qaws_sweep_report
