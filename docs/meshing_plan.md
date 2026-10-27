@@ -325,6 +325,18 @@ Ideas noted (not ordered):
   et al. 2010): local tetrahedral remeshing during a simulation, quality-driven edge and face operations; next to
   `qaws_volume_mesh_improve`.
 
+### Roadmap (2026-10-27): the reserved methods
+
+Back on the meshing roadmap after the sweeps: the methods still reserved behind `method` (UNSUPPORTED_OPERATION), the
+cheapest and most reused first:
+
+1. **References:** PHONG (done 2026-10-27: Boubekeur and Alexa, a quadratic patch degree-elevated into the PN net; test
+   122), NAGATA (quadratic edge curves from the normals), then G1, SUBDIVISION and MLS.
+2. **Remeshing:** FIELD_ALIGNED (Instant Meshes triangles, on the smoothest 6-RoSy field and the position flow).
+3. **Generation:** PARAMETRIC, RESTRICTED_DELAUNAY, STRUCTURED.
+4. **Tetrahedra:** ENVELOPE (fTetWild-style), STUFFING (isosurface stuffing).
+5. **Hexahedra:** an octree.
+
 ### Attributes through Booleans and sweeps (2026-10-26)
 
 Done: `qaws_mesh_3d_boolean` carries vertex, corner and face attributes (by name; per corner in the result, each

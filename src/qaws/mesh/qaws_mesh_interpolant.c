@@ -1,8 +1,9 @@
 /*
  * The interpolants of mesh references as cubic Bezier triangles: PN
- * (Vlachos et al. 2001, creases by their tangents) and LINEAR (the flat
- * triangle degree-elevated), evaluated with their derivatives, and the
- * curvature of a normal field.
+ * (Vlachos et al. 2001, creases by their tangents), PHONG (Boubekeur and
+ * Alexa 2008: quadratic, degree-elevated) and LINEAR (the flat triangle
+ * degree-elevated), evaluated with their derivatives, and the curvature of a
+ * normal field.
  */
 
 #include "qaws_mesh_internal.h"
@@ -58,7 +59,57 @@ static void mi_edge_point(double* out, double const* Pi, double const* Pj, doubl
 		out[k] = Pi[k] + d[k] / 3;
 }
 
-void mi_build(mi_tri* t, qaws_interpolant kind, double const* const* P, double const* const* N, double const* const* crease)
+#define MI_PHONG_ALPHA 0.75   /* Boubekeur and Alexa's shape factor: the blend of the projections against the flat triangle */
+
+/* Phong tessellation: p*(w) = (1 - a) p(w) + a sum_i w_i pi_i(p(w)), pi_i the projection on corner i's tangent plane, is the
+   quadratic Bezier triangle of corners P_i and edge points (1 - a) (P_i + P_j) / 2 + a (pi_i(P_j) + pi_j(P_i)) / 2, here
+   degree-elevated to the cubic net; an edge along a crease (tangents given) stays straight (Phong has no creases). Normals:
+   the corners' interpolated linearly (Phong shading). */
+static void mi_build_phong(mi_tri* t, double const* const* P, double const* const* N, double const* const* crease)
+{
+	static int const near_i[6] = { 0, 1, 1, 2, 2, 0 }, edge_of[6] = { 0, 0, 1, 1, 2, 2 };
+	double Q[3][3];
+	int e, q, k;
+	for (e = 0; e < 3; e++)
+	{
+		int i = e, j = (e + 1) % 3;
+		double pij[3], pji[3], di = 0, dj = 0;
+		for (k = 0; k < 3; k++)
+		{
+			di += (P[j][k] - P[i][k]) * N[i][k];
+			dj += (P[i][k] - P[j][k]) * N[j][k];
+		}
+		for (k = 0; k < 3; k++)
+		{
+			pij[k] = P[j][k] - di * N[i][k];
+			pji[k] = P[i][k] - dj * N[j][k];
+			Q[e][k] = crease && crease[e] ? 0.5 * (P[i][k] + P[j][k])
+			                               : (1 - MI_PHONG_ALPHA) * 0.5 * (P[i][k] + P[j][k]) + MI_PHONG_ALPHA * 0.5 * (pij[k] + pji[k]);
+		}
+	}
+	for (k = 0; k < 3; k++)
+	{
+		t->p[0][k] = P[0][k];
+		t->p[1][k] = P[1][k];
+		t->p[2][k] = P[2][k];
+		t->p[9][k] = (Q[0][k] + Q[1][k] + Q[2][k]) / 3;
+	}
+	/* (degree elevation: an edge's cubic points a third and two thirds between its corner and its quadratic point) */
+	for (q = 0; q < 6; q++)
+		for (k = 0; k < 3; k++)
+			t->p[3 + q][k] = (P[near_i[q]][k] + 2 * Q[edge_of[q]][k]) / 3;
+	for (k = 0; k < 3; k++)
+	{
+		t->n[0][k] = N[0][k];
+		t->n[1][k] = N[1][k];
+		t->n[2][k] = N[2][k];
+		for (q = 0; q < 3; q++)
+			t->n[3 + q][k] = 0.5 * (N[q][k] + N[(q + 1) % 3][k]);
+	}
+}
+
+/* PN and LINEAR */
+static void mi_build_pn(mi_tri* t, qaws_interpolant kind, double const* const* P, double const* const* N, double const* const* crease)
 {
 	/* edge point (index in the net) near corner i toward corner j: 210 (0 to 1), 120 (1 to 0), 021 (1 to 2), 012 (2 to 1), 102 (2 to 0), 201 (0 to 2) */
 	static int const near_i[6] = { 0, 1, 1, 2, 2, 0 }, near_j[6] = { 1, 0, 2, 1, 0, 2 }, edge_of[6] = { 0, 0, 1, 1, 2, 2 };
@@ -106,6 +157,14 @@ void mi_build(mi_tri* t, qaws_interpolant kind, double const* const* P, double c
 		if (!linear)
 			mi_unit(t->n[3 + q]);
 	}
+}
+
+void mi_build(mi_tri* t, qaws_interpolant kind, double const* const* P, double const* const* N, double const* const* crease)
+{
+	if (kind == QAWS_INTERPOLANT_PHONG)
+		mi_build_phong(t, P, N, crease);
+	else
+		mi_build_pn(t, kind, P, N, crease);
 }
 
 static double mi_pow(double x, int e)

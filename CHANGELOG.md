@@ -29,6 +29,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- References: `QAWS_INTERPOLANT_PHONG` (Phong tessellation, Boubekeur and Alexa 2008), a quadratic patch in the PN machinery
+  (test 122).
 - Decimation merge rules: `qaws_decimate_desc.merges` set how vertex attributes meet in a collapse (MINIMUM, MAXIMUM,
   SUM, AVERAGE; INTERPOLATE by default), so counts are kept in total and extremes survive (test 167).
 - Passes over one place: `qaws_sweep_desc.combines` combine an attribute's values over the passes of a spin (each turn)

@@ -36,9 +36,15 @@
  *            crease too (its curves from the border alone). The default.
  *   LINEAR   the flat triangles, normals interpolated (for shading and
  *            curvature only): for meshes that are the truth.
+ *   PHONG    Phong tessellation (Boubekeur and Alexa 2008): each point the
+ *            corners' tangent-plane projections of the flat point, blended
+ *            by its weights, 3/4 against the flat triangle: a quadratic
+ *            patch (cheaper to read than PN, rounder than flat: on a sphere
+ *            past it by half the flat sag at an edge's middle); C0 across
+ *            edges, normals interpolated linearly; a feature edge straight.
  *
- * PHONG, NAGATA, G1, SUBDIVISION and MLS are reserved for further
- * interpolants (UNSUPPORTED_OPERATION today).
+ * NAGATA, G1, SUBDIVISION and MLS are reserved for further interpolants
+ * (UNSUPPORTED_OPERATION today).
  *
  * Normals: given per vertex, or computed: the faces' normals round each
  * vertex weighted by their angles there, one normal per run of faces

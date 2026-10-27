@@ -7,6 +7,10 @@
  *   - an icosphere with its radial normals: the vertices interpolated, the
  *     patches meeting along their edges (positions and normals), PN far
  *     closer to the sphere than the flat triangles, curvatures near 1;
+ *     PHONG (Boubekeur and Alexa) the same: vertices, edges met, about twice
+ *     closer than the flat triangles (its shape factor 3/4 lifts an edge's
+ *     middle by 3/16 |d|^2 where the sphere needs 1/8: past it by half the
+ *     flat sag);
  *   - a cylinder: curvatures 1 / r and 0, the first direction round it;
  *   - a cube with its creases detected: every PN point on the cube;
  *   - projection against brute force (LINEAR and PN), and with a hint the
@@ -213,10 +217,11 @@ static void test_sphere(void)
 {
 	ts_mesh t;
 	qaws_mesh_3d* m;
-	qaws_mesh_reference *pn, *lin;
+	qaws_mesh_reference *pn, *lin, *ph;
 	qaws_scalar* nrm;
 	unsigned int i, s = 5, nt, okv = 1;
-	double vmax = 0, cmax = 0, nmax = 0, epn = 0, elin = 0, kmax = 0;
+	double vmax = 0, cmax = 0, nmax = 0, epn = 0, elin = 0, kmax = 0, eph = 0;
+	unsigned int r;
 	char msg[400];
 	ts_icosphere(&t, 2);
 	m = ts_make(&t);
@@ -225,25 +230,29 @@ static void test_sphere(void)
 		nrm[i] = (qaws_scalar)t.x[i];
 	pn = ts_ref(m, QAWS_INTERPOLANT_PN, nrm);
 	lin = ts_ref(m, QAWS_INTERPOLANT_LINEAR, nrm);
-	if (!m || !pn || !lin)
+	ph = ts_ref(m, QAWS_INTERPOLANT_PHONG, nrm);
+	if (!m || !pn || !lin || !ph)
 	{
 		TEST_ASSERT(0, "sphere: the references");
 		goto done;
 	}
 	nt = qaws_mesh_reference_get_triangle_count(pn);
-	/* the vertices interpolated */
+	/* the vertices interpolated (PN, then PHONG) */
+	for (r = 0; r < 2; r++)
 	for (i = 0; i < t.nv; i++)
 	{
 		qaws_mesh_location l;
 		qaws_scalar x[3];
-		okv &= qaws_mesh_reference_get_vertex_location(&l, pn, i) == QAWS_STATUS_OK;
-		qaws_mesh_reference_evaluate(x, NULL, NULL, pn, &l, 1);
+		okv &= qaws_mesh_reference_get_vertex_location(&l, r ? ph : pn, i) == QAWS_STATUS_OK;
+		qaws_mesh_reference_evaluate(x, NULL, NULL, r ? ph : pn, &l, 1);
 		vmax = fmax(vmax, fabs(x[0] - t.x[3 * i]) + fabs(x[1] - t.x[3 * i + 1]) + fabs(x[2] - t.x[3 * i + 2]));
 	}
 	/* the patches meet along their edges: each triangle edge's points from both sides */
+	for (r = 0; r < 2; r++)
 	for (i = 0; i < 3 * nt; i++)
 	{
-		unsigned int nb = pn->ta[i], tt = i / 3, e = i % 3, j;
+		qaws_mesh_reference const* rr = r ? ph : pn;
+		unsigned int nb = rr->ta[i], tt = i / 3, e = i % 3, j;
 		if (nb == HM_NONE)
 			continue;
 		for (j = 1; j < 4; j++)
@@ -252,13 +261,13 @@ static void test_sphere(void)
 			unsigned int u = nb / 3, ue = nb % 3;
 			b1[e] = 1 - lam; b1[(e + 1) % 3] = lam;
 			b2[ue] = lam; b2[(ue + 1) % 3] = 1 - lam;
-			mi_eval(&pn->patch[tt], b1[1], b1[2], x1, NULL, NULL, NULL, NULL, NULL, n1, NULL, NULL);
-			mi_eval(&pn->patch[u], b2[1], b2[2], x2, NULL, NULL, NULL, NULL, NULL, n2, NULL, NULL);
+			mi_eval(&rr->patch[tt], b1[1], b1[2], x1, NULL, NULL, NULL, NULL, NULL, n1, NULL, NULL);
+			mi_eval(&rr->patch[u], b2[1], b2[2], x2, NULL, NULL, NULL, NULL, NULL, n2, NULL, NULL);
 			cmax = fmax(cmax, fabs(x1[0] - x2[0]) + fabs(x1[1] - x2[1]) + fabs(x1[2] - x2[2]));
 			nmax = fmax(nmax, fabs(n1[0] - n2[0]) + fabs(n1[1] - n2[1]) + fabs(n1[2] - n2[2]));
 		}
 	}
-	sprintf(msg, "icosphere: vertices interpolated (%.2g), patches meet along edges (positions %.2g, normals %.2g)", vmax, cmax, nmax);
+	sprintf(msg, "icosphere, PN and PHONG: vertices interpolated (%.2g), patches meet along edges (positions %.2g, normals %.2g)", vmax, cmax, nmax);
 	TEST_ASSERT(okv && vmax < TEST_BOUND(1e-12, 32) && cmax < TEST_BOUND(1e-12, 32) && nmax < TEST_BOUND(1e-12, 32), msg);
 	/* closer to the sphere than the flat triangles; curvatures near 1 */
 	for (i = 0; i < 2000; i++)
@@ -267,15 +276,23 @@ static void test_sphere(void)
 		qaws_scalar x[3], y[3], k[8];
 		qaws_mesh_reference_evaluate(x, NULL, k, pn, &l, 1);
 		qaws_mesh_reference_evaluate(y, NULL, NULL, lin, &l, 1);
+		{
+			qaws_scalar z[3];
+			qaws_mesh_reference_evaluate(z, NULL, NULL, ph, &l, 1);
+			eph = fmax(eph, fabs(sqrt(z[0] * z[0] + z[1] * z[1] + z[2] * z[2]) - 1));
+		}
 		epn = fmax(epn, fabs(sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]) - 1));
 		elin = fmax(elin, fabs(sqrt(y[0] * y[0] + y[1] * y[1] + y[2] * y[2]) - 1));
 		kmax = fmax(kmax, fmax(fabs(k[0] - 1), fabs(k[1] - 1)));
 	}
-	sprintf(msg, "icosphere of %u triangles: off the sphere PN %.3g, flat %.3g (%.0fx); PN curvatures off 1 by %.3g", nt, epn, elin, elin / epn, kmax);
-	TEST_ASSERT(epn < elin / 10 && kmax < 0.08, msg);
+	sprintf(msg, "icosphere of %u triangles: off the sphere PN %.3g, PHONG %.3g, flat %.3g (%.0fx, %.1fx); PN curvatures off 1 by %.3g", nt, epn, eph,
+		elin, elin / epn, elin / eph, kmax);
+	printf("  %s\n", msg);
+	TEST_ASSERT(epn < elin / 10 && eph < elin / 1.5 && eph > elin / 3 && kmax < 0.08, msg);
 done:
 	qaws_mesh_reference_destroy(pn);
 	qaws_mesh_reference_destroy(lin);
+	qaws_mesh_reference_destroy(ph);
 	qaws_mesh_3d_destroy(m);
 	free(nrm);
 	ts_free(&t);
@@ -563,7 +580,7 @@ static void test_attributes_and_refusals(void)
 		qaws_mesh_location l;
 		qaws_status s1, s2;
 		memset(&dd, 0, sizeof dd);
-		dd.interpolant = QAWS_INTERPOLANT_NAGATA;
+		dd.interpolant = QAWS_INTERPOLANT_MLS;
 		s1 = qaws_mesh_reference_create(&bad, m, &dd);
 		l.patch = 100000; l.a = 0; l.b = 0;
 		s2 = r ? qaws_mesh_reference_evaluate(NULL, NULL, NULL, r, &l, 1) : QAWS_STATUS_OK;

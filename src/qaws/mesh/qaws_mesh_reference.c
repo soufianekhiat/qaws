@@ -266,7 +266,7 @@ qaws_status qaws_mesh_reference_create(qaws_mesh_reference** out, qaws_mesh_3d c
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if ((unsigned int)kind > QAWS_INTERPOLANT_MLS)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	if (kind != QAWS_INTERPOLANT_PN && kind != QAWS_INTERPOLANT_LINEAR)
+	if (kind != QAWS_INTERPOLANT_PN && kind != QAWS_INTERPOLANT_LINEAR && kind != QAWS_INTERPOLANT_PHONG)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	r = (qaws_mesh_reference*)qaws_internal_zalloc(1, sizeof *r);
 	if (!r)
