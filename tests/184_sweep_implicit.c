@@ -7,6 +7,7 @@
  *     volumes within 2%;
  *   - a vertex motion (a box's top rising from 1 to 2): closed, volume 2 within 3%;
  *   - refusals: no mesh, a vertex motion of another count;
+ *   - an attribute track: a vertex "heat" animated from 0 to 1 equals the generated time at every corner;
  *   - generated attributes (qaws_sweep_desc.generate): the cube moved by (1, 1, 0) at a constant rate: velocity (1, 1, 0)
  *     at every corner, distance sqrt 2 times the time, orientation the identity, and each corner its source point (its
  *     source_face and source_uv on the cube) moved by (time, time, 0), within a cell;
@@ -369,6 +370,73 @@ static void test_generate(void)
 	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o);
 }
 
+/* a sweep of b by m with "heat" (a vertex attribute) animated from 0 at t = 0 to 1 at t = 1, the generated time beside it:
+   the largest gap between them over the corners (-1: missing); st the call's status */
+static double si_heat_gap(qaws_mesh_3d* b, qaws_motion const* m, int implicit, double tol, qaws_status* st)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(b), i, id;
+	qaws_scalar* keys = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * nv);
+	qaws_scalar times[2] = { 0, 1 }, *zero = (qaws_scalar*)calloc(nv, sizeof(qaws_scalar)), *hv, *tv;
+	qaws_attribute_desc ad;
+	qaws_attribute_track tr;
+	qaws_sweep_desc d;
+	qaws_mesh_3d* o = NULL;
+	double gap = -1;
+	memset(&ad, 0, sizeof ad);
+	ad.name = "heat"; ad.element = QAWS_MESH_VERTEX; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	if (qaws_mesh_3d_find_attribute(&id, b, "heat") != QAWS_STATUS_OK)
+		qaws_mesh_3d_add_attribute(&id, b, zero, &ad);
+	for (i = 0; i < nv; i++)
+	{
+		keys[i] = 0;
+		keys[nv + i] = 1;
+	}
+	tr.name = "heat"; tr.times = times; tr.values = keys; tr.key_count = 2;
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)tol;
+	d.resolution = 24;
+	d.generate = QAWS_SWEEP_GENERATE_TIME;
+	d.tracks = &tr;
+	d.track_count = 1;
+	*st = implicit ? qaws_mesh_3d_sweep_implicit(&o, NULL, b, m, &d) : qaws_mesh_3d_sweep(&o, NULL, b, m, &d);
+	if (o && (hv = si_corner_values(o, "heat", 1)) != NULL)
+	{
+		if ((tv = si_corner_values(o, "time", 1)) != NULL)
+		{
+			gap = 0;
+			for (i = 0; i < qaws_mesh_3d_get_corner_count(o); i++)
+				gap = fmax(gap, fabs((double)hv[i] - (double)tv[i]));
+			free(tv);
+		}
+		free(hv);
+	}
+	qaws_mesh_3d_destroy(o);
+	free(keys); free(zero);
+	return gap;
+}
+
+static void test_track(void)
+{
+	qaws_mesh_3d* c = si_box(0, 1, 0, 1, 0, 1);
+	qaws_motion* m = NULL;
+	qaws_motion_pose s, e;
+	qaws_status st;
+	double g;
+	char msg[200];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	e.position.x = e.position.y = 1;
+	s.velocity = e.velocity = e.position;
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	g = si_heat_gap(c, m, 1, 0, &st);
+	sprintf(msg, "a track implicitly: heat off the time by %.1e", g);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && g >= 0 && g < 1e-9, msg);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(c);
+}
+
 int test_184_sweep_implicit_main(void)
 {
 	g_pass = 0;
@@ -378,6 +446,7 @@ int test_184_sweep_implicit_main(void)
 	test_vertex_motion();
 	test_attributes();
 	test_generate();
+	test_track();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

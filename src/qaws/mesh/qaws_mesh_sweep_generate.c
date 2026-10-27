@@ -47,6 +47,72 @@ static double sg_at(double const* tab, double t)
 	return tab[i] + (x - i) * (tab[i + 1] - tab[i]);
 }
 
+qaws_attribute_track const* swp_track(qaws_sweep_desc const* desc, char const* name)
+{
+	unsigned int i;
+	if (!desc || !name)
+		return NULL;
+	for (i = 0; i < desc->track_count; i++)
+		if (desc->tracks[i].name && !strcmp(desc->tracks[i].name, name))
+			return &desc->tracks[i];
+	return NULL;
+}
+
+qaws_status swp_tracks_check(qaws_sweep_desc const* desc, qaws_mesh_3d const* mesh)
+{
+	unsigned int i, k, id;
+	if (!desc || !desc->track_count)
+		return QAWS_STATUS_OK;
+	if (!desc->tracks)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < desc->track_count; i++)
+	{
+		qaws_attribute_track const* tr = &desc->tracks[i];
+		qaws_attribute_desc d;
+		if (!tr->name || !tr->key_count || !tr->times || !tr->values || qaws_mesh_3d_find_attribute(&id, mesh, tr->name) != QAWS_STATUS_OK)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		qaws_mesh_3d_get_attribute_desc(&d, mesh, id);
+		if (d.element == QAWS_MESH_EDGE)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		for (k = 0; k < tr->key_count; k++)
+			if (!isfinite((double)tr->times[k]) || (k && !((double)tr->times[k] > (double)tr->times[k - 1])))
+				return QAWS_STATUS_INVALID_ARGUMENT;
+	}
+	return QAWS_STATUS_OK;
+}
+
+void swp_track_value(qaws_attribute_track const* tr, unsigned int count, unsigned int n, unsigned int rule, unsigned int e, double t, double* out)
+{
+	unsigned int k = 0, lo = 0, hi = tr->key_count - 1, j;
+	double a[16], b[16], s = 0;
+	if (tr->key_count == 1 || t <= (double)tr->times[0])
+		k = 0;
+	else if (t >= (double)tr->times[hi])
+		k = hi;
+	else
+	{
+		while (hi - lo > 1)
+		{
+			unsigned int mid = (lo + hi) / 2;
+			if ((double)tr->times[mid] <= t)
+				lo = mid;
+			else
+				hi = mid;
+		}
+		k = lo;
+		s = (t - (double)tr->times[lo]) / ((double)tr->times[hi] - (double)tr->times[lo]);
+	}
+	for (j = 0; j < n; j++)
+	{
+		a[j] = (double)tr->values[((size_t)k * count + e) * n + j];
+		b[j] = s > 0 ? (double)tr->values[((size_t)(k + 1) * count + e) * n + j] : a[j];
+	}
+	if (s > 0)
+		hm_lerp(out, a, b, s, n, rule);
+	else
+		memcpy(out, a, sizeof(double) * n);
+}
+
 double swp_time_at_angle(qaws_motion const* m, double angle)
 {
 	double* ang = (double*)qaws_internal_scratch_malloc(sizeof(double) * 2 * (SG_STEPS + 1));

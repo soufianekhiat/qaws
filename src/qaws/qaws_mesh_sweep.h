@@ -127,6 +127,19 @@ typedef enum qaws_sweep_generate
 } qaws_sweep_generate;
 #endif
 
+/* An attribute of the body animated over the motion: keys at increasing times in [0, 1], each holding every value of the
+   attribute (its element count times its components, as qaws_mesh_3d_get_attribute gives them). The sweep reads it at the
+   time each place was swept (as the generated attributes), between the two keys about it blended by the attribute's rule
+   (colours in their space, quaternions on the short arc, NEAREST the nearer key); before the first key the first, after
+   the last the last. Borrowed for the call. */
+typedef struct qaws_attribute_track
+{
+	char const* name;                   /* an attribute of the body (vertex, corner or face) */
+	qaws_scalar const* times;           /* key_count, increasing */
+	qaws_scalar const* values;          /* key_count times the attribute's values */
+	unsigned int key_count;
+} qaws_attribute_track;
+
 typedef struct qaws_sweep_desc
 {
 	qaws_scalar tolerance;              /* the chords' largest deviation; 0: 1e-3 of the mesh's box diagonal */
@@ -141,6 +154,8 @@ typedef struct qaws_sweep_desc
 	                                       to the report's spin_drift); 0: such a spin is swept by slabs (slow) */
 	unsigned int resolution;            /* qaws_mesh_3d_sweep_implicit: cells along the result's box's longest side; 0: 64 */
 	unsigned int generate;              /* qaws_sweep_generate flags ORed: the attributes to add */
+	qaws_attribute_track const* tracks; /* attributes animated over the motion (NULL: none) */
+	unsigned int track_count;
 	int strict;                         /* nonzero: slabs also halved until no edge twists by more than 4 tolerances over one (an
 	                                       edge sliding along itself while turning: its hull's notch, a quarter of the twist,
 	                                       within the tolerance), so the result passes the true sweep by about the tolerance

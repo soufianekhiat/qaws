@@ -14,6 +14,7 @@
 #include "../internal/qaws_internal_ldlt.h"
 #include "../qaws_mesh_boolean.h"
 #include "../qaws_motion.h"
+#include "../qaws_mesh_sweep.h"
 
 /* qaws_mesh_boolean; one: edges inside flat regions turned only between pieces of one source face; out_turned (may be
    NULL, freed by the caller): per result face, 1 where it was turned over (qaws_internal_free; NULL on failure) */
@@ -316,8 +317,9 @@ typedef struct wt_cross
 
 /* the swept mesh's attributes onto out (qaws_mesh_sweep.c): per out corner its source triangle (of the mesh's nt, faces fanned
    from their first corner), weights on it and a rotation (9, NULL none); edges: out edges from points of one mesh edge take
-   its values (else zeros) */
-qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* csrc, double const* cw, double const* cR, int edges);
+   its values (else zeros); ct, desc: each corner's time and the sweep's tracks (NULL: none) */
+qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int nt, unsigned int const* csrc, double const* cw, double const* cR, int edges,
+	double const* ct, qaws_sweep_desc const* desc);
 
 /* the generated attributes (qaws_sweep_desc.generate) onto out (qaws_mesh_sweep_generate.c): per out corner its time (ct), its
    source triangle (of the mesh's nt) and weights */
@@ -325,6 +327,11 @@ qaws_status swp_generate(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_motio
 	unsigned int const* csrc, double const* cw, double const* ct);
 /* the time a rigid motion has turned by angle (radians, summed; 0 or 1 past its ends) */
 double swp_time_at_angle(qaws_motion const* m, double angle);
+/* the sweep's track of an attribute by name (NULL: none); the tracks checked against the body (INVALID_ARGUMENT); element e's
+   value of a track at t (count elements of n components, blended by rule) */
+qaws_attribute_track const* swp_track(qaws_sweep_desc const* desc, char const* name);
+qaws_status swp_tracks_check(qaws_sweep_desc const* desc, qaws_mesh_3d const* mesh);
+void swp_track_value(qaws_attribute_track const* tr, unsigned int count, unsigned int n, unsigned int rule, unsigned int e, double t, double* out);
 
 /* a field to contour (wt_contour_field, qaws_mesh_offset.c): phi at n points (3 each), negative inside, and when grad is
    not NULL its gradient (3 each) */

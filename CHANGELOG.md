@@ -29,6 +29,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Attribute tracks: `qaws_sweep_desc.tracks` animate the body's vertex, corner or face attributes by keys over the motion;
+  each place of the sweep takes the value at the time it was swept, blended between keys by the attribute's rule (tests
+  180, 184, figure 74).
 - Generated sweep attributes: `qaws_sweep_desc.generate` ORs `qaws_sweep_generate` flags (`TIME`, `INDEX`, `ANGLE`,
   `ORIENTATION`, `POSITION`, `VELOCITY`, `DISTANCE`, `SOURCE`), per corner from the time each place was swept and the
   body's point that swept it, by slabs, spins and implicitly (tests 180, 184, figure 73).

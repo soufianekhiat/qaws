@@ -393,8 +393,10 @@ static qaws_status swi_sources(swi_ctx* c, double const* x, size_t n, unsigned i
    it on the source's triangle or, when it lies on an edge or a corner of the shape (a wall an edge sweeps, a seam), on the
    triangle there whose normal at that time is nearest its own triangle's: one face's values on each side of a seam, the
    same point (so the same values) where they are continuous */
-static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int generate)
+static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_sweep_desc const* desc)
 {
+	unsigned int generate = desc ? desc->generate : 0;
+	double* ct = NULL;
 	unsigned int nvo = qaws_mesh_3d_get_vertex_count(out), nto = qaws_mesh_3d_get_triangle_count(out), i, k, j;
 	qaws_scalar* xo = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nvo + 1));
 	unsigned int* tri = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nto + 1));
@@ -509,21 +511,18 @@ static qaws_status swi_attributes(swi_ctx* c, qaws_mesh_3d* out, qaws_mesh_3d co
 			swi_weights(c, best, q, w + 3 * (size_t)cc);
 		}
 	}
-	st = swp_carry(out, mesh, c->nt, src + nvo, w + 3 * (size_t)nvo, c->pv ? NULL : cR, 0);
-	if (st == QAWS_STATUS_OK && generate)
+	/* (each corner at its vertex's time) */
+	if ((ct = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nto + 1))) == NULL)
 	{
-		/* (each corner at its vertex's time) */
-		double* ct = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nto + 1));
-		if (!ct)
-			st = QAWS_STATUS_ALLOCATION_FAILURE;
-		else
-		{
-			for (i = 0; i < 3 * nto; i++)
-				ct[i] = tb[tri[i]];
-			st = swp_generate(out, mesh, c->m, generate, c->nt, src + nvo, w + 3 * (size_t)nvo, ct);
-		}
-		qaws_internal_free(ct);
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
 	}
+	for (i = 0; i < 3 * nto; i++)
+		ct[i] = tb[tri[i]];
+	st = swp_carry(out, mesh, c->nt, src + nvo, w + 3 * (size_t)nvo, c->pv ? NULL : cR, 0, ct, desc);
+	if (st == QAWS_STATUS_OK && generate)
+		st = swp_generate(out, mesh, c->m, generate, c->nt, src + nvo, w + 3 * (size_t)nvo, ct);
+	qaws_internal_free(ct);
 done:
 	qaws_internal_free(xo); qaws_internal_free(tri); qaws_internal_free(X); qaws_internal_free(src); qaws_internal_free(w); qaws_internal_free(tb);
 	qaws_internal_free(cR); qaws_internal_free(tn); qaws_internal_free(vto); qaws_internal_free(vtl);
@@ -554,7 +553,7 @@ qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_repo
 	c.nt = qaws_mesh_3d_get_triangle_count(mesh);
 	c.ex = desc ? desc->executor : NULL;
 	c.cur = ~0u;
-	if (!c.nt || (c.pv && qaws_motion_get_vertex_count(motion) != c.nv))
+	if (!c.nt || (c.pv && qaws_motion_get_vertex_count(motion) != c.nv) || swp_tracks_check(desc, mesh) != QAWS_STATUS_OK)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	c.t = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 3 * (size_t)c.nt + 1));
 	c.x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c.nv + 1));
@@ -647,7 +646,7 @@ qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_repo
 	st = wt_contour_field(out_mesh, &info, swi_eval, &c, lo, hi, cell, res, 1.0);
 	report->closed = info.closed;
 	if (st == QAWS_STATUS_OK && *out_mesh && (qaws_mesh_3d_get_attribute_count(mesh) || (desc && desc->generate)))
-		st = swi_attributes(&c, *out_mesh, mesh, desc ? desc->generate : 0);
+		st = swi_attributes(&c, *out_mesh, mesh, desc);
 	if (st != QAWS_STATUS_OK)
 	{
 		qaws_mesh_3d_destroy(*out_mesh);

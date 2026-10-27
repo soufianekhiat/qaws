@@ -42,6 +42,8 @@
  *   - generated attributes by slabs: a box turned a quarter about z at tolerance 0.01: orientation the turn by its
  *     angle, and each corner its source point turned by it within 3 tolerances (walls and cut faces
  *     interpolate between their layers);
+ *   - attribute tracks: a vertex "heat" animated from 0 to 1 over the motion equals the generated time at every corner, by
+ *     slabs (a box turned a quarter) and through a spin (revolved); a track naming no attribute refused;
  *   - a vertex motion of another vertex count refused.
  */
 
@@ -712,6 +714,83 @@ static void test_slab_generate(void)
 	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
 }
 
+/* a sweep of b by m with "heat" (a vertex attribute) animated from 0 at t = 0 to 1 at t = 1, the generated time beside it:
+   the largest gap between them over the corners (-1: missing); st the call's status */
+static double sw_heat_gap(qaws_mesh_3d* b, qaws_motion const* m, int implicit, double tol, qaws_status* st)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(b), i, id;
+	qaws_scalar* keys = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 2 * nv);
+	qaws_scalar times[2] = { 0, 1 }, *zero = (qaws_scalar*)calloc(nv, sizeof(qaws_scalar)), *hv, *tv;
+	qaws_attribute_desc ad;
+	qaws_attribute_track tr;
+	qaws_sweep_desc d;
+	qaws_mesh_3d* o = NULL;
+	double gap = -1;
+	memset(&ad, 0, sizeof ad);
+	ad.name = "heat"; ad.element = QAWS_MESH_VERTEX; ad.components = 1; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	if (qaws_mesh_3d_find_attribute(&id, b, "heat") != QAWS_STATUS_OK)
+		qaws_mesh_3d_add_attribute(&id, b, zero, &ad);
+	for (i = 0; i < nv; i++)
+	{
+		keys[i] = 0;
+		keys[nv + i] = 1;
+	}
+	tr.name = "heat"; tr.times = times; tr.values = keys; tr.key_count = 2;
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)tol;
+	d.resolution = 24;
+	d.generate = QAWS_SWEEP_GENERATE_TIME;
+	d.tracks = &tr;
+	d.track_count = 1;
+	*st = implicit ? qaws_mesh_3d_sweep_implicit(&o, NULL, b, m, &d) : qaws_mesh_3d_sweep(&o, NULL, b, m, &d);
+	if (o && (hv = sw_corner_values(o, "heat", 1)) != NULL)
+	{
+		if ((tv = sw_corner_values(o, "time", 1)) != NULL)
+		{
+			gap = 0;
+			for (i = 0; i < qaws_mesh_3d_get_corner_count(o); i++)
+				gap = fmax(gap, fabs((double)hv[i] - (double)tv[i]));
+			free(tv);
+		}
+		free(hv);
+	}
+	qaws_mesh_3d_destroy(o);
+	free(keys); free(zero);
+	return gap;
+}
+
+static void test_tracks(void)
+{
+	qaws_mesh_3d *b = sw_box(1, 2, -0.1, 0.1, 0, 0.6), *bs = sw_box(0.5, 1, -0.25, 0.25, 0, 0.5), *o = NULL;
+	qaws_motion_pose s, e;
+	qaws_motion *m = NULL, *ms = sw_spin(0.001);
+	qaws_status s1, s2, s3;
+	qaws_attribute_track bad;
+	qaws_sweep_desc d;
+	qaws_scalar t2[2] = { 0, 1 }, v2[2] = { 0, 1 };
+	double g1, g2;
+	char msg[300];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	e.rotation[0] = (qaws_scalar)cos(SW_PI / 4);
+	e.rotation[3] = (qaws_scalar)sin(SW_PI / 4);
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(SW_PI / 2);
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	g1 = sw_heat_gap(b, m, 0, 0.01, &s1);
+	g2 = sw_heat_gap(bs, ms, 0, 0.002, &s2);
+	bad.name = "none"; bad.times = t2; bad.values = v2; bad.key_count = 2;
+	memset(&d, 0, sizeof d);
+	d.tracks = &bad;
+	d.track_count = 1;
+	s3 = qaws_mesh_3d_sweep(&o, NULL, b, m, &d);
+	sprintf(msg, "tracks: heat off the time by %.1e by slabs, %.1e through a spin; a track of no attribute refused %d", g1, g2, (int)s3);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s1 == QAWS_STATUS_OK && s2 == QAWS_STATUS_OK && g1 >= 0 && g1 < 1e-9 && g2 >= 0 && g2 < 1e-9 && s3 == QAWS_STATUS_INVALID_ARGUMENT && !o, msg);
+	qaws_motion_destroy(m); qaws_motion_destroy(ms);
+	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(bs);
+}
+
 static void test_refusals(void)
 {
 	qaws_mesh_3d *c = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -743,6 +822,7 @@ int test_180_mesh_sweep_main(void)
 	test_strict();
 	test_spin_generate();
 	test_slab_generate();
+	test_tracks();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
