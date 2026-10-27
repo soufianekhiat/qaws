@@ -19,6 +19,7 @@
 #include "../qaws_volume_improve.h"
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_tetrahedralize.h"
+#include "../qaws_mesh_bvh.h"
 #include "../internal/qaws_internal_wide.h"
 #include <stdlib.h>
 #include <string.h>
@@ -1344,6 +1345,478 @@ out:
 	return result;
 }
 
+/* ======================================================================== */
+/*  STUFFING: isosurface stuffing (Labelle and Shewchuk 2007)               */
+/* ======================================================================== */
+
+static int tt_u64_cmp(void const* p, void const* q)
+{
+	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
+	return a < b ? -1 : a > b;
+}
+
+/* the index of edge {a, b} among the sorted edges (present by construction) */
+static size_t tt_find_edge(unsigned long long const* e, size_t ne, unsigned int a, unsigned int b)
+{
+	unsigned long long key = a < b ? (unsigned long long)a << 32 | b : (unsigned long long)b << 32 | a;
+	size_t l = 0, h = ne;
+	while (l < h)
+	{
+		size_t m = (l + h) / 2;
+		if (e[m] < key)
+			l = m + 1;
+		else
+			h = m;
+	}
+	return l;
+}
+
+/* a prism (bottom v[0..2], top v[3..5], v[k + 3] over v[k]) in three tetrahedra by Dompierre et al.'s rule: each quad
+   cut through its smallest vertex, so prisms sharing a quad cut it alike; out: 12 vertices */
+static void tt_prism(unsigned int const* v, unsigned int* out)
+{
+	unsigned int w[6], best = 0, r, fl, k;
+	for (r = 0; r < 3; r++)
+		for (fl = 0; fl < 2; fl++)
+		{
+			unsigned int at = (fl ? 3 : 0) + r;
+			if (v[at] < v[best])
+				best = at;
+		}
+	r = best % 3;
+	fl = best >= 3;
+	for (k = 0; k < 3; k++)
+	{
+		w[k] = v[(fl ? 3 : 0) + (k + r) % 3];
+		w[k + 3] = v[(fl ? 0 : 3) + (k + r) % 3];
+	}
+	if ((w[1] < w[5] ? w[1] : w[5]) < (w[2] < w[4] ? w[2] : w[4]))
+	{
+		unsigned int t[12] = { w[0], w[1], w[2], w[5], w[0], w[1], w[5], w[4], w[0], w[4], w[5], w[3] };
+		memcpy(out, t, sizeof t);
+	}
+	else
+	{
+		unsigned int t[12] = { w[0], w[1], w[2], w[4], w[0], w[4], w[2], w[5], w[0], w[4], w[5], w[3] };
+		memcpy(out, t, sizeof t);
+	}
+}
+
+/* STUFFING: a body-centred cubic lattice of spacing h over the border's box (cube corners and centres; each pair of
+   neighbouring centres and the four edges of their shared square make four tetrahedra), the signed distance to the
+   border at its vertices (negative inside: the winding number, so soups and small holes do), each edge crossing the
+   surface cut where the distance vanishes (secant steps); a vertex closer to a cut than 0.24999 of a cube edge or 0.41189
+   of a diagonal (Labelle and Shewchuk's alphas) warped onto it (its cuts gone); then each tetrahedron's inside: whole,
+   a corner tetrahedron, or a prism in three (tt_prism, conforming across neighbours). The border is the surface's
+   approximation by the cuts and warped vertices, not the input's triangles. */
+static qaws_status tt_stuffing(qaws_mesh_3d const* boundary, qaws_tetrahedralize_desc const* desc, qaws_volume_mesh** out_mesh, qaws_mesh_report* rep)
+{
+	qaws_hm const* hb = &boundary->hm;
+	qaws_mesh_bvh* bvh = NULL;
+	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, h, *X = NULL, *phi = NULL, *cx = NULL;
+	unsigned int n[3], nc, nce, nv, i, j, k, a, *tets = NULL, ntet = 0, cap = 0, *out = NULL, nout = 0, *used = NULL, nused = 0;
+	unsigned long long* edges = NULL;
+	size_t ne = 0, ecap = 0, q;
+	double* t = NULL;
+	qaws_scalar *pts = NULL, *dist = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < hb->nv; i++)
+		if (hb->vc[i] != HM_NONE)
+			for (k = 0; k < 3; k++)
+			{
+				lo[k] = fmin(lo[k], hb->x[3 * (size_t)i + k]);
+				hi[k] = fmax(hi[k], hb->x[3 * (size_t)i + k]);
+			}
+	if (!(hi[0] >= lo[0]))
+		return QAWS_STATUS_INVALID_TOPOLOGY;
+	h = desc->target_length > 0 ? (double)desc->target_length : 0;
+	if (h == 0)
+	{
+		qaws_mesh_quality qq;
+		qaws_mesh_3d_measure_quality(&qq, boundary);
+		h = qq.mean_edge > 0 ? (double)qq.mean_edge : 0.1 * (hi[0] - lo[0] + hi[1] - lo[1] + hi[2] - lo[2]);
+	}
+	/* (the cubes: a cube's margin round the box) */
+	for (k = 0; k < 3; k++)
+	{
+		n[k] = (unsigned int)ceil((hi[k] - lo[k]) / h) + 2;
+		lo[k] -= h;
+	}
+	if ((double)(n[0] + 1) * (n[1] + 1) * (n[2] + 1) * 2 > 4e7)
+		return QAWS_STATUS_INVALID_ARGUMENT;   /* (the lattice past 40 million vertices: the size too small for the box) */
+	nc = (n[0] + 1) * (n[1] + 1) * (n[2] + 1);
+	nce = n[0] * n[1] * n[2];
+	nv = nc + nce;
+	X = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)nv));
+	phi = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (size_t)nv));
+	pts = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv));
+	dist = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)nv));
+	if (!X || !phi || !pts || !dist)
+		goto done;
+	for (k = 0; k <= n[2]; k++)
+		for (j = 0; j <= n[1]; j++)
+			for (i = 0; i <= n[0]; i++)
+			{
+				size_t v = i + (size_t)(n[0] + 1) * (j + (size_t)(n[1] + 1) * k);
+				X[3 * v] = lo[0] + h * i;
+				X[3 * v + 1] = lo[1] + h * j;
+				X[3 * v + 2] = lo[2] + h * k;
+			}
+	for (k = 0; k < n[2]; k++)
+		for (j = 0; j < n[1]; j++)
+			for (i = 0; i < n[0]; i++)
+			{
+				size_t v = nc + i + (size_t)n[0] * (j + (size_t)n[1] * k);
+				X[3 * v] = lo[0] + h * (i + 0.5);
+				X[3 * v + 1] = lo[1] + h * (j + 0.5);
+				X[3 * v + 2] = lo[2] + h * (k + 0.5);
+			}
+	if ((st = qaws_mesh_bvh_create_mesh_3d(&bvh, boundary, NULL)) != QAWS_STATUS_OK)
+		goto done;
+	for (q = 0; q < 3 * (size_t)nv; q++)
+		pts[q] = (qaws_scalar)X[q];
+	if ((st = qaws_mesh_bvh_signed_distance(dist, NULL, bvh, pts, nv, NULL)) != QAWS_STATUS_OK)
+		goto done;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	for (q = 0; q < nv; q++)
+		phi[q] = (double)dist[q];
+	/* the lattice's tetrahedra not wholly outside, and their edges crossing the surface */
+	for (a = 0; a < 3; a++)
+	{
+		unsigned int b = (a + 1) % 3, c = (a + 2) % 3, m[3];
+		for (m[2] = 0; m[2] < n[2]; m[2]++)
+			for (m[1] = 0; m[1] < n[1]; m[1]++)
+				for (m[0] = 0; m[0] < n[0]; m[0]++)
+				{
+					unsigned int m2[3], f[4][3], e, z, c1, c2, fv[4];
+					if (m[a] + 1 >= n[a])
+						continue;
+					m2[0] = m[0]; m2[1] = m[1]; m2[2] = m[2];
+					m2[a]++;
+					c1 = nc + m[0] + n[0] * (m[1] + n[1] * m[2]);
+					c2 = nc + m2[0] + n[0] * (m2[1] + n[1] * m2[2]);
+					/* (the shared square at m[a] + 1 along a: its corners in order round it) */
+					for (z = 0; z < 4; z++)
+					{
+						f[z][a] = m[a] + 1;
+						f[z][b] = m[b] + (z == 1 || z == 2);
+						f[z][c] = m[c] + (z >= 2);
+						fv[z] = f[z][0] + (n[0] + 1) * (f[z][1] + (n[1] + 1) * f[z][2]);
+					}
+					for (e = 0; e < 4; e++)
+					{
+						unsigned int tv[4] = { c1, c2, fv[e], fv[(e + 1) % 4] }, y, inside = 0;
+						for (y = 0; y < 4; y++)
+							inside += phi[tv[y]] <= 0;
+						if (!inside)
+							continue;
+						if (ntet == cap)
+						{
+							unsigned int nc2 = 2 * cap + 1024, *g = (unsigned int*)qaws_internal_realloc(tets, qaws_internal_mul3(sizeof(unsigned int), 4, nc2));
+							if (!g)
+								goto done;
+							tets = g;
+							cap = nc2;
+						}
+						memcpy(tets + 4 * (size_t)ntet++, tv, sizeof tv);
+						for (y = 0; y < 4; y++)
+						{
+							unsigned int z2;
+							for (z2 = y + 1; z2 < 4; z2++)
+							{
+								unsigned int p = tv[y], r = tv[z2];
+								if ((phi[p] < 0 && phi[r] > 0) || (phi[p] > 0 && phi[r] < 0))
+								{
+									if (ne == ecap)
+									{
+										size_t n2 = 2 * ecap + 1024;
+										unsigned long long* g = (unsigned long long*)qaws_internal_realloc(edges, qaws_internal_mul2(sizeof(unsigned long long), n2));
+										if (!g)
+											goto done;
+										edges = g;
+										ecap = n2;
+									}
+									edges[ne++] = p < r ? (unsigned long long)p << 32 | r : (unsigned long long)r << 32 | p;
+								}
+							}
+						}
+					}
+				}
+	}
+	qsort(edges, ne, sizeof *edges, tt_u64_cmp);
+	{
+		size_t u = 0;
+		for (q = 0; q < ne; q++)
+			if (!u || edges[u - 1] != edges[q])
+				edges[u++] = edges[q];
+		ne = u;
+	}
+	/* the cuts: secant steps on the signed distance, all edges at once */
+	t = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4, ne + 1));
+	cx = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, ne + 1));
+	{
+		qaws_scalar* p2 = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, ne + 1));
+		qaws_scalar* d2 = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), ne + 1));
+		unsigned int it;
+		if (!t || !cx || !p2 || !d2)
+		{
+			qaws_internal_free(p2);
+			qaws_internal_free(d2);
+			goto done;
+		}
+		/* (per edge: its bracket [t0, t1] and their values) */
+		for (q = 0; q < ne; q++)
+		{
+			unsigned int p = (unsigned int)(edges[q] >> 32), r = (unsigned int)(edges[q] & 0xffffffffu);
+			t[4 * q] = 0;
+			t[4 * q + 1] = 1;
+			t[4 * q + 2] = phi[p];
+			t[4 * q + 3] = phi[r];
+		}
+		for (it = 0; it < 6; it++)
+		{
+			for (q = 0; q < ne; q++)
+			{
+				unsigned int p = (unsigned int)(edges[q] >> 32), r = (unsigned int)(edges[q] & 0xffffffffu);
+				double s = t[4 * q] + (t[4 * q + 1] - t[4 * q]) * t[4 * q + 2] / (t[4 * q + 2] - t[4 * q + 3]);
+				for (k = 0; k < 3; k++)
+				{
+					cx[3 * q + k] = X[3 * (size_t)p + k] + s * (X[3 * (size_t)r + k] - X[3 * (size_t)p + k]);
+					p2[3 * q + k] = (qaws_scalar)cx[3 * q + k];
+				}
+			}
+			if (it == 5)
+				break;
+			if ((st = qaws_mesh_bvh_signed_distance(d2, NULL, bvh, p2, (unsigned int)ne, NULL)) != QAWS_STATUS_OK)
+			{
+				qaws_internal_free(p2);
+				qaws_internal_free(d2);
+				goto done;
+			}
+			st = QAWS_STATUS_ALLOCATION_FAILURE;
+			for (q = 0; q < ne; q++)
+			{
+				double s = t[4 * q] + (t[4 * q + 1] - t[4 * q]) * t[4 * q + 2] / (t[4 * q + 2] - t[4 * q + 3]), d = (double)d2[q];
+				if (d == 0)
+				{
+					t[4 * q] = t[4 * q + 1] = s;
+					t[4 * q + 2] = 1;
+					t[4 * q + 3] = -1;
+				}
+				else if ((d < 0) == (t[4 * q + 2] < 0))
+				{
+					t[4 * q] = s;
+					t[4 * q + 2] = d;
+				}
+				else
+				{
+					t[4 * q + 1] = s;
+					t[4 * q + 3] = d;
+				}
+			}
+		}
+		qaws_internal_free(p2);
+		qaws_internal_free(d2);
+	}
+	/* warping: each vertex onto its nearest cut within alpha of its edge's length from it */
+	{
+		double* best = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)nv));
+		unsigned int* to = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nv));
+		if (!best || !to)
+		{
+			qaws_internal_free(best);
+			qaws_internal_free(to);
+			goto done;
+		}
+		for (q = 0; q < nv; q++)
+		{
+			best[q] = HUGE_VAL;
+			to[q] = HM_NONE;
+		}
+		for (q = 0; q < ne; q++)
+		{
+			unsigned int p = (unsigned int)(edges[q] >> 32), r = (unsigned int)(edges[q] & 0xffffffffu), s;
+			double len = 0, alpha;
+			for (k = 0; k < 3; k++)
+				len += (X[3 * (size_t)p + k] - X[3 * (size_t)r + k]) * (X[3 * (size_t)p + k] - X[3 * (size_t)r + k]);
+			len = sqrt(len);
+			alpha = len > 0.95 * h ? 0.24999 : 0.41189;
+			for (s = 0; s < 2; s++)
+			{
+				unsigned int v = s ? r : p;
+				double d = 0;
+				for (k = 0; k < 3; k++)
+					d += (cx[3 * q + k] - X[3 * (size_t)v + k]) * (cx[3 * q + k] - X[3 * (size_t)v + k]);
+				d = sqrt(d);
+				if (d < alpha * len && d < best[v])
+				{
+					best[v] = d;
+					to[v] = (unsigned int)q;
+				}
+			}
+		}
+		for (q = 0; q < nv; q++)
+			if (to[q] != HM_NONE)
+			{
+				memcpy(X + 3 * q, cx + 3 * (size_t)to[q], sizeof(double) * 3);
+				phi[q] = 0;
+			}
+		qaws_internal_free(best);
+		qaws_internal_free(to);
+	}
+	/* each tetrahedron's inside (cut ids nv + edge's index; a zero vertex is on the surface: no cut beside it) */
+	{
+		size_t ocap = 0;
+		for (q = 0; q < ntet; q++)
+		{
+			unsigned int const* tv = tets + 4 * q;
+			unsigned int P[4], N[4], np = 0, nn = 0, y, piece[12], npiece = 0, z;
+			int sg[4];
+			for (y = 0; y < 4; y++)
+			{
+				sg[y] = phi[tv[y]] < 0 ? -1 : phi[tv[y]] > 0 ? 1 : 0;
+				if (sg[y] > 0)
+					P[np++] = y;
+				else
+					N[nn++] = y;
+			}
+#define TT_CUT(x, yv) (sg[x] == 0 ? tv[x] : (unsigned int)(nv + tt_find_edge(edges, ne, tv[x], tv[yv])))
+			if (np == 0)
+			{
+				if (sg[0] || sg[1] || sg[2] || sg[3])
+				{
+					memcpy(piece, tv, sizeof(unsigned int) * 4);
+					npiece = 1;
+				}
+			}
+			else if (np == 3)
+			{
+				unsigned int i0 = N[0];
+				if (sg[i0] < 0)
+				{
+					piece[0] = tv[i0];
+					piece[1] = TT_CUT(i0, P[0]);
+					piece[2] = TT_CUT(i0, P[1]);
+					piece[3] = TT_CUT(i0, P[2]);
+					npiece = 1;
+				}
+			}
+			else if (np == 1 || np == 2)
+			{
+				unsigned int pr[6];
+				if (np == 1)
+				{
+					/* (bottom: the three inside, top: their cuts toward the outside one) */
+					for (y = 0; y < 3; y++)
+					{
+						pr[y] = tv[N[y]];
+						pr[y + 3] = TT_CUT(N[y], P[0]);
+					}
+				}
+				else
+				{
+					/* (the wedge: each inside one with its cuts toward the two outside) */
+					pr[0] = tv[N[0]];
+					pr[1] = TT_CUT(N[0], P[0]);
+					pr[2] = TT_CUT(N[0], P[1]);
+					pr[3] = tv[N[1]];
+					pr[4] = TT_CUT(N[1], P[0]);
+					pr[5] = TT_CUT(N[1], P[1]);
+				}
+				tt_prism(pr, piece);
+				npiece = 3;
+			}
+#undef TT_CUT
+			for (z = 0; z < npiece; z++)
+			{
+				unsigned int* tz = piece + 4 * z;
+				if (tz[0] == tz[1] || tz[0] == tz[2] || tz[0] == tz[3] || tz[1] == tz[2] || tz[1] == tz[3] || tz[2] == tz[3])
+					continue;
+				if (4 * (size_t)nout + 4 > ocap)
+				{
+					unsigned int* g;
+					ocap = 2 * ocap + 4096;
+					g = (unsigned int*)qaws_internal_realloc(out, qaws_internal_mul2(sizeof(unsigned int), ocap));
+					if (!g)
+						goto done;
+					out = g;
+				}
+				memcpy(out + 4 * (size_t)nout++, tz, sizeof(unsigned int) * 4);
+			}
+		}
+	}
+	/* the vertices in use (lattice ones, then cuts), the cells turned positive, the flat ones dropped */
+	used = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nv + ne + 1));
+	if (!used)
+		goto done;
+	for (q = 0; q < nv + ne; q++)
+		used[q] = HM_NONE;
+	{
+		qaws_scalar* pos = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + ne + 1));
+		unsigned int* cells = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, (size_t)nout + 1));
+		unsigned int kept = 0;
+		qaws_volume_mesh_desc vd;
+		if (!pos || !cells)
+		{
+			qaws_internal_free(pos);
+			qaws_internal_free(cells);
+			goto done;
+		}
+		for (q = 0; q < nout; q++)
+		{
+			unsigned int* tz = out + 4 * q, y;
+			double const* P4[4];
+			double e1[3], e2[3], e3[3], vol;
+			for (y = 0; y < 4; y++)
+				P4[y] = tz[y] < nv ? X + 3 * (size_t)tz[y] : cx + 3 * (size_t)(tz[y] - nv);
+			for (k = 0; k < 3; k++)
+			{
+				e1[k] = P4[1][k] - P4[0][k];
+				e2[k] = P4[2][k] - P4[0][k];
+				e3[k] = P4[3][k] - P4[0][k];
+			}
+			vol = e1[0] * (e2[1] * e3[2] - e2[2] * e3[1]) - e1[1] * (e2[0] * e3[2] - e2[2] * e3[0]) + e1[2] * (e2[0] * e3[1] - e2[1] * e3[0]);
+			if (fabs(vol) < 1e-9 * h * h * h)
+				continue;
+			if (vol < 0)
+			{
+				unsigned int sw = tz[2];
+				tz[2] = tz[3];
+				tz[3] = sw;
+			}
+			for (y = 0; y < 4; y++)
+			{
+				if (used[tz[y]] == HM_NONE)
+				{
+					double const* pp = tz[y] < nv ? X + 3 * (size_t)tz[y] : cx + 3 * (size_t)(tz[y] - nv);
+					used[tz[y]] = nused;
+					pos[3 * (size_t)nused] = (qaws_scalar)pp[0];
+					pos[3 * (size_t)nused + 1] = (qaws_scalar)pp[1];
+					pos[3 * (size_t)nused + 2] = (qaws_scalar)pp[2];
+					nused++;
+				}
+				cells[4 * (size_t)kept + y] = used[tz[y]];
+			}
+			kept++;
+		}
+		memset(&vd, 0, sizeof vd);
+		vd.positions = pos;
+		vd.vertex_count = nused;
+		vd.cell_vertices = cells;
+		vd.cell_count = kept;
+		st = kept ? qaws_volume_mesh_create(out_mesh, &vd) : QAWS_STATUS_INVALID_TOPOLOGY;
+		memset(rep, 0, sizeof *rep);
+		rep->moves = nused;
+		qaws_internal_free(pos);
+		qaws_internal_free(cells);
+	}
+done:
+	qaws_mesh_bvh_destroy(bvh);
+	qaws_internal_free(X); qaws_internal_free(phi); qaws_internal_free(pts); qaws_internal_free(dist); qaws_internal_free(cx); qaws_internal_free(t);
+	qaws_internal_free(tets); qaws_internal_free(edges); qaws_internal_free(out); qaws_internal_free(used);
+	return st;
+}
+
 qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* boundary,
 	qaws_tetrahedralize_desc const* desc)
 {
@@ -1363,6 +1836,14 @@ qaws_status qaws_volume_mesh_tetrahedralize(qaws_volume_mesh** out_mesh, qaws_me
 	*out_mesh = NULL;
 	if (!boundary || !desc || (unsigned int)desc->method > QAWS_TETS_STUFFING || desc->target_length < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (desc->method == QAWS_TETS_STUFFING)
+	{
+		qaws_mesh_report sr;
+		st = tt_stuffing(boundary, desc, out_mesh, &sr);
+		if (st == QAWS_STATUS_OK && out_report)
+			*out_report = sr;
+		return st;
+	}
 	if (desc->method != QAWS_TETS_DELAUNAY)
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	h = &boundary->hm;

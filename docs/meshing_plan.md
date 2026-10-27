@@ -345,7 +345,8 @@ cheapest and most reused first:
    on a 64 x 64 reference grid, boundary pinned; figure 78 second row); RESTRICTED_DELAUNAY done 2026-10-27 (mg_delaunay: Lawson
    flips, Chew/Ruppert circumcentre insertion snapped on the faces, encroached feature edges split on their curves; 30
    degrees, Delaunay off the features; test 126, figure 78). Generation complete.
-4. **Tetrahedra:** ENVELOPE (fTetWild-style), STUFFING (isosurface stuffing).
+4. **Tetrahedra:** STUFFING done 2026-10-27 (tt_stuffing: BCC lattice, winding-signed distance, secant cuts,
+   Labelle-Shewchuk warping, Dompierre prisms; test 127, figure 79); ENVELOPE next.
 5. **Hexahedra:** an octree.
 
 ### Attributes through Booleans and sweeps (2026-10-26)

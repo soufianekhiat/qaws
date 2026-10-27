@@ -1611,8 +1611,14 @@ circumcentres of cells past the radius-edge bound with the border as walls,
 then improved by 3-2 and 2-3 flips and smoothing on the worst dihedral
 angle. The border's triangles are kept (split only where recovery needed
 it), and the volume equals the surface's to rounding. `border_only` keeps
-the border's vertices alone. `ENVELOPE` (triangle soups, fTetWild) and
-`STUFFING` are reserved.
+the border's vertices alone.
+
+`STUFFING` is isosurface stuffing (Labelle and Shewchuk): a body-centred cubic
+lattice cut by the surface (signed distance, the winding number telling the
+inside, so soups and holes do), vertices near a cut warped onto it, each
+cell's inside split conformingly: regular cells inside, dihedral angles
+about 19 to 149 degrees in figure 79; its border approximates the input
+surface. `ENVELOPE` is reserved.
 
 `keep_border` keeps the border as given, using TetGen's Steiner point suppression rather than a constrained Delaunay recovery. Each point the recovery added to the border is moved inside afterwards:
 

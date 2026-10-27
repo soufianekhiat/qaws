@@ -33,8 +33,23 @@
  *             worst dihedral angle. The border's triangles are kept, split
  *             only where the recovery needed it, so the cells by the border
  *             are as long as its edges. The default.
- *   ENVELOPE, STUFFING  reserved (UNSUPPORTED_OPERATION): any triangle soup
- *             within an envelope (fTetWild); isosurface stuffing.
+ *   STUFFING  isosurface stuffing (Labelle and Shewchuk 2007): a
+ *             body-centred cubic lattice of spacing target_length over the
+ *             border's box, the signed distance to the border at its
+ *             vertices (negative where the winding number passes 1/2: a
+ *             soup, holes or overlaps do; the border need not be closed),
+ *             each lattice edge crossing the surface cut where the
+ *             distance vanishes, a vertex closer to a cut than their alphas
+ *             (0.24999 of a cube edge, 0.41189 of a diagonal) warped onto
+ *             it, then each lattice cell's inside: whole, a corner
+ *             tetrahedron or a prism in three (cut through each quad's
+ *             smallest vertex, so neighbours conform). The border is the
+ *             surface's approximation by the cuts and warped vertices, not
+ *             the input's triangles; the inside the lattice's regular
+ *             cells. radius_edge, border_only and keep_border unused; the
+ *             report's moves the vertices.
+ *   ENVELOPE  reserved (UNSUPPORTED_OPERATION): any triangle soup within
+ *             an envelope (fTetWild).
  *
  * The border: a closed qaws_mesh_3d turned outward (polygons fanned into
  * triangles), not self-intersecting. INVALID_TOPOLOGY when it is not

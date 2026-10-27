@@ -11,7 +11,12 @@
  *   - a NURBS torus's generated surface filled: valid, its volume exactly
  *     the surface's, its border the surface, the angles bounded;
  *   - a box generated as a shell of six faces, filled: the volume exact;
- *   - refusals: an open surface, the reserved methods.
+ *   - STUFFING (isosurface stuffing): the torus's surface filled from a
+ *     lattice: valid, its volume the surface's within 2 percent, its border's
+ *     vertices on the torus, the dihedral angles bounded; the same surface
+ *     with faces taken out (a soup with holes: the winding number tells the
+ *     inside) filled alike;
+ *   - refusals: an open surface, the reserved method.
  */
 
 #include "test_common.h"
@@ -312,6 +317,101 @@ static void test_box(void)
 		qaws_surface_destroy(f[i]);
 }
 
+/* STUFFING on a surface s (its enclosed volume vol): the checks printed */
+static void tv_stuffing_case(char const* name, qaws_mesh_3d const* s, double vol)
+{
+	qaws_tetrahedralize_desc d;
+	qaws_volume_mesh* v = NULL;
+	qaws_volume_quality q;
+	qaws_mesh_3d* b = NULL;
+	qaws_status st;
+	double off = 0;
+	char msg[400];
+	memset(&d, 0, sizeof d);
+	d.method = QAWS_TETS_STUFFING;
+	d.target_length = (qaws_scalar)0.25;
+	st = qaws_volume_mesh_tetrahedralize(&v, NULL, s, &d);
+	if (st != QAWS_STATUS_OK || !v)
+	{
+		sprintf(msg, "STUFFING, %s: %s", name, qaws_status_to_string(st));
+		TEST_ASSERT(0, msg);
+		return;
+	}
+	qaws_volume_mesh_measure_quality(&q, v);
+	if (qaws_volume_mesh_get_boundary(&b, v) == QAWS_STATUS_OK && b)
+	{
+		unsigned int nv = qaws_mesh_3d_get_vertex_count(b), i;
+		qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+		qaws_mesh_3d_get_positions(x, b);
+		for (i = 0; i < nv; i++)
+		{
+			double rho = sqrt((double)(x[3 * i] * x[3 * i] + x[3 * i + 1] * x[3 * i + 1]));
+			off = fmax(off, fabs(sqrt((rho - 2) * (rho - 2) + (double)(x[3 * i + 2] * x[3 * i + 2])) - 0.7));
+		}
+		free(x);
+	}
+	sprintf(msg, "STUFFING, %s: %u tetrahedra, valid %d, volume %.4f of %.4f, border off the torus %.2e, dihedral %.1f..%.1f, radius-edge %.2f",
+		name, q.tetrahedra, qaws_volume_mesh_validate(v) == QAWS_STATUS_OK, (double)q.volume, vol, off, (double)q.min_dihedral, (double)q.max_dihedral,
+		(double)q.max_radius_edge);
+	printf("  %s\n", msg);
+	TEST_ASSERT(qaws_volume_mesh_validate(v) == QAWS_STATUS_OK && fabs((double)q.volume - vol) < 0.02 * vol && off < 0.02 && q.min_dihedral > 8
+		&& q.max_dihedral < 172, msg);
+	qaws_mesh_3d_destroy(b);
+	qaws_volume_mesh_destroy(v);
+}
+
+static void test_stuffing(void)
+{
+	qaws_surface* t = tv_torus(2, 0.7);
+	qaws_generate_desc g;
+	qaws_mesh_3d *s = NULL, *holed = NULL;
+	double vol;
+	memset(&g, 0, sizeof g);
+	g.target_length = (qaws_scalar)0.25;
+	if (qaws_mesh_generate_surface(&s, NULL, t, &g) != QAWS_STATUS_OK || !s)
+	{
+		TEST_ASSERT(0, "STUFFING: the torus's surface");
+		qaws_surface_destroy(t);
+		return;
+	}
+	vol = tv_enclosed(s);
+	tv_stuffing_case("a torus", s, vol);
+	/* (every 25th face taken out: holes, the winding number still about 1 inside) */
+	{
+		unsigned int nf = qaws_mesh_3d_get_face_count(s), nv = qaws_mesh_3d_get_vertex_count(s), nc = qaws_mesh_3d_get_corner_count(s), f, k, o = 0, kept = 0;
+		unsigned int *fv = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1)), *fs = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1));
+		unsigned int *fv2 = (unsigned int*)malloc(sizeof(unsigned int) * (nc + 1)), *fs2 = (unsigned int*)malloc(sizeof(unsigned int) * (nf + 1)), o2 = 0;
+		qaws_scalar* x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+		qaws_mesh_3d_desc md;
+		qaws_mesh_3d_get_faces(fv, fs, s);
+		qaws_mesh_3d_get_positions(x, s);
+		for (f = 0; f < nf; f++)
+		{
+			if (f % 25 != 7)
+			{
+				for (k = 0; k < fs[f]; k++)
+					fv2[o2 + k] = fv[o + k];
+				o2 += fs[f];
+				fs2[kept++] = fs[f];
+			}
+			o += fs[f];
+		}
+		memset(&md, 0, sizeof md);
+		md.positions = x;
+		md.vertex_count = nv;
+		md.face_vertices = fv2;
+		md.face_sizes = fs2;
+		md.face_count = kept;
+		qaws_mesh_3d_create(&holed, &md);
+		if (holed)
+			tv_stuffing_case("the torus with holes", holed, vol);
+		free(fv); free(fs); free(fv2); free(fs2); free(x);
+	}
+	qaws_mesh_3d_destroy(holed);
+	qaws_mesh_3d_destroy(s);
+	qaws_surface_destroy(t);
+}
+
 static void test_refusals(void)
 {
 	static qaws_scalar const p[12] = { 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0 };
@@ -337,7 +437,7 @@ static void test_refusals(void)
 	d.method = QAWS_TETS_ENVELOPE;
 	s2 = qaws_volume_mesh_tetrahedralize(&v, NULL, cube, &d);
 	s3 = qaws_volume_mesh_tetrahedralize(&v, NULL, cube, NULL);
-	sprintf(msg, "refusals: an open surface %s, ENVELOPE %s, no description %s", qaws_status_to_string(s1), qaws_status_to_string(s2), qaws_status_to_string(s3));
+	sprintf(msg, "refusals: an open surface %s, ENVELOPE (reserved) %s, no description %s", qaws_status_to_string(s1), qaws_status_to_string(s2), qaws_status_to_string(s3));
 	TEST_ASSERT(s1 == QAWS_STATUS_INVALID_TOPOLOGY && s2 == QAWS_STATUS_UNSUPPORTED_OPERATION && s3 == QAWS_STATUS_INVALID_ARGUMENT && !v, msg);
 	qaws_mesh_3d_destroy(open);
 	qaws_mesh_3d_destroy(cube);
@@ -352,6 +452,7 @@ int test_127_tetrahedralize_main(void)
 	test_cube();
 	test_torus();
 	test_box();
+	test_stuffing();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
