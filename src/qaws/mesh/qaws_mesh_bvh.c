@@ -7,6 +7,7 @@
 
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_mesh_bvh.h"
+#include "../internal/qaws_internal_array.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -1310,17 +1311,68 @@ void qaws_mesh_bvh_destroy(qaws_mesh_bvh* b)
 
 qaws_status qaws_mesh_bvh_refit(qaws_mesh_bvh* b, qaws_scalar const* positions)
 {
-	double* x = NULL;
-	qaws_status st;
+	size_t i, n;
+	unsigned int j;
 	if (!b || (b->nv && !positions))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = bv_positions(&x, positions, b->nv, b->dim);
-	if (st != QAWS_STATUS_OK)
-		return st;
-	qaws_internal_free(b->x);
-	b->x = x;
+	/* in place, no allocation (checked first: a value not finite leaves the BVH as it was) */
+	n = (size_t)b->dim * b->nv;
+	for (i = 0; i < n; i++)
+		if (!isfinite((double)positions[i]))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < b->nv; i++)
+		for (j = 0; j < 3; j++)
+			b->x[3 * i + j] = j < b->dim ? (double)positions[(size_t)b->dim * i + j] : 0.0;
 	bv_refit_nodes(b, 1);
 	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_mesh_bvh_refit_view(qaws_mesh_bvh* b, qaws_array_view const* positions)
+{
+	unsigned int i, j;
+	if (!b || !positions || qaws_array_view_validate(positions) != QAWS_STATUS_OK || positions->components != b->dim || positions->count != b->nv)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < b->nv; i++)
+		for (j = 0; j < b->dim; j++)
+			if (!isfinite(qaws_internal_array_get(positions, i, j)))
+				return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < b->nv; i++)
+		for (j = 0; j < 3; j++)
+			b->x[3 * (size_t)i + j] = j < b->dim ? qaws_internal_array_get(positions, i, j) : 0.0;
+	bv_refit_nodes(b, 1);
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_mesh_bvh_create_view(qaws_mesh_bvh** out, qaws_mesh_view const* view, qaws_mesh_bvh_desc const* desc)
+{
+	double* x;
+	unsigned int *s, *el, t, k, nv, nt;
+	qaws_status st;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if ((st = qaws_mesh_view_validate(view)) != QAWS_STATUS_OK)
+		return st;
+	nv = view->positions.count;
+	nt = view->triangle_count;
+	x = (double*)qaws_internal_malloc(qaws_internal_mul3((size_t)nv + 1, 3, sizeof(double)));
+	s = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3((size_t)nt + 1, 3, sizeof(unsigned int)));
+	el = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((size_t)nt + 1, sizeof(unsigned int)));
+	if (!x || !s || !el)
+	{
+		qaws_internal_free(x);
+		qaws_internal_free(s);
+		qaws_internal_free(el);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	qaws_internal_mesh_view_positions(x, &view->positions);
+	for (t = 0; t < nt; t++)
+	{
+		for (k = 0; k < 3; k++)
+			s[3 * (size_t)t + k] = qaws_internal_mesh_view_index(view, t, k);
+		el[t] = t;
+	}
+	return bv_make(out, x, nv, 3, s, 3, nt, el, desc);
 }
 
 /* ---- point to simplex ---- */

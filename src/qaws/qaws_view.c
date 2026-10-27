@@ -29,6 +29,7 @@
 #include "core/qaws_horner_core.h"
 #include "internal/qaws_internal_diff.h"
 #include "internal/qaws_internal_closest.h"
+#include "internal/qaws_internal_array.h"
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -65,6 +66,11 @@ static double vw_get(qaws_array_view const* v, unsigned int i, unsigned int c)
 		memcpy(&d, p, sizeof d);
 		return d;
 	}
+}
+
+double qaws_internal_array_get(qaws_array_view const* v, unsigned int i, unsigned int c)
+{
+	return vw_get(v, i, c);
 }
 
 static void vw_put(qaws_array_view_mut const* v, unsigned int i, unsigned int c, double x)

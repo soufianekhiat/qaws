@@ -7,6 +7,7 @@
 #include "qaws_eval.h"
 #include "qaws_inspect.h"
 #include "internal/qaws_internal_memory.h"
+#include "internal/qaws_internal_array.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -34,7 +35,8 @@ struct qaws_motion
 	qaws_curve const* curve;   /* CURVE: borrowed */
 	double u0, u1;             /* CURVE: its parameter range */
 	unsigned int n;            /* VERTICES: their count */
-	double* V;                 /* VERTICES: 18 each: p0, v0, a0, p1, v1, a1 */
+	double* V;                 /* VERTICES: 18 each: p0, v0, a0, p1, v1, a1 (NULL: borrowed, P0 to P1 on chords) */
+	qaws_array_view P0, P1;    /* VERTICES borrowed: the host's positions at 0 and 1 */
 };
 
 /* the Hermite basis at t (cubic: 4 functions on p0, v0, p1, v1, written into slots 0, 1, 3, 4; quintic: 6 on p0, v0, a0,
@@ -383,6 +385,31 @@ qaws_status qaws_motion_create_curve(qaws_motion** out, qaws_curve const* curve,
 	return QAWS_STATUS_OK;
 }
 
+qaws_status qaws_motion_create_vertices_borrowed(qaws_motion** out, qaws_array_view const* p0, qaws_array_view const* p1)
+{
+	qaws_motion* m;
+	unsigned int i, k;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if (!p0 || !p1 || qaws_array_view_validate(p0) != QAWS_STATUS_OK || qaws_array_view_validate(p1) != QAWS_STATUS_OK || p0->components != 3 ||
+		p1->components != 3 || !p0->count || p0->count != p1->count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < p0->count; i++)
+		for (k = 0; k < 3; k++)
+			if (!isfinite(qaws_internal_array_get(p0, i, k)) || !isfinite(qaws_internal_array_get(p1, i, k)))
+				return QAWS_STATUS_INVALID_ARGUMENT;
+	m = (qaws_motion*)qaws_internal_zalloc(1, sizeof *m);
+	if (!m)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	m->kind = MO_VERTICES;
+	m->n = p0->count;
+	m->P0 = *p0;
+	m->P1 = *p1;
+	*out = m;
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_motion_create_vertices(qaws_motion** out, qaws_scalar const* p0, qaws_scalar const* p1, qaws_scalar const* v0,
 	qaws_scalar const* v1, qaws_scalar const* a0, qaws_scalar const* a1, unsigned int count, unsigned int flags)
 {
@@ -528,7 +555,15 @@ qaws_status qaws_motion_transform_points(qaws_scalar* out, qaws_scalar* out_v, q
 		for (i = 0; i < count; i++)
 		{
 			double x[3], dx[3];
-			mo_hermite((double const(*)[3])(m->V + 18 * (size_t)i), (double)t, m->quintic, x, dx);
+			if (!m->V)
+				for (k = 0; k < 3; k++)
+				{
+					double a = qaws_internal_array_get(&m->P0, i, k), b = qaws_internal_array_get(&m->P1, i, k);
+					dx[k] = b - a;
+					x[k] = a + (double)t * dx[k];
+				}
+			else
+				mo_hermite((double const(*)[3])(m->V + 18 * (size_t)i), (double)t, m->quintic, x, dx);
 			for (k = 0; k < 3; k++)
 			{
 				out[3 * (size_t)i + k] = (qaws_scalar)x[k];

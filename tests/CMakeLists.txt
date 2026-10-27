@@ -186,6 +186,7 @@ add_executable(
 182_volume_attributes.c
 183_mesh_contact.c
 184_sweep_implicit.c
+185_mesh_view.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can
