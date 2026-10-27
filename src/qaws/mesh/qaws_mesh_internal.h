@@ -194,6 +194,7 @@ typedef struct mf_level
 	unsigned char* con;             /* MF_ALONG: q along cq; MF_ON_LINE: o on the line x + t cq; MF_PINNED: o at x */
 	double* sc;                     /* the lattice's local spacing over the scale (NULL: 1 everywhere; mf_scales) */
 	double* wt;                     /* per vertex its weight in the orientations' smoothing, an edge the mean of its ends' (NULL: 1; mf_weights) */
+	unsigned int sym;               /* the symmetry: 4 (0 too: square lattice) or 6 (6 directions, a hexagonal lattice: q and q turned by 60 degrees) */
 } mf_level;
 
 #define MF_ALONG 1u
@@ -237,6 +238,14 @@ void mf_compat_position(double const* x0, double const* n0, double const* q0, do
 	double const* q1, double const* o1, double scale, double* out0, double* out1);
 /* the quarter turns taking q1 onto q0 (0 to 3) */
 int mf_rotation(double const* q0, double const* n0, double const* q1, double const* n1);
+/* the same for a symmetry sym (4 or 6): matched directions; the turns, in 1/sym, taking q1 onto q0 */
+void mf_compat_orientation_n(unsigned int sym, double const* q0, double const* n0, double const* q1, double const* n1, double* out0, double* out1);
+int mf_rotation_n(unsigned int sym, double const* q0, double const* n0, double const* q1, double const* n1);
+/* the lattice points of two vertices nearest each other (as mf_compat_position, q1 matched to q0), as integer steps from
+   o0 along (q0, t0) and from o1 along (q1, t1) (t q turned a quarter, or a sixth for sym 6): i0 - i1 the lattice step
+   from o1 to o0 */
+void mf_compat_index_n(unsigned int sym, double const* x0, double const* n0, double const* q0, double const* o0, double const* x1, double const* n1,
+	double const* q1, double const* o1, double scale, int* i0, int* i1);
 /* p, a point of x1's tangent plane, turned into x0's about the point near both (the rotation taking n1 onto n0): unfolded across a crease */
 void mf_unfold(double const* x0, double const* n0, double const* x1, double const* n1, double const* p, double* out);
 

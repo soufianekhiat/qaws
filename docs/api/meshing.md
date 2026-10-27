@@ -256,7 +256,12 @@ qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d** out, qaws_mesh_report* report
   seams kept per side. The default.
 - **CVT** remeshing: a centroidal Voronoi tessellation restricted to the
   reference (Lloyd, then L-BFGS), creases locked: the most regular and
-  uniform triangles, about five times slower. `FIELD_ALIGNED` is reserved.
+  uniform triangles, about five times slower.
+- **FIELD_ALIGNED** remeshing: Instant Meshes' triangles. A 6-symmetric
+  direction field and a hexagonal lattice on a dense remesh, read off as
+  triangles whose rows follow the field and the creases, finished by 3
+  LOCAL passes. On the blob of figure 77, 93% of the vertices have valence 6
+  (LOCAL: 82%); about ten times slower than LOCAL. No metric.
 - **INSTANT** quads (Jakob et al. 2015, with QuadriFlow's consistency,
   Huang et al. 2018): a dense remesh; a cross field, the best of Instant
   Meshes' local one and the globally smoothest ones (free, or drawn to the

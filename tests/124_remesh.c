@@ -1,5 +1,5 @@
 /*
- * Test 124: remeshing (qaws_mesh_remesh, LOCAL)
+ * Test 124: remeshing (qaws_mesh_remesh, LOCAL and FIELD_ALIGNED)
  *
  *   - a coarse icosphere with its normals remeshed on its PN reference: a
  *     valid closed mesh of genus 0, every vertex its footpoint evaluated,
@@ -13,7 +13,11 @@
  *     border, its 4 corners kept;
  *   - adaptive: a curvature field on a bumped sphere, shorter edges on the
  *     bump;
- *   - refusals.
+ *   - FIELD_ALIGNED on the sphere and on the cube with its creases: valid
+ *     closed meshes of genus 0, footpoints, near the surface, edges near the
+ *     target, mostly of valence 6 (the hexagonal lattice), the cube's
+ *     corners kept and its creases along its edges;
+ *   - refusals (FIELD_ALIGNED with a metric, a size field on another reference).
  */
 
 #include "test_common.h"
@@ -302,6 +306,109 @@ done:
 	qaws_mesh_3d_destroy(out);
 }
 
+/* FIELD_ALIGNED: valence, angles, the edges' spread; (on the cube) corners and crease length */
+static void rt_aligned_case(qaws_mesh_3d const* m, qaws_mesh_reference const* r, double L, char const* name, int cube)
+{
+	qaws_remesh_desc d;
+	qaws_mesh_3d* out = NULL;
+	qaws_mesh_report rep;
+	qaws_mesh_topology t;
+	qaws_status st;
+	unsigned int nv = 0, i, v6 = 0, nin = 0, corners = 0;
+	double foot = 0, off = 0, crease = 0;
+	char msg[600];
+	memset(&d, 0, sizeof d);
+	memset(&rep, 0, sizeof rep);
+	d.method = QAWS_REMESH_FIELD_ALIGNED;
+	d.reference = r;
+	d.target_length = (qaws_scalar)L;
+	st = qaws_mesh_remesh(&out, &rep, m, &d);
+	if (!out)
+	{
+		sprintf(msg, "FIELD_ALIGNED, %s: %s", name, qaws_status_to_string(st));
+		TEST_ASSERT(0, msg);
+		return;
+	}
+	nv = qaws_mesh_3d_get_vertex_count(out);
+	{
+		qaws_mesh_location* l = (qaws_mesh_location*)malloc(sizeof(qaws_mesh_location) * nv);
+		qaws_scalar *x = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv), *y = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * nv);
+		unsigned int nfe = qaws_mesh_3d_get_feature_edge_count(out), *fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (nfe + 1));
+		unsigned char* onf = (unsigned char*)calloc(nv + 1, 1);
+		qaws_mesh_3d_get_feature_edges(fe, out);
+		for (i = 0; i < 2 * nfe; i++)
+			onf[fe[i]] = 1;
+		qaws_mesh_3d_get_positions(x, out);
+		qaws_mesh_3d_get_footpoints(l, out);
+		qaws_mesh_reference_evaluate(y, NULL, NULL, r, l, nv);
+		for (i = 0; i < nv; i++)
+		{
+			unsigned int ring[64], n = 0;
+			foot = fmax(foot, fabs(x[3 * i] - y[3 * i]) + fabs(x[3 * i + 1] - y[3 * i + 1]) + fabs(x[3 * i + 2] - y[3 * i + 2]));
+			if (cube)
+				off = fmax(off, fabs(fmax(fabs(x[3 * i]), fmax(fabs(x[3 * i + 1]), fabs(x[3 * i + 2]))) - 1));
+			else
+				off = fmax(off, fabs(sqrt(x[3 * i] * x[3 * i] + x[3 * i + 1] * x[3 * i + 1] + x[3 * i + 2] * x[3 * i + 2]) - 1));
+			corners += qaws_mesh_3d_is_feature_corner(out, i);
+			if (onf[i])
+				continue;
+			qaws_mesh_3d_get_vertex_ring(ring, &n, out, 64, i);
+			nin++;
+			v6 += n == 6;
+		}
+		free(l); free(x); free(y); free(fe); free(onf);
+	}
+	if (cube)
+	{
+		unsigned int ne = qaws_mesh_3d_get_feature_edge_count(out), e;
+		unsigned int* fe = (unsigned int*)malloc(sizeof(unsigned int) * 2 * (ne + 1));
+		qaws_mesh_3d_get_feature_edges(fe, out);
+		for (e = 0; e < ne; e++)
+		{
+			qaws_vec3 a = qaws_mesh_3d_get_vertex(out, fe[2 * e]), b = qaws_mesh_3d_get_vertex(out, fe[2 * e + 1]);
+			crease += sqrt((double)((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)));
+		}
+		free(fe);
+	}
+	qaws_mesh_3d_get_topology(&t, out);
+	sprintf(msg, "FIELD_ALIGNED, %s to %.2g: %u vertices, valid %d, closed %d, genus %u; footpoints %.2g, off %.2g; edges %.3g..%.3g mean %.3g, "
+		"angles %.3g..%.3g, valence 6 at %.0f%% of %u smooth vertices; corners %u, crease length %.3g",
+		name, L, nv, qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t.closed, t.genus, foot, off, (double)rep.quality.min_edge,
+		(double)rep.quality.max_edge, (double)rep.quality.mean_edge, (double)rep.quality.min_angle, (double)rep.quality.max_angle,
+		nin ? 100.0 * v6 / nin : 0, nin, corners, crease);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t.closed && t.genus == 0 && t.components == 1 && foot < 1e-9
+		&& off < 0.02 && fabs(rep.quality.mean_edge - L) < 0.25 * L && v6 > (cube ? 0.7 : 0.85) * nin && (!cube || (corners == 8 && fabs(crease - 24) < 0.05)), msg);
+	qaws_mesh_3d_destroy(out);
+}
+
+static void test_field_aligned(void)
+{
+	static double const x[24] = { -1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1 };
+	static unsigned int const f[24] = { 0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5, 2, 3, 7, 6, 3, 0, 4, 7 };
+	static unsigned int const fs[6] = { 4, 4, 4, 4, 4, 4 };
+	qaws_scalar nrm[3 * 42];
+	qaws_mesh_3d *m = rt_icosphere(nrm), *cube = rt_make(x, 8, f, fs, 6);
+	qaws_mesh_reference_desc rd;
+	qaws_mesh_reference *r = NULL, *rc = NULL;
+	memset(&rd, 0, sizeof rd);
+	rd.normals = nrm;
+	qaws_mesh_reference_create(&r, m, &rd);
+	if (r)
+		rt_aligned_case(m, r, 0.15, "sphere", 0);
+	if (cube)
+	{
+		qaws_mesh_3d_detect_features(cube, (qaws_scalar)(3.14159265358979 / 6), 0, 0);
+		qaws_mesh_reference_create(&rc, cube, NULL);
+	}
+	if (rc)
+		rt_aligned_case(cube, rc, 0.25, "cube with creases", 1);
+	qaws_mesh_reference_destroy(r);
+	qaws_mesh_reference_destroy(rc);
+	qaws_mesh_3d_destroy(m);
+	qaws_mesh_3d_destroy(cube);
+}
+
 static void test_adaptive_and_refusals(void)
 {
 	qaws_mesh_3d *m = rt_icosphere(NULL), *out = NULL, *other = rt_icosphere(NULL);
@@ -364,12 +471,13 @@ static void test_adaptive_and_refusals(void)
 	sprintf(msg, "adaptive by curvature on a bumped sphere: valid %d, mean edge on the bump %.3g (%u), far from it %.3g (%u)",
 		out && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, nbump ? lb / nbump : 0, nbump, nfar ? lf / nfar : 0, nfar);
 	TEST_ASSERT(out && st == QAWS_STATUS_OK && qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && nbump > 10 && nfar > 10 && lb / nbump < 0.6 * lf / nfar, msg);
-	/* refusals: a reserved method, a field on another reference */
+	/* refusals: FIELD_ALIGNED with a metric, a field on another reference */
 	{
 		qaws_remesh_desc d;
 		qaws_mesh_3d* bad = NULL;
 		memset(&d, 0, sizeof d);
 		d.method = QAWS_REMESH_FIELD_ALIGNED;
+		d.metric = (qaws_metric_field const*)&d;   /* (any: refused before it is read) */
 		s1 = qaws_mesh_remesh(&bad, NULL, m, &d);
 		qaws_mesh_reference_create(&ro, other, NULL);
 		if (ro)
@@ -378,7 +486,7 @@ static void test_adaptive_and_refusals(void)
 		d.reference = r;
 		d.size = so;
 		s2 = so ? qaws_mesh_remesh(&bad, NULL, m, &d) : QAWS_STATUS_OK;
-		sprintf(msg, "remesh refusals: CVT %s, a size field on another reference %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
+		sprintf(msg, "remesh refusals: FIELD_ALIGNED with a metric %s, a size field on another reference %s", qaws_status_to_string(s1), qaws_status_to_string(s2));
 		TEST_ASSERT(s1 == QAWS_STATUS_UNSUPPORTED_OPERATION && s2 == QAWS_STATUS_INVALID_ARGUMENT && !bad, msg);
 	}
 	qaws_size_field_destroy(sf);
@@ -398,6 +506,7 @@ int test_124_remesh_main(void)
 	test_sphere();
 	test_cube();
 	test_open_square();
+	test_field_aligned();
 	test_adaptive_and_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

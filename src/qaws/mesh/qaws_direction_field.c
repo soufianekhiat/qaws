@@ -53,16 +53,49 @@ static void mf_tangent(double* v, double const* n)
 	}
 }
 
+#define MF_SYM(L) ((L)->sym == 6 ? 6u : 4u)
+
+/* q turned by k / sym of a turn round n (a quarter exactly n x q) */
+static void mf_turn(double const* q, double const* n, unsigned int sym, int k, double* out)
+{
+	double t[3], a = 6.283185307179586 * k / sym, c = cos(a), s = sin(a);
+	int i;
+	if (k == 0)
+	{
+		memcpy(out, q, sizeof(double) * 3);
+		return;
+	}
+	mf_cross(n, q, t);
+	if (4 * k == (int)sym)
+	{
+		memcpy(out, t, sizeof(double) * 3);
+		return;
+	}
+	for (i = 0; i < 3; i++)
+		out[i] = c * q[i] + s * t[i];
+}
+
+/* the sym / 2 directions of q (the others their opposites) */
+static void mf_directions(double const* q, double const* n, unsigned int sym, double A[3][3])
+{
+	int i;
+	for (i = 0; i < (int)sym / 2; i++)
+		mf_turn(q, n, sym, i, A[i]);
+}
+
 void mf_compat_orientation(double const* q0, double const* n0, double const* q1, double const* n1, double* out0, double* out1)
 {
-	double A[2][3], B[2][3], best = -1, dp;
-	int i, j, ba = 0, bb = 0, k;
-	memcpy(A[0], q0, sizeof A[0]);
-	mf_cross(n0, q0, A[1]);
-	memcpy(B[0], q1, sizeof B[0]);
-	mf_cross(n1, q1, B[1]);
-	for (i = 0; i < 2; i++)
-		for (j = 0; j < 2; j++)
+	mf_compat_orientation_n(4, q0, n0, q1, n1, out0, out1);
+}
+
+void mf_compat_orientation_n(unsigned int sym, double const* q0, double const* n0, double const* q1, double const* n1, double* out0, double* out1)
+{
+	double A[3][3], B[3][3], best = -1, dp;
+	int i, j, ba = 0, bb = 0, k, m = (int)sym / 2;
+	mf_directions(q0, n0, sym, A);
+	mf_directions(q1, n1, sym, B);
+	for (i = 0; i < m; i++)
+		for (j = 0; j < m; j++)
 		{
 			double s = fabs(mf_dot(A[i], B[j]));
 			if (s > best)
@@ -82,14 +115,17 @@ void mf_compat_orientation(double const* q0, double const* n0, double const* q1,
 
 int mf_rotation(double const* q0, double const* n0, double const* q1, double const* n1)
 {
-	double A[2][3], B[2][3], best = -1;
-	int i, j, ba = 0, bb = 0;
-	memcpy(A[0], q0, sizeof A[0]);
-	mf_cross(n0, q0, A[1]);
-	memcpy(B[0], q1, sizeof B[0]);
-	mf_cross(n1, q1, B[1]);
-	for (i = 0; i < 2; i++)
-		for (j = 0; j < 2; j++)
+	return mf_rotation_n(4, q0, n0, q1, n1);
+}
+
+int mf_rotation_n(unsigned int sym, double const* q0, double const* n0, double const* q1, double const* n1)
+{
+	double A[3][3], B[3][3], best = -1;
+	int i, j, ba = 0, bb = 0, m = (int)sym / 2;
+	mf_directions(q0, n0, sym, A);
+	mf_directions(q1, n1, sym, B);
+	for (i = 0; i < m; i++)
+		for (j = 0; j < m; j++)
 		{
 			double s = fabs(mf_dot(A[i], B[j]));
 			if (s > best)
@@ -99,8 +135,14 @@ int mf_rotation(double const* q0, double const* n0, double const* q1, double con
 				bb = j;
 			}
 		}
-	/* R^a q0 = R^(b + 2 (sign < 0)) q1: q1 turned by b' - a quarter turns is q0 */
-	return ((bb + (mf_dot(A[ba], B[bb]) < 0 ? 2 : 0)) - ba + 4) % 4;
+	/* R^a q0 = R^(b + sym / 2 (sign < 0)) q1: q1 turned by b' - a steps is q0 */
+	return ((bb + (mf_dot(A[ba], B[bb]) < 0 ? m : 0)) - ba + (int)sym) % (int)sym;
+}
+
+/* the lattice's second direction: q turned a quarter (sym 4) or a sixth (sym 6) */
+static void mf_second(double const* n, double const* q, unsigned int sym, double* t)
+{
+	mf_turn(q, n, sym, 1, t);
 }
 
 /* a point near both tangent planes (Instant Meshes' middle point) */
@@ -135,19 +177,116 @@ void mf_unfold(double const* x0, double const* n0, double const* x1, double cons
 		out[k] = mid[k] + v[k] * c + w[k] + axis[k] * mf_dot(axis, v) * f;
 }
 
-/* the lattice point of (o, q, t) below p (floor) or nearest it (round) */
-static void mf_lattice(double const* o, double const* q, double const* t, double const* p, double scale, int round_it, double* out)
+/* p's coordinates in the lattice (o, q, t) (t at a quarter or a sixth of a turn from q) */
+static void mf_coords(double const* o, double const* q, double const* t, double const* p, double scale, double* a, double* b)
 {
-	double d[3], a, b;
+	double d[3], c = mf_dot(q, t), da, db;
 	int k;
 	for (k = 0; k < 3; k++)
 		d[k] = p[k] - o[k];
-	a = mf_dot(q, d) / scale;
-	b = mf_dot(t, d) / scale;
-	a = round_it ? floor(a + 0.5) : floor(a);
-	b = round_it ? floor(b + 0.5) : floor(b);
+	da = mf_dot(q, d) / scale;
+	db = mf_dot(t, d) / scale;
+	*a = c == 0 ? da : (da - c * db) / (1 - c * c);
+	*b = c == 0 ? db : (db - c * da) / (1 - c * c);
+}
+
+/* the lattice point of (o, q, t) below p (floor) or nearest it (round) */
+static void mf_lattice(double const* o, double const* q, double const* t, double const* p, double scale, int round_it, double* out)
+{
+	double a, b;
+	int k;
+	mf_coords(o, q, t, p, scale, &a, &b);
+	if (round_it && mf_dot(q, t) != 0)
+	{
+		/* (oblique: the nearest of the cell's four corners) */
+		double fa = floor(a), fb = floor(b), best = HUGE_VAL, ba = fa, bb = fb;
+		int i;
+		for (i = 0; i < 4; i++)
+		{
+			double ca = fa + (i & 1), cb = fb + (i >> 1), e[3], d2;
+			for (k = 0; k < 3; k++)
+				e[k] = o[k] + (q[k] * ca + t[k] * cb) * scale - p[k];
+			d2 = mf_dot(e, e);
+			if (d2 < best)
+			{
+				best = d2;
+				ba = ca;
+				bb = cb;
+			}
+		}
+		a = ba;
+		b = bb;
+	}
+	else
+	{
+		a = round_it ? floor(a + 0.5) : floor(a);
+		b = round_it ? floor(b + 0.5) : floor(b);
+	}
 	for (k = 0; k < 3; k++)
 		out[k] = o[k] + (q[k] * a + t[k] * b) * scale;
+}
+
+/* the closest pair of lattice points by the edge's middle: points (out0, out1) and integer steps (i0, i1) */
+static void mf_compat_pair(unsigned int sym, double const* x0, double const* n0, double const* q0, double const* o0, double const* x1,
+	double const* n1, double const* q1, double const* o1, double scale, double* out0, double* out1, int* i0, int* i1)
+{
+	double t0[3], t1[3], mid[3], a[3], b[3], best = HUGE_VAL, c0a, c0b, c1a, c1b;
+	int i, j, k;
+	mf_second(n0, q0, sym, t0);
+	mf_second(n1, q1, sym, t1);
+	mf_middle(x0, n0, x1, n1, mid);
+	mf_coords(o0, q0, t0, mid, scale, &c0a, &c0b);
+	mf_coords(o1, q1, t1, mid, scale, &c1a, &c1b);
+	c0a = floor(c0a); c0b = floor(c0b); c1a = floor(c1a); c1b = floor(c1b);
+	for (k = 0; k < 3; k++)
+	{
+		a[k] = o0[k] + (q0[k] * c0a + t0[k] * c0b) * scale;
+		b[k] = o1[k] + (q1[k] * c1a + t1[k] * c1b) * scale;
+	}
+	for (i = 0; i < 4; i++)
+		for (j = 0; j < 4; j++)
+		{
+			double u[3], v[3], c = 0;
+			for (k = 0; k < 3; k++)
+			{
+				u[k] = a[k] + (q0[k] * (i & 1) + t0[k] * ((i & 2) >> 1)) * scale;
+				v[k] = b[k] + (q1[k] * (j & 1) + t1[k] * ((j & 2) >> 1)) * scale;
+				c += (u[k] - v[k]) * (u[k] - v[k]);
+			}
+			if (c < best)
+			{
+				best = c;
+				if (out0)
+				{
+					memcpy(out0, u, sizeof u);
+					memcpy(out1, v, sizeof v);
+				}
+				if (i0)
+				{
+					i0[0] = (int)c0a + (i & 1);
+					i0[1] = (int)c0b + ((i & 2) >> 1);
+					i1[0] = (int)c1a + (j & 1);
+					i1[1] = (int)c1b + ((j & 2) >> 1);
+				}
+			}
+		}
+}
+
+void mf_compat_index_n(unsigned int sym, double const* x0, double const* n0, double const* q0, double const* o0, double const* x1, double const* n1,
+	double const* q1, double const* o1, double scale, int* i0, int* i1)
+{
+	mf_compat_pair(sym, x0, n0, q0, o0, x1, n1, q1, o1, scale, NULL, NULL, i0, i1);
+}
+
+static void mf_compat_position_n(unsigned int sym, double const* x0, double const* n0, double const* q0, double const* o0, double const* x1,
+	double const* n1, double const* q1, double const* o1, double scale, double* out0, double* out1)
+{
+	if (sym == 6)
+	{
+		mf_compat_pair(sym, x0, n0, q0, o0, x1, n1, q1, o1, scale, out0, out1, NULL, NULL);
+		return;
+	}
+	mf_compat_position(x0, n0, q0, o0, x1, n1, q1, o1, scale, out0, out1);
 }
 
 void mf_compat_position(double const* x0, double const* n0, double const* q0, double const* o0, double const* x1, double const* n1,
@@ -505,7 +644,7 @@ static void mf_sweep_q(mf_level* L, unsigned int sweeps)
 			{
 				unsigned int j = L->adj[k], q;
 				double a[3], b[3], wj = L->wt ? 0.5 * (L->wt[i] + L->wt[j]) : 1;
-				mf_compat_orientation(qi, n, L->q + 3 * (size_t)j, L->nrm + 3 * (size_t)j, a, b);
+				mf_compat_orientation_n(MF_SYM(L), qi, n, L->q + 3 * (size_t)j, L->nrm + 3 * (size_t)j, a, b);
 				for (q = 0; q < 3; q++)
 					qi[q] = a[q] * ws + b[q] * wj;
 				ws += wj;
@@ -515,7 +654,7 @@ static void mf_sweep_q(mf_level* L, unsigned int sweeps)
 			{
 				double a[3], b[3];
 				unsigned int q;
-				mf_compat_orientation(qi, n, L->cq + 3 * (size_t)i, n, a, b);
+				mf_compat_orientation_n(MF_SYM(L), qi, n, L->cq + 3 * (size_t)i, n, a, b);
 				for (q = 0; q < 3; q++)
 					qi[q] = (a[q] + b[q]) * ws;   /* (b as long as cq: |cq| times the neighbours) */
 				mf_tangent(qi, n);
@@ -563,7 +702,7 @@ void mf_orientations(mf_hier* h, unsigned int sweeps, double const* init, int pu
 						memcpy(ref, cq, sizeof ref);
 						have = 1;
 					}
-					mf_compat_orientation(ref, L->nrm + 3 * (size_t)i, cq, F->nrm + 3 * (size_t)ch, a, b);
+					mf_compat_orientation_n(MF_SYM(L), ref, L->nrm + 3 * (size_t)i, cq, F->nrm + 3 * (size_t)ch, a, b);
 					for (k = 0; k < 3; k++)
 						q[k] += b[k];
 				}
@@ -626,7 +765,7 @@ static void mf_settle(mf_level* L, unsigned int i, double* o, double scale)
 		for (k = 0; k < 3; k++)
 			o[k] = x[k] + d * c[k];
 	}
-	mf_cross(n, q, t);
+	mf_second(n, q, MF_SYM(L), t);
 	mf_lattice(o, q, t, x, L->sc ? scale * L->sc[i] : scale, 1, o);
 }
 
@@ -643,8 +782,8 @@ static void mf_sweep_o(mf_level* L, double scale, unsigned int sweeps)
 			{
 				unsigned int j = L->adj[k];
 				double qa[3], qb[3], a[3], b[3], d;
-				mf_compat_orientation(qi, n, L->q + 3 * (size_t)j, L->nrm + 3 * (size_t)j, qa, qb);
-				mf_compat_position(x, n, qi, sum, L->x + 3 * (size_t)j, L->nrm + 3 * (size_t)j, qb, L->o + 3 * (size_t)j,
+				mf_compat_orientation_n(MF_SYM(L), qi, n, L->q + 3 * (size_t)j, L->nrm + 3 * (size_t)j, qa, qb);
+				mf_compat_position_n(MF_SYM(L), x, n, qi, sum, L->x + 3 * (size_t)j, L->nrm + 3 * (size_t)j, qb, L->o + 3 * (size_t)j,
 					mf_pair_scale(L, i, j, scale), a, b);
 				for (q = 0; q < 3; q++)
 					sum[q] = (a[q] * ws + b[q]) / (ws + 1);
@@ -804,7 +943,7 @@ void mf_guide(mf_hier* h, double const* dir, double const* w)
 					memcpy(ref, u, sizeof ref);
 					have = 1;
 				}
-				mf_compat_orientation(ref, L->nrm + 3 * (size_t)i, u, F->nrm + 3 * (size_t)ch, a, b);
+				mf_compat_orientation_n(MF_SYM(L), ref, L->nrm + 3 * (size_t)i, u, F->nrm + 3 * (size_t)ch, a, b);
 				for (k = 0; k < 3; k++)
 					sum[k] += b[k];
 			}

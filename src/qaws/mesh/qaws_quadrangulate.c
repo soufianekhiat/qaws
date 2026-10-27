@@ -10,7 +10,9 @@
  * paired across their diagonals into quads, holes filled, doublets
  * removed), for all quads at the target spacing or else split from twice
  * it, relaxed on the reference (creases and the border along themselves);
- * footpoints and attributes as remeshing.
+ * footpoints and attributes as remeshing. The same with a 6-symmetric field
+ * and a hexagonal lattice gives triangles: remeshing's FIELD_ALIGNED
+ * (qd_remesh_aligned, qd_tri_extract).
  */
 
 #include "qaws_mesh_internal.h"
@@ -40,8 +42,8 @@ static unsigned int qd_find(unsigned int* uf, unsigned int i)
 	return i;
 }
 
-/* the faces round which the cross field turns (its singularities) */
-static unsigned int qd_singular(qaws_hm const* dm, mf_level const* L)
+/* the faces round which the field (symmetry nsym) turns (its singularities) */
+static unsigned int qd_singular(qaws_hm const* dm, mf_level const* L, unsigned int nsym)
 {
 	unsigned int f, i, n = 0;
 	for (f = 0; f < dm->nf; f++)
@@ -50,9 +52,9 @@ static unsigned int qd_singular(qaws_hm const* dm, mf_level const* L)
 		for (i = 0; i < 3; i++)
 		{
 			unsigned int a = dm->cv[dm->fc[f] + i], b = dm->cv[dm->fc[f] + (i + 1) % 3];
-			t += mf_rotation(L->q + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)b, L->nrm + 3 * (size_t)b);
+			t += mf_rotation_n(nsym, L->q + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)b, L->nrm + 3 * (size_t)b);
 		}
-		n += (t & 3) != 0;
+		n += t % (int)nsym != 0;
 	}
 	return n;
 }
@@ -1437,8 +1439,440 @@ static void qd_cone_points(mf_hier* h, int const* cone)
 }
 
 /* qaws_mesh_quadrangulate; map (may be NULL): GLOBAL's integer-grid map kept (left empty when it fell back) */
+/* ---- FIELD_ALIGNED: triangles off a hexagonal lattice ------------------------ */
+
+static int qd_u64_cmp(void const* p, void const* q)
+{
+	unsigned long long a = *(unsigned long long const*)p, b = *(unsigned long long const*)q;
+	return a < b ? -1 : a > b;
+}
+
+/* directed edges as an open-addressed set (keys + 1, 0 empty): 1 when added, 0 when already there */
+static int qd_dir_add(unsigned long long* tab, size_t mask, unsigned int a, unsigned int b, int test_only)
+{
+	unsigned long long key = ((unsigned long long)a << 32 | b) + 1;
+	size_t i = (size_t)(key * 0x9E3779B97F4A7C15ull >> 20) & mask;
+	while (tab[i] && tab[i] != key)
+		i = (i + 1) & mask;
+	if (tab[i] == key)
+		return 0;
+	if (!test_only)
+		tab[i] = key;
+	return 1;
+}
+
+typedef struct qd_tri
+{
+	unsigned int v[3];      /* clusters, oriented as the dense triangle */
+	unsigned int votes;
+	unsigned long long key; /* the sorted triple's */
+} qd_tri;
+
+static int qd_tri_key_cmp(void const* p, void const* q)
+{
+	qd_tri const *a = (qd_tri const*)p, *b = (qd_tri const*)q;
+	return a->key < b->key ? -1 : a->key > b->key;
+}
+
+static int qd_tri_votes_cmp(void const* p, void const* q)
+{
+	qd_tri const *a = (qd_tri const*)p, *b = (qd_tri const*)q;
+	return a->votes > b->votes ? -1 : a->votes < b->votes ? 1 : (a->key < b->key ? -1 : a->key > b->key);
+}
+
+/* FIELD_ALIGNED (Instant Meshes' triangles): each dense edge's lattice step (q matched, the nearest lattice points by its
+   middle, mf_compat_index_n): ends 0 apart merged into one cluster, ends one of the six unit steps apart joined; a dense
+   triangle whose three clusters differ and are joined pairwise votes for that triangle; the most voted first, each directed
+   edge taken once (no fold, no third face on an edge); holes of up to 12 sides left among clusters off the lines fanned
+   from the corner giving the shortest longest diagonal. Each cluster at its members' lattice points' mean, on the reference
+   (on its line for a cluster with a member on a crease or the border, at the pinned vertex for one with a pinned member). */
+static qaws_status qd_tri_extract(qaws_hm const* dm, mf_hier* h, double rho, qaws_mesh_reference const* r, mr_scratch* s, qd_out* o)
+{
+	static int const unit[6][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, -1 }, { -1, 1 } };
+	mf_level* L = &h->lv[0];
+	unsigned int nv = dm->nv, *uf = NULL, *cl = NULL, *cnt = NULL, *rep = NULL, *used = NULL, ncl = 0, ne = 0, nt = 0, ntu = 0, nacc = 0, v, c, k, i;
+	unsigned long long *ue = NULL, *ce = NULL, *dir = NULL;
+	double* cx = NULL;
+	unsigned char* ck = NULL;
+	qd_tri* tr = NULL;
+	unsigned int* acc = NULL;
+	size_t mask = 0, nce = 0;
+	int merged = 0;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	uf = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nv + 1));
+	cl = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nv + 1));
+	ue = (unsigned long long*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned long long), (size_t)dm->nc + 1));
+	tr = (qd_tri*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qd_tri), (size_t)dm->nf + 1));
+	if (!uf || !cl || !ue || !tr)
+		goto done;
+	for (v = 0; v < nv; v++)
+		uf[v] = v;
+	/* 1. the steps */
+	for (c = 0; c < dm->nc; c++)
+	{
+		unsigned int a, b, ra, rb;
+		double qa[3], qb[3];
+		int ia[2], ib[2], d0, d1;
+		if (dm->cf[c] == HM_NONE || (dm->co[c] != HM_NONE && dm->co[c] < c))
+			continue;
+		a = dm->cv[c];
+		b = hm_to(dm, c);
+		mf_compat_orientation_n(6, L->q + 3 * (size_t)a, L->nrm + 3 * (size_t)a, L->q + 3 * (size_t)b, L->nrm + 3 * (size_t)b, qa, qb);
+		mf_compat_index_n(6, L->x + 3 * (size_t)a, L->nrm + 3 * (size_t)a, qa, L->o + 3 * (size_t)a, L->x + 3 * (size_t)b, L->nrm + 3 * (size_t)b,
+			qb, L->o + 3 * (size_t)b, mf_pair_scale(L, a, b, rho), ia, ib);
+		d0 = ia[0] - ib[0];
+		d1 = ia[1] - ib[1];
+		if (d0 == 0 && d1 == 0)
+		{
+			ra = qd_find(uf, a);
+			rb = qd_find(uf, b);
+			if (ra != rb)
+				uf[ra] = rb;
+			continue;
+		}
+		for (k = 0; k < 6; k++)
+			if (d0 == unit[k][0] && d1 == unit[k][1])
+				break;
+		if (k < 6)
+			ue[ne++] = (unsigned long long)a << 32 | b;
+	}
+	/* 2. the clusters: lattice points averaged, kinds */
+clusters:
+	ncl = 0;
+	for (v = 0; v < nv; v++)
+		cl[v] = HM_NONE;
+	for (v = 0; v < nv; v++)
+		if (dm->vc[v] != HM_NONE && qd_find(uf, v) == v)
+			cl[v] = ncl++;
+	cx = (double*)qaws_internal_scratch_zalloc(3 * (size_t)ncl + 3, sizeof(double));
+	cnt = (unsigned int*)qaws_internal_scratch_zalloc((size_t)ncl + 1, sizeof(unsigned int));
+	ck = (unsigned char*)qaws_internal_scratch_zalloc((size_t)ncl + 1, 1);
+	rep = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)ncl + 1));
+	if (!cx || !cnt || !ck || !rep)
+		goto done;
+	for (v = 0; v < nv; v++)
+	{
+		unsigned int q;
+		if (dm->vc[v] == HM_NONE)
+			continue;
+		q = cl[qd_find(uf, v)];
+		cl[v] = q;
+		if (L->con[v] & MF_PINNED)
+		{
+			if (ck[q] != 2)
+				cnt[q] = 0;
+			ck[q] = 2;
+			for (k = 0; k < 3; k++)
+				cx[3 * (size_t)q + k] = L->x[3 * (size_t)v + k];
+			rep[q] = v;
+			continue;
+		}
+		if (ck[q] == 2)
+			continue;
+		if (L->con[v] & (MF_ON_LINE | MF_ALONG))
+		{
+			if (!ck[q])
+			{
+				/* (a line's member: the cluster sits on its line, from the line's members only) */
+				cnt[q] = 0;
+				cx[3 * (size_t)q] = cx[3 * (size_t)q + 1] = cx[3 * (size_t)q + 2] = 0;
+			}
+			ck[q] = 1;
+		}
+		else if (ck[q])
+			continue;
+		if (!cnt[q])
+			rep[q] = v;
+		for (k = 0; k < 3; k++)
+			cx[3 * (size_t)q + k] += L->o[3 * (size_t)v + k];
+		cnt[q]++;
+	}
+	for (i = 0; i < ncl; i++)
+		if (ck[i] != 2 && cnt[i])
+			for (k = 0; k < 3; k++)
+				cx[3 * (size_t)i + k] /= cnt[i];
+	/* clusters on a line from both its sides (each side's lattice met the line on its own) less than half a step apart: one,
+	   the clusters then made again */
+	if (!merged)
+	{
+		unsigned int joined = 0;
+		merged = 1;
+		for (c = 0; c < dm->nc; c++)
+		{
+			unsigned int a, b, A, B, ra, rb;
+			double d2 = 0;
+			if (dm->cf[c] == HM_NONE)
+				continue;
+			a = dm->cv[c];
+			b = hm_to(dm, c);
+			A = cl[a];
+			B = cl[b];
+			if (A == B || !ck[A] || !ck[B] || (ck[A] == 2 && ck[B] == 2))
+				continue;
+			for (k = 0; k < 3; k++)
+				d2 += (cx[3 * (size_t)A + k] - cx[3 * (size_t)B + k]) * (cx[3 * (size_t)A + k] - cx[3 * (size_t)B + k]);
+			if (d2 >= 0.25 * rho * rho)
+				continue;
+			ra = qd_find(uf, a);
+			rb = qd_find(uf, b);
+			if (ra != rb)
+			{
+				uf[ra] = rb;
+				joined++;
+			}
+		}
+		if (joined)
+		{
+			qaws_internal_free(cx); qaws_internal_free(cnt); qaws_internal_free(ck); qaws_internal_free(rep);
+			cx = NULL; cnt = NULL; ck = NULL; rep = NULL;
+			goto clusters;
+		}
+	}
+	/* 3. the clusters' edges, sorted */
+	ce = (unsigned long long*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned long long), (size_t)ne + 1));
+	if (!ce)
+		goto done;
+	for (i = 0; i < ne; i++)
+	{
+		unsigned int A = cl[(unsigned int)(ue[i] >> 32)], B = cl[(unsigned int)(ue[i] & 0xffffffffu)];
+		/* (two clusters off the lines in different regions: the edge would cut a crease) */
+		if (A == B || (!ck[A] && !ck[B] && r->treg[dm->foot[rep[A]].patch] != r->treg[dm->foot[rep[B]].patch]))
+			continue;
+		ce[nce++] = A < B ? (unsigned long long)A << 32 | B : (unsigned long long)B << 32 | A;
+	}
+	qsort(ce, nce, sizeof *ce, qd_u64_cmp);
+	{
+		/* an edge between two clusters on lines skipping a third on them, joined to both and lying on it (the line met by the
+		   lattice on a slant): dropped, the line taken through the third */
+		unsigned int *off = (unsigned int*)qaws_internal_scratch_zalloc((size_t)ncl + 2, sizeof(unsigned int)), *adj, *fill, keep = 0;
+		size_t q, u2 = 0;
+		adj = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 2 * nce + 1));
+		fill = (unsigned int*)qaws_internal_scratch_zalloc((size_t)ncl + 1, sizeof(unsigned int));
+		if (!off || !adj || !fill)
+		{
+			qaws_internal_free(off); qaws_internal_free(adj); qaws_internal_free(fill);
+			goto done;
+		}
+		for (q = 0; q < nce; q++)
+			if (q == 0 || ce[q] != ce[q - 1])
+				ce[u2++] = ce[q];
+		nce = u2;
+		for (q = 0; q < nce; q++)
+		{
+			off[(unsigned int)(ce[q] >> 32) + 1]++;
+			off[(unsigned int)(ce[q] & 0xffffffffu) + 1]++;
+		}
+		for (i = 0; i < ncl; i++)
+			off[i + 1] += off[i];
+		for (q = 0; q < nce; q++)
+		{
+			unsigned int A = (unsigned int)(ce[q] >> 32), B = (unsigned int)(ce[q] & 0xffffffffu);
+			adj[off[A] + fill[A]++] = B;
+			adj[off[B] + fill[B]++] = A;
+		}
+		for (q = 0; q < nce; q++)
+		{
+			unsigned int A = (unsigned int)(ce[q] >> 32), B = (unsigned int)(ce[q] & 0xffffffffu), j, z, skip = 0;
+			double const *pa = cx + 3 * (size_t)A, *pb = cx + 3 * (size_t)B;
+			double ab[3], l2;
+			for (k = 0; k < 3; k++)
+				ab[k] = pb[k] - pa[k];
+			l2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+			for (j = off[A]; ck[A] && ck[B] && !skip && j < off[A + 1]; j++)
+			{
+				unsigned int C = adj[j];
+				double const* pc = cx + 3 * (size_t)C;
+				double t, d2 = 0;
+				if (C == B || !ck[C])
+					continue;
+				for (z = off[B]; z < off[B + 1] && adj[z] != C; z++)
+					;
+				if (z == off[B + 1] || l2 <= 0)
+					continue;
+				t = ((pc[0] - pa[0]) * ab[0] + (pc[1] - pa[1]) * ab[1] + (pc[2] - pa[2]) * ab[2]) / l2;
+				for (k = 0; k < 3; k++)
+					d2 += (pa[k] + t * ab[k] - pc[k]) * (pa[k] + t * ab[k] - pc[k]);
+				skip = t > 0.05 && t < 0.95 && d2 < 0.04 * l2;
+			}
+			if (!skip)
+				ce[keep++] = ce[q];
+		}
+		nce = keep;
+		qaws_internal_free(off); qaws_internal_free(adj); qaws_internal_free(fill);
+	}
+	/* 4. the dense triangles' votes */
+	for (i = 0; i < dm->nf; i++)
+	{
+		unsigned int V[3], j, ok = 1, lo, mid, hi2;
+		if (dm->fn[i] != 3)
+			continue;
+		for (j = 0; j < 3; j++)
+			V[j] = cl[dm->cv[dm->fc[i] + j]];
+		if (V[0] == V[1] || V[1] == V[2] || V[0] == V[2])
+			continue;
+		for (j = 0; j < 3 && ok; j++)
+		{
+			unsigned int A = V[j], B = V[(j + 1) % 3];
+			unsigned long long key = A < B ? (unsigned long long)A << 32 | B : (unsigned long long)B << 32 | A;
+			ok = bsearch(&key, ce, nce, sizeof *ce, qd_u64_cmp) != NULL;
+		}
+		if (!ok)
+			continue;
+		lo = V[0] < V[1] ? (V[0] < V[2] ? V[0] : V[2]) : (V[1] < V[2] ? V[1] : V[2]);
+		hi2 = V[0] > V[1] ? (V[0] > V[2] ? V[0] : V[2]) : (V[1] > V[2] ? V[1] : V[2]);
+		mid = V[0] + V[1] + V[2] - lo - hi2;
+		memcpy(tr[nt].v, V, sizeof V);
+		tr[nt].votes = 1;
+		/* (21 bits each: up to two million clusters) */
+		tr[nt].key = (unsigned long long)lo << 42 | (unsigned long long)mid << 21 | hi2;
+		nt++;
+	}
+	qsort(tr, nt, sizeof *tr, qd_tri_key_cmp);
+	for (i = 0; i < nt; i++)
+		if (ntu && tr[ntu - 1].key == tr[i].key)
+			tr[ntu - 1].votes++;
+		else
+			tr[ntu++] = tr[i];
+	qsort(tr, ntu, sizeof *tr, qd_tri_votes_cmp);
+	/* 5. accepted most voted first, each directed edge once */
+	for (mask = 64; mask < 8 * (size_t)ntu + 64; mask <<= 1)
+		;
+	dir = (unsigned long long*)qaws_internal_scratch_zalloc(mask, sizeof(unsigned long long));
+	acc = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)ntu + 4 * (size_t)ncl + 16));
+	if (!dir || !acc)
+		goto done;
+	mask--;
+	for (i = 0; i < ntu; i++)
+	{
+		unsigned int const* V = tr[i].v;
+		if (!qd_dir_add(dir, mask, V[0], V[1], 1) || !qd_dir_add(dir, mask, V[1], V[2], 1) || !qd_dir_add(dir, mask, V[2], V[0], 1))
+			continue;
+		qd_dir_add(dir, mask, V[0], V[1], 0);
+		qd_dir_add(dir, mask, V[1], V[2], 0);
+		qd_dir_add(dir, mask, V[2], V[0], 0);
+		memcpy(acc + 3 * (size_t)nacc++, V, sizeof(unsigned int) * 3);
+	}
+	/* 6. small holes among clusters off the lines: loops of edges whose reverse no triangle has */
+	{
+		unsigned int nb = 0, *bn = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)ncl + 1));
+		unsigned char* seen = (unsigned char*)qaws_internal_scratch_zalloc((size_t)ncl + 1, 1);
+		unsigned int n0 = nacc;
+		if (!bn || !seen)
+		{
+			qaws_internal_free(bn);
+			qaws_internal_free(seen);
+			goto done;
+		}
+		for (i = 0; i < ncl; i++)
+			bn[i] = HM_NONE;
+		/* (each cluster's next along the holes' boundaries: from A on a border edge B -> A of a triangle) */
+		for (i = 0; i < n0; i++)
+			for (k = 0; k < 3; k++)
+			{
+				unsigned int A = acc[3 * (size_t)i + k], B = acc[3 * (size_t)i + (k + 1) % 3];
+				if (qd_dir_add(dir, mask, B, A, 1))
+				{
+					bn[B] = bn[B] == HM_NONE ? A : HM_NONE - 1;   /* (two: a pinch, left) */
+					nb++;
+				}
+			}
+		for (i = 0; nb && i < ncl; i++)
+		{
+			unsigned int loop[13], m = 0, w = i, j, best = HM_NONE, z;
+			double bestd = HUGE_VAL;
+			int onlines = 1;
+			if (bn[i] >= HM_NONE - 1 || seen[i])
+				continue;
+			while (m < 13 && bn[w] < HM_NONE - 1 && !seen[w])
+			{
+				seen[w] = 1;
+				loop[m++] = w;
+				w = bn[w];
+			}
+			if (w != i || m < 3 || m > 12)
+				continue;
+			for (j = 0; j < m; j++)
+				onlines &= ck[loop[j]] != 0;
+			if (onlines)
+				continue;   /* (the input's border, or a line's side) */
+			for (j = 0; j < m; j++)
+			{
+				double dmax = 0;
+				for (z = 2; z + 1 < m; z++)
+				{
+					unsigned int A = loop[j], B = loop[(j + z) % m];
+					double const *p = cx + 3 * (size_t)A, *q = cx + 3 * (size_t)B;
+					dmax = fmax(dmax, (p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2]));
+					if (!ck[A] && !ck[B] && r->treg[dm->foot[rep[A]].patch] != r->treg[dm->foot[rep[B]].patch])
+						dmax = HUGE_VAL;   /* (a diagonal across a crease) */
+				}
+				if (dmax < bestd || best == HM_NONE)
+				{
+					bestd = dmax;
+					best = j;
+				}
+			}
+			/* (the loop runs against its edges' triangles: the fan follows it) */
+			for (z = 1; z + 1 < m; z++)
+			{
+				acc[3 * (size_t)nacc] = loop[best];
+				acc[3 * (size_t)nacc + 1] = loop[(best + z) % m];
+				acc[3 * (size_t)nacc + 2] = loop[(best + z + 1) % m];
+				nacc++;
+			}
+		}
+		qaws_internal_free(bn);
+		qaws_internal_free(seen);
+	}
+	/* 7. out: the clusters in use, on the reference */
+	used = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)ncl + 1));
+	if (!used)
+		goto done;
+	for (i = 0; i < ncl; i++)
+		used[i] = HM_NONE;
+	o->nv = 0;
+	for (i = 0; i < 3 * nacc; i++)
+		if (used[acc[i]] == HM_NONE)
+			used[acc[i]] = o->nv++;
+	o->x = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 3, (size_t)o->nv + 1));
+	o->foot = (qaws_mesh_location*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (size_t)o->nv + 1));
+	o->kind = (unsigned char*)qaws_internal_malloc((size_t)o->nv + 1);
+	o->fv = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, (size_t)nacc + 1));
+	o->fs = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nacc + 1));
+	if (!o->x || !o->foot || !o->kind || !o->fv || !o->fs)
+		goto done;
+	for (i = 0; i < ncl; i++)
+	{
+		unsigned int u = used[i];
+		if (u == HM_NONE)
+			continue;
+		o->kind[u] = ck[i];
+		if (ck[i] == 2)
+		{
+			memcpy(o->x + 3 * (size_t)u, cx + 3 * (size_t)i, sizeof(double) * 3);
+			o->foot[u] = dm->foot[rep[i]];
+		}
+		else
+			qd_place(r, s, cx + 3 * (size_t)i, dm->foot[rep[i]], ck[i] != 0, o->x + 3 * (size_t)u, &o->foot[u]);
+	}
+	for (i = 0; i < nacc; i++)
+	{
+		for (k = 0; k < 3; k++)
+			o->fv[3 * (size_t)i + k] = used[acc[3 * (size_t)i + k]];
+		o->fs[i] = 3;
+	}
+	o->nf = nacc;
+	o->nc = 3 * nacc;
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(uf); qaws_internal_free(cl); qaws_internal_free(ue); qaws_internal_free(tr); qaws_internal_free(cx); qaws_internal_free(cnt);
+	qaws_internal_free(ck); qaws_internal_free(rep); qaws_internal_free(ce); qaws_internal_free(dir); qaws_internal_free(acc); qaws_internal_free(used);
+	return st;
+}
+
+/* tri: FIELD_ALIGNED's triangles (a 6-symmetric field, its hexagonal lattice read off by qd_tri_extract) */
 static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report,
-	qg_map* map)
+	qg_map* map, int tri)
 {
 	qaws_mesh_reference* own = NULL;
 	qaws_mesh_reference const* r;
@@ -1551,6 +1985,8 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	st = mf_build(&h, &dense->hm, nrm);
 	if (st != QAWS_STATUS_OK)
 		goto done;
+	for (k = 0; tri && k < h.nl; k++)
+		h.lv[k].sym = 6;
 	st = qd_guide(desc, mesh, r, &dense->hm, nrm, &h, &rho, &soft, &dcone, &vw);
 	if (st != QAWS_STATUS_OK)
 		goto done;
@@ -1608,7 +2044,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 		}
 		for (at = 0, l = 0; l < h.nl; at += 3 * (size_t)h.lv[l].n, l++)
 			memcpy(keep + at, h.lv[l].q, sizeof(double) * 3 * h.lv[l].n);
-		s0 = qd_singular(&dense->hm, &h.lv[0]);
+		s0 = qd_singular(&dense->hm, &h.lv[0], tri ? 6 : 4);
 		/* GLOBAL on a closed surface with a handle (Euler characteristic 0 or less): the field drawn to the curvature kept on a tie,
 		   as the smoothest may turn slowly round a thin tube and the quads then spiral */
 		{
@@ -1636,7 +2072,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 			}
 			else
 			{
-				if (t == 1 && ((fst = cf_create(&dense->hm, nrm, &h.lv[0], 4, &sys)) != QAWS_STATUS_OK
+				if (t == 1 && ((fst = cf_create(&dense->hm, nrm, &h.lv[0], tri ? 6 : 4, &sys)) != QAWS_STATUS_OK
 					|| (fst = cf_steer(sys, vw ? vw + dense->hm.nv : NULL, dcone)) != QAWS_STATUS_OK
 					|| (soft && (fst = cf_guide(sys, soft)) != QAWS_STATUS_OK)))
 					break;
@@ -1648,7 +2084,7 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 					continue;
 				memcpy(h.lv[0].q, cand, sizeof(double) * 3 * dense->hm.nv);
 			}
-			s1 = qd_singular(&dense->hm, &h.lv[0]);
+			s1 = qd_singular(&dense->hm, &h.lv[0], tri ? 6 : 4);
 			better = t == 1 ? s1 <= s0 || dcone : s1 < s0 || (t == 2 && s1 == s0 && tube);   /* (placed cones: the field with them, whatever it costs) */
 			placed |= better && t;
 			if (better && t)
@@ -1672,6 +2108,13 @@ static qaws_status qd_run(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc cons
 	}
 	mf_positions(&h, rf, desc->sweeps ? desc->sweeps : 8);
 	qd_cone_points(&h, dcone);
+	if (tri)
+	{
+		st = qd_tri_extract(&dense->hm, &h, rf, r, &s, &o);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+		goto output;
+	}
 	/* 3. the steps between lattice points made to close round every face, the mesh read off them; all quads at the
 	   target when that leaves no other face, else (a triangle or a polygon left) the same at twice the target, every face
 	   split; holes left are not looked for, the split would not close them either */
@@ -1821,7 +2264,9 @@ output:
 		}
 		for (v = 0; v < out->hm.nv; v++)
 			kind[v] = kind[v] == 3 ? 2 : kind[v];   /* (guide lines held by the relaxation and the finishing, not corners) */
-		if (!direct)
+		if (tri)
+			qd_relax(&out->hm, r, &s, kind, 10);
+		else if (!direct)
 		{
 			qd_relax(&out->hm, r, &s, kind, 10);
 			if (qi_improve(&out->hm, r, &s, kind, rho, 4) == HM_NONE)
@@ -1884,7 +2329,56 @@ done:
 
 qaws_status qaws_mesh_quadrangulate(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc)
 {
-	return qd_run(mesh, desc, out_mesh, out_report, NULL);
+	return qd_run(mesh, desc, out_mesh, out_report, NULL, 0);
+}
+
+qaws_status qd_remesh_aligned(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* mesh, qaws_remesh_desc const* rd)
+{
+	qaws_quadrangulate_desc d;
+	memset(&d, 0, sizeof d);
+	d.method = QAWS_QUADS_INSTANT;
+	d.reference = rd->reference;
+	d.size = rd->size;
+	d.pinned = rd->pinned;
+	d.pinned_count = rd->pinned_count;
+	d.target_length = rd->target_length;
+	qaws_mesh_reference* own = NULL;
+	qaws_mesh_3d* tri = NULL;
+	qaws_remesh_desc ld;
+	qaws_status st;
+	if (d.target_length == 0 && mesh)
+	{
+		qaws_mesh_quality q;
+		qaws_mesh_3d_measure_quality(&q, mesh);
+		d.target_length = q.mean_edge > 0 ? q.mean_edge : 1;
+	}
+	if (!d.reference && mesh)
+	{
+		/* (the input's own reference, its attributes' seams creases, as remeshing's) */
+		qaws_mesh_reference_desc rdesc;
+		memset(&rdesc, 0, sizeof rdesc);
+		rdesc.seams = 1;
+		if ((st = qaws_mesh_reference_create(&own, mesh, &rdesc)) != QAWS_STATUS_OK)
+			return st;
+		d.reference = own;
+	}
+	st = qd_run(mesh, &d, &tri, NULL, NULL, 1);
+	/* a few LOCAL passes finish it: the lattice, at the target already, kept but for its relaxation; the slivers and fans
+	   where it meets the creases and its holes split, collapsed and flipped away */
+	if (st == QAWS_STATUS_OK)
+	{
+		memset(&ld, 0, sizeof ld);
+		ld.method = QAWS_REMESH_LOCAL;
+		ld.reference = d.reference;
+		ld.target_length = d.target_length;
+		ld.size = rd->size;
+		ld.iterations = 3;
+		st = qaws_mesh_remesh(out_mesh, out_report, tri, &ld);
+	}
+
+	qaws_mesh_3d_destroy(tri);
+	qaws_mesh_reference_destroy(own);
+	return st;
 }
 
 qaws_status qg_parametrization(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc const* desc, qg_map* out)
@@ -1894,7 +2388,7 @@ qaws_status qg_parametrization(qaws_mesh_3d const* mesh, qaws_quadrangulate_desc
 	memset(out, 0, sizeof *out);
 	if (!desc || desc->method != QAWS_QUADS_GLOBAL)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = qd_run(mesh, desc, &q, NULL, out);
+	st = qd_run(mesh, desc, &q, NULL, out, 0);
 	qaws_mesh_3d_destroy(q);
 	if (st == QAWS_STATUS_OK && !out->nt)
 		st = QAWS_STATUS_INVALID_TOPOLOGY;

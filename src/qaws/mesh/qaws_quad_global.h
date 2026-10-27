@@ -31,6 +31,7 @@
 
 #include "qaws_mesh_internal.h"
 #include "../qaws_quadrangulate.h"
+#include "../qaws_remesh.h"
 
 /* A quad mesh read off: vertices x (3 each) with footpoints, kind (2: pinned, 1: on a line), faces. */
 typedef struct qd_out
@@ -43,6 +44,10 @@ typedef struct qd_out
 } qd_out;
 
 void qd_out_free(qd_out* o);
+
+/* qaws_mesh_remesh's FIELD_ALIGNED (qaws_quadrangulate.c): the quadrangulation's INSTANT pipeline on a 6-symmetric field and
+   its hexagonal lattice, read off as triangles */
+qaws_status qd_remesh_aligned(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_report, qaws_mesh_3d const* mesh, qaws_remesh_desc const* rd);
 
 /* the map as a triangle soup: per triangle its corners' positions (9) and uv (6, in lattice steps) */
 typedef struct qg_map

@@ -87,7 +87,21 @@
  *          `iterations` counts the L-BFGS steps after 5 Lloyd steps, per
  *          level (0: 30). The most uniform and regular triangles, the
  *          edges on target; about five times slower than LOCAL.
- *   FIELD_ALIGNED  reserved (UNSUPPORTED_OPERATION today).
+ *   FIELD_ALIGNED  Instant Meshes' triangles (Jakob et al. 2015): the
+ *          input remeshed densely (a third of the target), a 6-symmetric
+ *          direction field on it (smoothed coarse to fine, and the
+ *          globally smoothest one when it has fewer singularities) along
+ *          the creases, a hexagonal lattice position field (rows along the
+ *          creases, points on them), the lattice read off: each dense
+ *          edge's lattice step merging its ends (0) or joining them (one
+ *          of the six unit steps), the dense triangles voting for the
+ *          lattice's, small holes fanned, no edge across a crease; then
+ *          3 LOCAL passes finish it (needles and fans by the creases).
+ *          Mostly valence 6, the rows following the field, the defects at
+ *          its singularities only; about ten times slower than LOCAL.
+ *          Takes target_length, size, reference and pinned (iterations,
+ *          the angle bounds and tolerance unused); a metric is
+ *          UNSUPPORTED_OPERATION.
  *
  * Metric (LOCAL; as Mmgs): with a metric field every length, angle and
  * shape LOCAL weighs is measured in the metric, each vertex's taken in its

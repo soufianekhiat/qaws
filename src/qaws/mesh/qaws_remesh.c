@@ -15,6 +15,7 @@
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_remesh.h"
 #include "qaws_remesh_cvt.h"
+#include "qaws_quad_global.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -2362,7 +2363,14 @@ qaws_status qaws_mesh_remesh(qaws_mesh_3d** out_mesh, qaws_mesh_report* out_repo
 	if (!mesh || !desc || (unsigned int)desc->method > QAWS_REMESH_FIELD_ALIGNED || desc->target_length < 0)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (desc->method == QAWS_REMESH_FIELD_ALIGNED)
-		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	{
+		for (it = 0; it < desc->pinned_count; it++)
+			if (!desc->pinned || desc->pinned[it] >= mesh->hm.nv)
+				return QAWS_STATUS_INVALID_ARGUMENT;
+		if (desc->metric)
+			return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		return qd_remesh_aligned(out_mesh, out_report, mesh, desc);
+	}
 	/* the angle bounds about 60 degrees, below one another; the tolerance not negative */
 	if (desc->min_angle < 0 || desc->max_angle < 0 || desc->tolerance < 0 || (desc->min_angle > 0 && (double)desc->min_angle >= RM_PI / 3)
 		|| (desc->max_angle > 0 && (double)desc->max_angle <= RM_PI / 3) || (desc->min_angle > 0 && desc->max_angle > 0 && desc->min_angle >= desc->max_angle))

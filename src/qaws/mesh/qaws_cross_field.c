@@ -965,7 +965,7 @@ void cf_restrict(mf_hier* h)
 			{
 				unsigned int ch = L->child[c];
 				double a[3], b[3], wc = F->area[ch];
-				mf_compat_orientation(q, n, F->q + 3 * (size_t)ch, F->nrm + 3 * (size_t)ch, a, b);
+				mf_compat_orientation_n(L->sym == 6 ? 6u : 4u, q, n, F->q + 3 * (size_t)ch, F->nrm + 3 * (size_t)ch, a, b);
 				for (k = 0; k < 3; k++)
 					q[k] = a[k] * w + b[k] * wc;
 				w += wc;

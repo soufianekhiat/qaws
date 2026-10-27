@@ -335,7 +335,10 @@ cheapest and most reused first:
    Gregory interior, Chiyokura-Kimura cross tangents), SUBDIVISION (exact Loop limit: Stam's box splines, local
    subdivision near extraordinary vertices and creases, against qaws_mesh_3d_subdivide's limit to 1e-15) and MLS (APSS
    with value-gradient-Hessian jets; IMLS with normals was tried first and bulges outward on curved surfaces).
-2. **Remeshing:** FIELD_ALIGNED (Instant Meshes triangles, on the smoothest 6-RoSy field and the position flow).
+2. **Remeshing:** FIELD_ALIGNED done 2026-10-27 (test 124, figure 77): the quadrangulation's INSTANT pipeline with
+   mf levels of symmetry 6 (mf_compat_orientation_n, mf_compat_index_n, a hexagonal lattice), qd_tri_extract reading
+   triangles off the lattice steps (votes, each directed edge once, small holes fanned; line clusters from both sides
+   merged, edges skipping a line cluster or crossing a crease dropped), 3 LOCAL passes to finish.
 3. **Generation:** PARAMETRIC, RESTRICTED_DELAUNAY, STRUCTURED.
 4. **Tetrahedra:** ENVELOPE (fTetWild-style), STUFFING (isosurface stuffing).
 5. **Hexahedra:** an octree.
