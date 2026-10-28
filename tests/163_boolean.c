@@ -20,11 +20,13 @@
  *   - coplanar overlaps flagged: B turned about z sharing A's floor and ceiling,
  *     the union's and intersection's "overlap" faces (all A's) cover 2 V(A n B);
  *     none for the difference or two cubes crossing;
+ *   - the two spheres united on 4 threads: the serial result (faces, volume);
  *   - refusals: no faces, an unknown operation.
  */
 
 #include "test_common.h"
 #include "qaws_mesh_boolean.h"
+#include "test_threads.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -333,6 +335,37 @@ static void test_overlap(void)
 		&& ar[2] == -1 && rep[2] == 0 && crossing == -1 && crossing_rep == 0, msg);
 }
 
+/* an executor on host threads: count split in n ranges, one thread each */
+typedef struct bo_part
+{
+	qaws_batch_task_fn task;
+	void* ctx;
+	unsigned int b, e;
+} bo_part;
+
+static void bo_part_run(void* p)
+{
+	bo_part* q = (bo_part*)p;
+	if (q->e > q->b)
+		q->task(q->ctx, q->b, q->e);
+}
+
+static void bo_parallel_for(void* user, unsigned int count, qaws_batch_task_fn task, void* ctx)
+{
+	unsigned int n = (unsigned int)(size_t)user, k;
+	bo_part parts[TEST_MAX_THREADS];
+	void* args[TEST_MAX_THREADS];
+	for (k = 0; k < n; k++)
+	{
+		parts[k].task = task;
+		parts[k].ctx = ctx;
+		parts[k].b = (unsigned int)((unsigned long long)count * k / n);
+		parts[k].e = (unsigned int)((unsigned long long)count * (k + 1) / n);
+		args[k] = &parts[k];
+	}
+	test_run_threads(n, bo_part_run, args);
+}
+
 static void test_spheres(void)
 {
 	static double const c0[3] = { 0, 0, 0 }, c1[3] = { 0.7, 0.25, 0.15 };
@@ -358,6 +391,28 @@ static void test_spheres(void)
 	A = bo_desc(x, nv0, t, nt0);
 	B = bo_desc(x + 3 * nv0, nv - nv0, t + 3 * nt0, nt - nt0);
 	bo_identities("two spheres", &A, &B);
+	{
+		/* the same union on four threads (the operands' BVHs built side by side): the same result */
+		qaws_batch_executor ex;
+		qaws_intersect_desc id;
+		qaws_mesh_3d *s = NULL, *p = NULL;
+		double vs, vp;
+		char msg[200];
+		ex.parallel_for = bo_parallel_for;
+		ex.user = (void*)(size_t)4;
+		memset(&id, 0, sizeof id);
+		id.executor = &ex;
+		qaws_mesh_boolean(&s, NULL, &A, &B, QAWS_BOOLEAN_UNION, NULL);
+		qaws_mesh_boolean(&p, NULL, &A, &B, QAWS_BOOLEAN_UNION, &id);
+		vs = bo_volume(s);
+		vp = bo_volume(p);
+		sprintf(msg, "two spheres united serially and on 4 threads: %u and %u faces, volumes %.15f and %.15f", s ? qaws_mesh_3d_get_face_count(s) : 0,
+			p ? qaws_mesh_3d_get_face_count(p) : 0, vs, vp);
+		printf("  %s\n", msg);
+		TEST_ASSERT(s && p && qaws_mesh_3d_get_face_count(s) == qaws_mesh_3d_get_face_count(p) && vs == vp, msg);
+		qaws_mesh_3d_destroy(s);
+		qaws_mesh_3d_destroy(p);
+	}
 	free(x);
 	free(t);
 }

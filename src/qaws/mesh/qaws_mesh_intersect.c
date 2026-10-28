@@ -7,6 +7,7 @@
  */
 
 #include "../internal/qaws_internal_memory.h"
+#include "../qaws_allocator.h"
 #include "../internal/qaws_internal_broadphase.h"
 #include "../qaws_mesh_intersect.h"
 #include "../qaws_mesh_boolean.h"
@@ -2941,6 +2942,37 @@ static double sx_offset_of(qaws_scalar const* pts, unsigned int i)
 	return 0.5 * sqrt(s);
 }
 
+/* the operands' BVHs built side by side (sx_bvh each; st its status) */
+typedef struct sx_bvh_job
+{
+	qaws_mesh_bvh** out;
+	qaws_mesh_3d_desc const* m;
+	unsigned int** tri;
+	qaws_status st;
+} sx_bvh_job;
+
+static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri);
+
+static void sx_bvh_task(void* ctx, unsigned int begin, unsigned int end)
+{
+	sx_bvh_job* j = (sx_bvh_job*)ctx;
+	unsigned int i;
+	for (i = begin; i < end; i++)
+		j[i].st = sx_bvh(j[i].out, j[i].m, j[i].tri);
+}
+
+/* whether the calling thread allocates from the process default (no thread or scratch allocator of its own): only then
+   may other threads build what this call returns or frees, from the same allocator */
+static int sx_shared_heap(void)
+{
+	qaws_allocator a, s, none;
+	qaws_get_thread_allocator(&a);
+	memset(&none, 0, sizeof none);
+	qaws_exchange_thread_scratch_allocator(&s, NULL);
+	qaws_exchange_thread_scratch_allocator(&none, s.alloc || s.alloc_sized ? &s : NULL);
+	return !a.alloc && !a.alloc_sized && !s.alloc && !s.alloc_sized;
+}
+
 static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri)
 {
 	qaws_mesh_bvh_desc d;
@@ -3557,16 +3589,39 @@ static int sx_mend(sx_out const* o, unsigned long long const* grp, unsigned int 
    (SX_NONE where not known; filled here where the order tells). 0 on allocation failure. */
 static int sx_pair_round(unsigned int const* t, qaws_scalar const* pos, unsigned int nt, unsigned int* opp)
 {
-	unsigned int n = 3 * nt, i, j, q;
-	unsigned long long* g = (unsigned long long*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned long long), 2, (size_t)n + 1));
-	if (!g)
+	unsigned int n = 3 * nt, i, j, q, nm = 0, ng = 0;
+	unsigned long long *g, *mk;
+	/* (only the edges with a corner still unpaired: their keys, then every corner on them; none in most results) */
+	for (i = 0; i < n; i++)
+		nm += opp[i] == SX_NONE;
+	if (!nm)
+		return 1;
+	mk = (unsigned long long*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned long long), (size_t)nm + 1));
+	g = (unsigned long long*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned long long), 2, (size_t)n + 1));
+	if (!mk || !g)
+	{
+		qaws_internal_free(mk);
+		qaws_internal_free(g);
 		return 0;
+	}
+	for (i = 0, nm = 0; i < n; i++)
+		if (opp[i] == SX_NONE)
+		{
+			unsigned long long a = t[i], b = t[3 * (i / 3) + (i % 3 + 1) % 3];
+			mk[nm++] = a < b ? (a << 32 | b) : (b << 32 | a);
+		}
+	qsort(mk, nm, sizeof(unsigned long long), sx_cmp_u64);
 	for (i = 0; i < n; i++)
 	{
-		unsigned long long a = t[i], b = t[3 * (i / 3) + (i % 3 + 1) % 3];
-		g[2 * (size_t)i] = (a < b ? (a << 32 | b) : (b << 32 | a)) << 1 | (a > b);
-		g[2 * (size_t)i + 1] = i;
+		unsigned long long a = t[i], b = t[3 * (i / 3) + (i % 3 + 1) % 3], key = a < b ? (a << 32 | b) : (b << 32 | a);
+		if (!bsearch(&key, mk, nm, sizeof(unsigned long long), sx_cmp_u64))
+			continue;
+		g[2 * (size_t)ng] = key << 1 | (a > b);
+		g[2 * (size_t)ng + 1] = i;
+		ng++;
 	}
+	qaws_internal_free(mk);
+	n = ng;
 	qsort(g, n, 2 * sizeof(unsigned long long), sx_cmp_edge);
 	for (i = 0; i < n; i = j)
 	{
@@ -3805,14 +3860,28 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 	   the first surface its ray meets (from 1e-9 D off the piece, so not the piece itself) */
 	{
 		unsigned int rop;
+		{
+			/* the operands' BVHs (kept for their winding numbers below): side by side on the executor when this thread
+			   allocates from the shared default */
+			qaws_batch_executor const* ex = desc ? desc->executor : NULL;
+			sx_bvh_job jobs[2];
+			unsigned int nj = two ? 2u : 1u;
+			jobs[0].out = &ba; jobs[0].m = a; jobs[0].tri = &ta; jobs[0].st = QAWS_STATUS_ALLOCATION_FAILURE;
+			jobs[1].out = &bb; jobs[1].m = b; jobs[1].tri = &tb; jobs[1].st = QAWS_STATUS_ALLOCATION_FAILURE;
+			if (nj > 1 && ex && ex->parallel_for && sx_shared_heap())
+				ex->parallel_for(ex->user, nj, sx_bvh_task, jobs);
+			else
+				sx_bvh_task(jobs, 0, nj);
+			if (jobs[0].st != QAWS_STATUS_OK || (two && jobs[1].st != QAWS_STATUS_OK))
+				goto oom;
+		}
 		for (rop = 0; rop < (two ? 2u : 1u); rop++)
 		{
 			qaws_scalar* org = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 6, (size_t)npatch + 1));
 			qaws_scalar* dir = (qaws_scalar*)qaws_internal_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 6, (size_t)npatch + 1));
 			qaws_mesh_hit* rh = (qaws_mesh_hit*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_mesh_hit), 2 * (size_t)npatch + 1));
 			double e0 = 1e-9 * o.diag, far = 1e-6 * o.diag;
-			/* (the operand's BVH, kept for its winding numbers below) */
-			if (!org || !dir || !rh || sx_bvh(rop ? &bb : &ba, rop ? b : a, rop ? &tb : &ta) != QAWS_STATUS_OK)
+			if (!org || !dir || !rh)
 			{
 				qaws_internal_free(org); qaws_internal_free(dir); qaws_internal_free(rh);
 				goto oom;

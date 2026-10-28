@@ -185,6 +185,12 @@ All notable changes to Qaws are documented here.
 - BILATERAL smoothing moves each vertex to the least-squares point of its filtered
   planes (a corner to where they meet) instead of their mean. Test 165.
 
+### Changed
+
+- Booleans faster: the operands' BVHs built side by side on the executor (when the calling thread allocates from the
+  shared default), the result's edges paired by sorting only the edges with an unpaired corner: two 65k-triangle spheres
+  united in 0.25 s serially (was 0.29), 0.14 s on 8 threads (was 0.155). Test 163 (the same union on 4 threads).
+
 ### Added
 
 - Certified sweep chords: with `qaws_sweep_desc.strict`, each slab's deviation from its chords is bounded rather than
