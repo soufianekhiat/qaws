@@ -20,7 +20,9 @@
  *     apply;
  *   - the processor's paths: a BVH built with AVX2 masked off answers as
  *     the default one (closest distances, first and any hits, winding
- *     numbers within both expansions' error).
+ *     numbers within both expansions' error);
+ *   - built on an executor (its subtrees run backwards one at a time): 9024
+ *     triangles answer 200 closest-point and winding queries as built serially.
  */
 
 #include "test_common.h"
@@ -886,6 +888,46 @@ static void test_overlap(void)
 	free(f);
 }
 
+/* the build's subtrees on an executor (here run backwards, one at a time): a sphere of 9024 triangles (past the 8192 the
+   split waits for) built both ways answers 200 closest-point and winding queries alike, and is as deep */
+static void test_parallel_build(void)
+{
+	qaws_scalar *x = NULL, q[600], w0[200], w1[200];
+	unsigned int *t = NULL, nv = 0, nt = 0, i, same = 0;
+	qaws_mesh_bvh *b0 = NULL, *b1 = NULL;
+	qaws_mesh_bvh_desc d;
+	qaws_batch_executor ex;
+	qaws_mesh_hit h0[200], h1[200];
+	qaws_status s0, s1;
+	char msg[200];
+	bt_sphere(96, 48, &x, &nv, &t, &nt);
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = nv; d.dimension = 3; d.simplices = t; d.simplex_size = 3; d.simplex_count = nt;
+	s0 = qaws_mesh_bvh_create(&b0, &d);
+	ex.parallel_for = bt_backwards;
+	ex.user = NULL;
+	d.executor = &ex;
+	s1 = qaws_mesh_bvh_create(&b1, &d);
+	for (i = 0; i < 600; i++)
+		q[i] = (qaws_scalar)(2.4 * bt_rand() - 1.2);
+	if (s0 == QAWS_STATUS_OK && s1 == QAWS_STATUS_OK)
+	{
+		qaws_mesh_bvh_closest(h0, b0, q, 200, 0, NULL);
+		qaws_mesh_bvh_closest(h1, b1, q, 200, 0, NULL);
+		qaws_mesh_bvh_winding_number(w0, b0, q, 200, NULL);
+		qaws_mesh_bvh_winding_number(w1, b1, q, 200, NULL);
+		for (i = 0; i < 200; i++)
+			same += h0[i].element == h1[i].element && h0[i].distance == h1[i].distance && w0[i] == w1[i];
+	}
+	sprintf(msg, "a BVH of %u triangles built on an executor: %u of 200 closest points and winding numbers as built serially", nt, same);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s0 == QAWS_STATUS_OK && s1 == QAWS_STATUS_OK && nt >= 8192 && same == 200, msg);
+	qaws_mesh_bvh_destroy(b0);
+	qaws_mesh_bvh_destroy(b1);
+	free(x);
+	free(t);
+}
+
 int test_159_mesh_bvh_main(void)
 {
 	g_pass = 0;
@@ -899,6 +941,7 @@ int test_159_mesh_bvh_main(void)
 	test_refusals();
 	test_paths();
 	test_scale();
+	test_parallel_build();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

@@ -107,8 +107,9 @@ Robust numerical Booleans (decision 10):
 7. **Scale: started.** Resolution and Booleans parallel through the executor, fitted pair grid (522k triangles resolved in 0.55 s on 8 threads, 0.77 s on one); BVH AVX2 with runtime CPU dispatch in progress. Measured 2026-10-28 (two spheres of 65k triangles each united): the weld and grid build take 3 ms (no longer worth
    work); the operands' BVHs now built side by side on the executor (when the calling thread allocates from the shared
    default), the result's edges paired only where a corner is left unpaired (the 290k half-edges' sort gone: 35 ms to
-   none): 0.29 s to 0.25 s serial, 0.155 s to 0.14 s on 8 threads. Next: the BVH's own build in parallel (31 ms build,
-   9 ms collapse, 15 ms moments per 65k triangles; it takes no executor yet), the patches' mending (15 ms), field solves. Planned as: Benchmarks past 10^6 elements, parallel field solves and local operations, on the executor interface the batches use. Placed here because the Booleans compete on speed.
+   none): 0.29 s to 0.25 s serial, 0.155 s to 0.14 s on 8 threads. The BVH's build in parallel: done (qaws_mesh_bvh_desc.executor, subtrees
+   by ranges: 261k triangles 0.24 s to 0.17 s on 8 threads). Next: the BVH's collapse and winding moments (about 25 ms per
+   65k triangles, serial), the patches' mending (15 ms), field solves. Planned as: Benchmarks past 10^6 elements, parallel field solves and local operations, on the executor interface the batches use. Placed here because the Booleans compete on speed.
 
 Mesh processing:
 

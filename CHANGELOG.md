@@ -187,6 +187,9 @@ All notable changes to Qaws are documented here.
 
 ### Changed
 
+- BVHs build on an executor (`qaws_mesh_bvh_desc.executor`): the top of the tree split on the calling thread, its subtrees
+  on the executor, nodes numbered by their ranges so the tree is the same either way (261k triangles: 0.24 s to 0.17 s on 8
+  threads). Test 159.
 - Booleans faster: the operands' BVHs built side by side on the executor (when the calling thread allocates from the
   shared default), the result's edges paired by sorting only the edges with an unpaired corner: two 65k-triangle spheres
   united in 0.25 s serially (was 0.29), 0.14 s on 8 threads (was 0.155). Test 163 (the same union on 4 threads).

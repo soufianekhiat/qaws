@@ -389,19 +389,193 @@ BV_AVX2_FN static void bv_bin_avx2(bv_ref const* r, unsigned int begin, unsigned
 }
 #endif
 
-static qaws_status bv_build(qaws_mesh_bvh* b, unsigned int leaf_size)
+/* node t (refs [begin, end)) split by binned SAH (the median when the bins do not split); its node written, its children's
+   tasks into kid (their nodes by ranges, so the tree is the same whatever order the nodes are split in): 1, or 0 for a leaf
+   (one simplex) */
+static int bv_split(qaws_mesh_bvh* b, bv_ref* r, bv_task const* t, bv_task* kid)
+{
+	unsigned int i;
+	bv_node* nd = b->nodes + t->node;
+	unsigned int n = t->end - t->begin, axis, best_axis = 3, mid, j, k;
+	int best_bin = 0;
+	float best = HUGE_VALF, scale[3];
+	float blo[3][BV_BINS][4], bhi[3][BV_BINS][4];
+	unsigned int bcount[3][BV_BINS];
+	nd->first = t->begin;
+	nd->cnt = n;
+	for (axis = 0; axis < 3; axis++)
+	{
+		nd->lo[axis] = t->lo[axis];
+		nd->hi[axis] = t->hi[axis];
+	}
+	if (n <= 1)
+	{
+		nd->leaf = 1;
+		nd->a = t->begin;
+		nd->b = n;
+		return 0;
+	}
+	/* binned SAH, every axis the centroids spread along binned in one pass, each bin with its box and centroids' box */
+	for (axis = 0; axis < 3; axis++)
+	{
+		scale[axis] = n > 4 && axis < b->dim && t->chi[axis] > t->clo[axis] ? BV_BINS / (t->chi[axis] - t->clo[axis]) : 0;
+		for (j = 0; j < BV_BINS; j++)
+		{
+			bv_fempty4(blo[axis][j], bhi[axis][j]);
+			bcount[axis][j] = 0;
+		}
+	}
+	if (n > 4)
+	{
+#if BV_AVX2
+		if (b->simd == 2)
+			bv_bin_avx2(r, t->begin, t->end, b->dim, t->clo, scale, blo, bhi, bcount);
+		else
+#endif
+			for (i = t->begin; i < t->end; i++)
+				for (axis = 0; axis < b->dim; axis++)
+					if (scale[axis] > 0)
+					{
+						int bin = bv_bin(r + i, axis, t->clo[axis], scale[axis]);
+						bcount[axis][bin]++;
+						bv_acc(blo[axis][bin], bhi[axis][bin], r[i].lo, r[i].hi);
+					}
+	}
+	for (axis = 0; axis < b->dim; axis++)
+	{
+		float rlo[4], rhi[4], llo[4], lhi[4], rarea[BV_BINS];
+		unsigned int rcount[BV_BINS], left = 0;
+		if (!(scale[axis] > 0))
+			continue;
+		/* the right side of the plane after bin j - 1: bins j.. */
+		bv_fempty4(rlo, rhi);
+		for (j = BV_BINS - 1; j > 0; j--)
+		{
+			bv_acc(rlo, rhi, blo[axis][j], bhi[axis][j]);
+			rcount[j - 1] = (j + 1 < BV_BINS ? rcount[j] : 0) + bcount[axis][j];
+			rarea[j - 1] = bv_farea(rlo, rhi, b->dim);
+		}
+		bv_fempty4(llo, lhi);
+		for (j = 0; j + 1 < BV_BINS; j++)
+		{
+			float cost;
+			left += bcount[axis][j];
+			bv_acc(llo, lhi, blo[axis][j], bhi[axis][j]);
+			if (!left || !rcount[j])
+				continue;
+			cost = bv_farea(llo, lhi, b->dim) * left + rarea[j] * rcount[j];
+			if (cost < best)
+			{
+				best = cost;
+				best_axis = axis;
+				best_bin = (int)j;
+			}
+		}
+	}
+	for (k = 0; k < 2; k++)
+		kid[k].depth = t->depth + 1;
+	mid = t->begin;
+	if (best_axis < 3)
+	{
+		/* the children's bounds from the bins on each side */
+		mid = bv_partition(r, best_axis, t->clo[best_axis], scale[best_axis], best_bin, t->begin, t->end);
+		for (k = 0; k < 2; k++)
+		{
+			bv_fempty4(kid[k].lo, kid[k].hi);
+			bv_fempty4(kid[k].clo, kid[k].chi);
+		}
+		for (j = 0; j < BV_BINS; j++)
+		{
+			k = (int)j <= best_bin ? 0 : 1;
+			bv_acc(kid[k].lo, kid[k].hi, blo[best_axis][j], bhi[best_axis][j]);
+		}
+		/* the centroids (doubled) within the box, doubled */
+		for (k = 0; k < 2; k++)
+			for (j = 0; j < 4; j++)
+			{
+				kid[k].clo[j] = 2 * kid[k].lo[j];
+				kid[k].chi[j] = 2 * kid[k].hi[j];
+			}
+	}
+	kid[0].begin = t->begin;
+	kid[1].end = t->end;
+	if (mid == t->begin || mid == t->end)
+	{
+		/* no split by the bins (centroids together): the median along the widest spread */
+		float w = -1;
+		for (axis = 0, best_axis = 0; axis < b->dim; axis++)
+			if (t->chi[axis] - t->clo[axis] > w)
+			{
+				w = t->chi[axis] - t->clo[axis];
+				best_axis = axis;
+			}
+		bv_median(r, best_axis, t->begin, t->end);
+		mid = t->begin + n / 2;
+		kid[0].end = kid[1].begin = mid;
+		bv_task_bounds(r, kid);
+		bv_task_bounds(r, kid + 1);
+	}
+	kid[0].end = kid[1].begin = mid;
+	/* (pre-order by ranges: the left subtree right after the node, 2 m - 1 nodes for m simplices, then the right) */
+	nd->leaf = 0;
+	nd->a = t->node + 1;
+	nd->b = t->node + 2 * (mid - t->begin);
+	kid[0].node = nd->a;
+	kid[1].node = nd->b;
+	return 1;
+}
+
+/* the subtree of task t split to its leaves, depth first on stack (room for t's count plus 2 tasks); its deepest level into
+   *depth */
+static void bv_subtree(qaws_mesh_bvh* b, bv_ref* r, bv_task t, bv_task* stack, unsigned int* depth)
+{
+	unsigned int top = 1;
+	stack[0] = t;
+	while (top)
+	{
+		bv_task u = stack[--top], kid[2];
+		if (u.depth > *depth)
+			*depth = u.depth;
+		if (bv_split(b, r, &u, kid))
+		{
+			stack[top++] = kid[1];
+			stack[top++] = kid[0];
+		}
+	}
+}
+
+/* subtrees split on the executor: each its own tasks' stack, nothing allocated by them */
+typedef struct bv_par
+{
+	qaws_mesh_bvh* b;
+	bv_ref* r;
+	bv_task const* task;
+	bv_task* stack;
+	size_t const* off;
+	unsigned int* depth;
+} bv_par;
+
+static void bv_par_run(void* ctx, unsigned int begin, unsigned int end)
+{
+	bv_par const* p = (bv_par const*)ctx;
+	unsigned int i;
+	for (i = begin; i < end; i++)
+		bv_subtree(p->b, p->r, p->task[i], p->stack + p->off[i], p->depth + i);
+}
+
+/* the binary tree to single simplices (2 ns - 1 nodes): the top split here, its subtrees of at most a 64th of the
+   simplices (when there are 8192 or more) on the executor */
+static qaws_status bv_build(qaws_mesh_bvh* b, qaws_batch_executor const* ex)
 {
 	bv_ref* r = (bv_ref*)qaws_internal_scratch_malloc(qaws_internal_mul2((size_t)b->ns + 1, sizeof(bv_ref)));
-	unsigned int top = 0, scap = 64, i, cap = b->ns ? 2 * b->ns - 1 : 0;
+	unsigned int top = 0, scap = 64, i, cap = b->ns ? 2 * b->ns - 1 : 0, nd = 0, dcap = 0, cut;
 	bv_task* stack = (bv_task*)qaws_internal_malloc(scap * sizeof(bv_task));
+	bv_task* deferred = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	b->ord = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2((size_t)b->ns + 1, sizeof(unsigned int)));
 	b->nodes = (bv_node*)qaws_internal_malloc(qaws_internal_mul2((size_t)cap + 1, sizeof(bv_node)));
 	if (!r || !stack || !b->ord || !b->nodes)
-	{
-		qaws_internal_free(r);
-		qaws_internal_free(stack);
-		return QAWS_STATUS_ALLOCATION_FAILURE;
-	}
+		goto done;
 	for (i = 0; i < b->ns; i++)
 	{
 		double lo[3], hi[3];
@@ -415,11 +589,11 @@ static qaws_status bv_build(qaws_mesh_bvh* b, unsigned int leaf_size)
 		r[i].id = i;
 		r[i].pad = 0;
 	}
-	b->nn = 0;
+	b->nn = cap;
 	b->depth = 0;
+	cut = ex && ex->parallel_for && b->ns >= 8192 ? b->ns / 16 : 0;
 	if (b->ns)
 	{
-		b->nn = 1;
 		stack[0].node = 0;
 		stack[0].begin = 0;
 		stack[0].end = b->ns;
@@ -429,157 +603,85 @@ static qaws_status bv_build(qaws_mesh_bvh* b, unsigned int leaf_size)
 	}
 	while (top)
 	{
-		bv_task t = stack[--top];
-		bv_node* nd = b->nodes + t.node;
-		unsigned int n = t.end - t.begin, axis, best_axis = 3, mid, j, k;
-		int best_bin = 0;
-		float best = HUGE_VALF, scale[3];
-		float blo[3][BV_BINS][4], bhi[3][BV_BINS][4];
-		unsigned int bcount[3][BV_BINS];
-		bv_task kid[2];
-		nd->first = t.begin;
-		nd->cnt = n;
-		if (t.depth > b->depth)
-			b->depth = t.depth;
-		for (axis = 0; axis < 3; axis++)
+		bv_task t = stack[--top], kid[2];
+		if (t.end - t.begin <= cut)
 		{
-			nd->lo[axis] = t.lo[axis];
-			nd->hi[axis] = t.hi[axis];
-		}
-		if (n <= leaf_size)
-		{
-			nd->leaf = 1;
-			nd->a = t.begin;
-			nd->b = n;
+			/* (a subtree for the executor) */
+			if (nd + 1 > dcap)
+			{
+				unsigned int c2 = dcap ? 2 * dcap : 256;
+				bv_task* g = (bv_task*)qaws_internal_realloc(deferred, qaws_internal_mul2(c2, sizeof(bv_task)));
+				if (!g)
+					goto done;
+				deferred = g;
+				dcap = c2;
+			}
+			deferred[nd++] = t;
 			continue;
 		}
-		/* binned SAH, every axis the centroids spread along binned in one pass, each bin with its box and centroids' box */
-		for (axis = 0; axis < 3; axis++)
-		{
-			scale[axis] = n > 4 && axis < b->dim && t.chi[axis] > t.clo[axis] ? BV_BINS / (t.chi[axis] - t.clo[axis]) : 0;
-			for (j = 0; j < BV_BINS; j++)
-			{
-				bv_fempty4(blo[axis][j], bhi[axis][j]);
-				bcount[axis][j] = 0;
-			}
-		}
-		if (n > 4)
-		{
-#if BV_AVX2
-			if (b->simd == 2)
-				bv_bin_avx2(r, t.begin, t.end, b->dim, t.clo, scale, blo, bhi, bcount);
-			else
-#endif
-				for (i = t.begin; i < t.end; i++)
-					for (axis = 0; axis < b->dim; axis++)
-						if (scale[axis] > 0)
-						{
-							int bin = bv_bin(r + i, axis, t.clo[axis], scale[axis]);
-							bcount[axis][bin]++;
-							bv_acc(blo[axis][bin], bhi[axis][bin], r[i].lo, r[i].hi);
-						}
-		}
-		for (axis = 0; axis < b->dim; axis++)
-		{
-			float rlo[4], rhi[4], llo[4], lhi[4], rarea[BV_BINS];
-			unsigned int rcount[BV_BINS], left = 0;
-			if (!(scale[axis] > 0))
-				continue;
-			/* the right side of the plane after bin j - 1: bins j.. */
-			bv_fempty4(rlo, rhi);
-			for (j = BV_BINS - 1; j > 0; j--)
-			{
-				bv_acc(rlo, rhi, blo[axis][j], bhi[axis][j]);
-				rcount[j - 1] = (j + 1 < BV_BINS ? rcount[j] : 0) + bcount[axis][j];
-				rarea[j - 1] = bv_farea(rlo, rhi, b->dim);
-			}
-			bv_fempty4(llo, lhi);
-			for (j = 0; j + 1 < BV_BINS; j++)
-			{
-				float cost;
-				left += bcount[axis][j];
-				bv_acc(llo, lhi, blo[axis][j], bhi[axis][j]);
-				if (!left || !rcount[j])
-					continue;
-				cost = bv_farea(llo, lhi, b->dim) * left + rarea[j] * rcount[j];
-				if (cost < best)
-				{
-					best = cost;
-					best_axis = axis;
-					best_bin = (int)j;
-				}
-			}
-		}
-		for (k = 0; k < 2; k++)
-			kid[k].depth = t.depth + 1;
-		mid = t.begin;
-		if (best_axis < 3)
-		{
-			/* the children's bounds from the bins on each side */
-			mid = bv_partition(r, best_axis, t.clo[best_axis], scale[best_axis], best_bin, t.begin, t.end);
-			for (k = 0; k < 2; k++)
-			{
-				bv_fempty4(kid[k].lo, kid[k].hi);
-				bv_fempty4(kid[k].clo, kid[k].chi);
-			}
-			for (j = 0; j < BV_BINS; j++)
-			{
-				k = (int)j <= best_bin ? 0 : 1;
-				bv_acc(kid[k].lo, kid[k].hi, blo[best_axis][j], bhi[best_axis][j]);
-			}
-			/* the centroids (doubled) within the box, doubled */
-			for (k = 0; k < 2; k++)
-				for (j = 0; j < 4; j++)
-				{
-					kid[k].clo[j] = 2 * kid[k].lo[j];
-					kid[k].chi[j] = 2 * kid[k].hi[j];
-				}
-		}
-		kid[0].begin = t.begin;
-		kid[1].end = t.end;
-		if (mid == t.begin || mid == t.end)
-		{
-			/* no split by the bins (centroids together): the median along the widest spread */
-			float w = -1;
-			for (axis = 0, best_axis = 0; axis < b->dim; axis++)
-				if (t.chi[axis] - t.clo[axis] > w)
-				{
-					w = t.chi[axis] - t.clo[axis];
-					best_axis = axis;
-				}
-			bv_median(r, best_axis, t.begin, t.end);
-			mid = t.begin + n / 2;
-			kid[0].end = kid[1].begin = mid;
-			bv_task_bounds(r, kid);
-			bv_task_bounds(r, kid + 1);
-		}
-		kid[0].end = kid[1].begin = mid;
-		nd->leaf = 0;
-		nd->a = b->nn;
-		nd->b = b->nn + 1;
-		kid[0].node = nd->a;
-		kid[1].node = nd->b;
-		b->nn += 2;
+		if (t.depth > b->depth)
+			b->depth = t.depth;
+		if (!bv_split(b, r, &t, kid))
+			continue;
 		if (top + 2 > scap)
 		{
 			bv_task* grown = (bv_task*)qaws_internal_realloc(stack, 2 * (size_t)scap * sizeof(bv_task));
 			if (!grown)
-			{
-				qaws_internal_free(r);
-				qaws_internal_free(stack);
-				return QAWS_STATUS_ALLOCATION_FAILURE;
-			}
+				goto done;
 			stack = grown;
 			scap *= 2;
 		}
 		stack[top++] = kid[1];
 		stack[top++] = kid[0];
 	}
+	if (nd)
+	{
+		/* (each subtree's stack room: its count and two, from one block) */
+		size_t* off = (size_t*)qaws_internal_malloc(qaws_internal_mul2((size_t)nd + 1, sizeof(size_t)));
+		unsigned int* depth = (unsigned int*)qaws_internal_zalloc((size_t)nd + 1, sizeof(unsigned int));
+		bv_task* stacks;
+		bv_par par;
+		size_t total = 0;
+		if (!off || !depth)
+		{
+			qaws_internal_free(off);
+			qaws_internal_free(depth);
+			goto done;
+		}
+		for (i = 0; i < nd; i++)
+		{
+			off[i] = total;
+			total += (size_t)(deferred[i].end - deferred[i].begin) + 2;
+		}
+		stacks = (bv_task*)qaws_internal_malloc(qaws_internal_mul2(total + 1, sizeof(bv_task)));
+		if (!stacks)
+		{
+			qaws_internal_free(off);
+			qaws_internal_free(depth);
+			goto done;
+		}
+		par.b = b;
+		par.r = r;
+		par.task = deferred;
+		par.stack = stacks;
+		par.off = off;
+		par.depth = depth;
+		ex->parallel_for(ex->user, nd, bv_par_run, &par);
+		for (i = 0; i < nd; i++)
+			if (depth[i] > b->depth)
+				b->depth = depth[i];
+		qaws_internal_free(stacks);
+		qaws_internal_free(off);
+		qaws_internal_free(depth);
+	}
 	for (i = 0; i < b->ns; i++)
 		b->ord[i] = r[i].id;
+	st = QAWS_STATUS_OK;
+done:
 	qaws_internal_free(r);
 	qaws_internal_free(stack);
-	return QAWS_STATUS_OK;
+	qaws_internal_free(deferred);
+	return st;
 }
 
 /* entry e's (a position in ord) vertices, contiguous */
@@ -1051,7 +1153,7 @@ static qaws_status bv_make(qaws_mesh_bvh** out, double* x, unsigned int nv, unsi
 #endif
 	leaf = desc && desc->leaf_size ? desc->leaf_size : 4;
 	b->leaf = leaf;
-	st = bv_build(b, 1);   /* (to single simplices: the collapse forms the leaves by cost) */
+	st = bv_build(b, desc ? desc->executor : NULL);   /* (to single simplices: the collapse forms the leaves by cost) */
 	if (st == QAWS_STATUS_OK)
 		st = bv_collapse(b);
 	if (st == QAWS_STATUS_OK && bv_winds(b) && b->t.n4)

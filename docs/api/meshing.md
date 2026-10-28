@@ -1501,7 +1501,7 @@ A `qaws_mesh_hit` holds:
 
 **Signed distance.** The closest distance, negative where the winding number is at least 1/2. Its sign therefore holds on soups, with holes and with overlaps.
 
-**Threads.** Queries run in chunks of 64 through the caller's `qaws_batch_executor`, and the results do not depend on it.
+**Threads.** Queries run in chunks of 64 through the caller's `qaws_batch_executor`, and the results do not depend on it. The build takes one too (`qaws_mesh_bvh_desc.executor`): from 8192 simplices the top of the tree is split on the calling thread and its subtrees of at most a sixteenth of them on the executor. Nodes are numbered by their ranges (pre-order: the left subtree right after its node, 2m − 1 nodes for m simplices), so the tree is the same whichever order the subtrees are split in, and the workers allocate nothing. A 261k-triangle sphere builds in 0.17 s on 8 threads against 0.24 s on one; the collapse to wide nodes and the winding moments still run on the calling thread (test 159: the same answers either way). Booleans build their two operands' trees side by side when the calling thread allocates from the shared default, else one after the other, each on the executor.
 
 **Status.** `UNSUPPORTED_OPERATION` for rays or winding numbers except on triangles in 3D or segments in 2D. `INVALID_ARGUMENT` for:
 - a dimension other than 2 or 3;

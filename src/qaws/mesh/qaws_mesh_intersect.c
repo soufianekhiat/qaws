@@ -2951,14 +2951,14 @@ typedef struct sx_bvh_job
 	qaws_status st;
 } sx_bvh_job;
 
-static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri);
+static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri, qaws_batch_executor const* ex);
 
 static void sx_bvh_task(void* ctx, unsigned int begin, unsigned int end)
 {
 	sx_bvh_job* j = (sx_bvh_job*)ctx;
 	unsigned int i;
 	for (i = begin; i < end; i++)
-		j[i].st = sx_bvh(j[i].out, j[i].m, j[i].tri);
+		j[i].st = sx_bvh(j[i].out, j[i].m, j[i].tri, NULL);
 }
 
 /* whether the calling thread allocates from the process default (no thread or scratch allocator of its own): only then
@@ -2973,7 +2973,8 @@ static int sx_shared_heap(void)
 	return !a.alloc && !a.alloc_sized && !s.alloc && !s.alloc_sized;
 }
 
-static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri)
+/* an operand's BVH over its faces fanned (its triangles into *tri), its subtrees split on ex (may be NULL) */
+static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsigned int** tri, qaws_batch_executor const* ex)
 {
 	qaws_mesh_bvh_desc d;
 	unsigned int f, k, off = 0, n = 0;
@@ -3000,6 +3001,7 @@ static qaws_status sx_bvh(qaws_mesh_bvh** out, qaws_mesh_3d_desc const* m, unsig
 	d.simplices = *tri;
 	d.simplex_size = 3;
 	d.simplex_count = n;
+	d.executor = ex;
 	return qaws_mesh_bvh_create(out, &d);
 }
 
@@ -3862,7 +3864,7 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 		unsigned int rop;
 		{
 			/* the operands' BVHs (kept for their winding numbers below): side by side on the executor when this thread
-			   allocates from the shared default */
+			   allocates from the shared default, else one after the other, each split on it (its workers allocate nothing) */
 			qaws_batch_executor const* ex = desc ? desc->executor : NULL;
 			sx_bvh_job jobs[2];
 			unsigned int nj = two ? 2u : 1u;
@@ -3871,7 +3873,8 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 			if (nj > 1 && ex && ex->parallel_for && sx_shared_heap())
 				ex->parallel_for(ex->user, nj, sx_bvh_task, jobs);
 			else
-				sx_bvh_task(jobs, 0, nj);
+				for (k = 0; k < nj; k++)
+					jobs[k].st = sx_bvh(jobs[k].out, jobs[k].m, jobs[k].tri, ex);
 			if (jobs[0].st != QAWS_STATUS_OK || (two && jobs[1].st != QAWS_STATUS_OK))
 				goto oom;
 		}

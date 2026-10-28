@@ -78,6 +78,7 @@ typedef struct qaws_mesh_bvh_desc
 	unsigned int const* elements;      /* per simplex its element; NULL: the simplex's own index */
 	unsigned int leaf_size;            /* 0: 4 */
 	qaws_scalar winding_accuracy;      /* 0: 2.25 (Barill et al.'s beta) */
+	qaws_batch_executor const* executor;   /* NULL: built on the calling thread; else its subtrees split on it (the same tree) */
 } qaws_mesh_bvh_desc;
 
 /* A query's answer. element QAWS_MESH_NONE: nothing within reach. */
