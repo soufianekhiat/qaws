@@ -837,7 +837,12 @@ at equal lengths (a shared edge alike from both faces), counts matched
 across edges, doubled per direction to meet chord or angle tolerances.
 Quads or triangles, exactly on the faces, no irregular vertex but at shell
 corners (figure 78). A trimmed face with one loop of four pieces takes a
-Coons grid of them (figure 80); other trimmed faces are refused.
+Coons grid of them (figure 80), across a seam too (each piece moved by
+whole periods to go on from the one before); a band on a surface closed in
+u or v (two loops of one piece each, round once in opposite ways: a tube
+between two rims) takes the grid between its rims, cut open along the
+segment joining the rims' starts and welded back (a rim starting a quarter
+turn on slants the grid); other trimmed faces are refused.
 
 `PARAMETRIC` meshes each face in its (u, v) in the surface's metric (the
 first fundamental form over the size squared, the size from the curvature

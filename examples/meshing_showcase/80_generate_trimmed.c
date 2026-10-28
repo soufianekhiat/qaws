@@ -10,7 +10,9 @@
  *     map of its sides, quads following the arcs;
  *   - a cylinder between its rims (two loops round it: a band, cut open and
  *     welded back) with a hole across its seam and the disk filling it, by
- *     PARAMETRIC.
+ *     PARAMETRIC;
+ *   - a band of the cylinder between a wavy rim and a straight one by
+ *     STRUCTURED: quads following both rims, welded back across the cut.
  */
 
 static qaws_curve* ms_tr_line(double x0, double y0, double x1, double y1)
@@ -79,7 +81,7 @@ static void demo_generate_trimmed(void)
 	static double const wire[3] = { 40, 45, 60 };
 	static double const pal[6][3] = { { 178, 192, 212 }, { 232, 196, 120 }, { 170, 205, 160 }, { 205, 185, 220 }, { 120, 198, 121 }, { 49, 130, 189 } };
 	static double const A[4][3] = { { -2, -2, 0 }, { 2, -2, 0 }, { -2, 2, 0 }, { 2, 2, 0 } }, B[4][3] = { { 1, -1, 0 }, { 1, 1, 0 }, { -1, -1, 0 }, { -1, 1, 0 } };
-	er_canvas* c = er_create(2800, 700, 3, 252, 252, 250);
+	er_canvas* c = er_create(3500, 700, 3, 252, 252, 250);
 	qaws_surface *sa = ms_tr_plane(A), *sb = ms_tr_plane(B), *sl = ms_tr_plane(A);
 	qaws_curve *oc[4], *hole, *disk, *lc[6], *holes[3];
 	qaws_curve const *ol[4], *hl[1], *dl[1], *ll[6], *hh[3][1];
@@ -227,6 +229,38 @@ static void demo_generate_trimmed(void)
 			printf("  cylinder band failed\n");
 		qaws_mesh_3d_destroy(g);
 		qaws_shell_atlas_destroy(ac);
+		{
+			/* STRUCTURED on a band: its bottom rim a wave once round (a cubic in (u, v)), its top a line */
+			qaws_bezier_desc bd;
+			qaws_scalar cp[8] = { 0, 0.1f, 0.33f, 0.4f, 0.67f, -0.2f, 1, 0.1f };
+			qaws_curve *wave = NULL, *rim = ms_tr_line(1, 0.85, 0, 0.85);
+			memset(&bd, 0, sizeof bd);
+			bd.dimension = QAWS_DIMENSION_2D; bd.degree = 3; bd.control_points = cp; bd.control_point_count = 4;
+			qaws_curve_create_bezier(&wave, &bd);
+			l1[0] = wave; l2[0] = rim;
+			fc[0].trim_count = 2;
+			ac = NULL;
+			qaws_shell_atlas_create_trimmed(&ac, fc, 1, 0);
+			memset(&d, 0, sizeof d);
+			d.method = QAWS_GENERATE_STRUCTURED;
+			d.elements = QAWS_ELEMENTS_QUADS;
+			d.target_length = (qaws_scalar)0.12;
+			g = NULL;
+			if (ac && qaws_mesh_generate_shell(&g, &rep, ac, &d) == QAWS_STATUS_OK && g)
+			{
+				qaws_mesh_topology tb;
+				qaws_mesh_3d_get_topology(&tb, g);
+				sprintf(sub, "%u quads, %u irregular, %u border loops, %u piece", rep.quality.quads, rep.quality.irregular, tb.boundary_loops, tb.components);
+				ms_panel(c, 2800, 0, 700, 700, g, -1.3, 0.5, "STRUCTURED, a band between rims", sub);
+				ms_tr_draw(c, g, pal + 2, wire);
+				printf("  structured band: %s\n", sub);
+			}
+			else
+				printf("  structured band failed\n");
+			qaws_mesh_3d_destroy(g);
+			qaws_shell_atlas_destroy(ac);
+			qaws_curve_destroy(wave); qaws_curve_destroy(rim);
+		}
 		qaws_surface_destroy(cy);
 		qaws_curve_destroy(prof); qaws_curve_destroy(bot); qaws_curve_destroy(top); qaws_curve_destroy(ch); qaws_curve_destroy(cd);
 	}

@@ -45,8 +45,12 @@
  *           seams and poles meet; every vertex exactly on its face, edges
  *           between faces features. A trimmed face takes a grid when its
  *           one loop has four pieces (its sides; the nodes inside by the
- *           discrete Coons map of the sides' points in (u, v)); other
- *           trimmed faces, and trims on surfaces closed in u or v:
+ *           discrete Coons map of the sides' points in (u, v)), on a
+ *           surface closed in u or v each piece moved by whole periods to
+ *           go on from the one before; and a band (two loops of one piece
+ *           each going round the surface once, opposite ways) takes the
+ *           grid between them, cut open along the segment joining their
+ *           starts and welded back; other trimmed faces:
  *           UNSUPPORTED_OPERATION.
  *   PARAMETRIC  triangles meshed in each face's (u, v) and lifted: the
  *           boundary split in space (each side by equal steps of its length

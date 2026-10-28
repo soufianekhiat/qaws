@@ -185,6 +185,11 @@ All notable changes to Qaws are documented here.
 - BILATERAL smoothing moves each vertex to the least-squares point of its filtered
   planes (a corner to where they meet) instead of their mean. Test 165.
 
+### Added
+
+- STRUCTURED on trimmed faces of surfaces closed in u or v: a four-sided loop across the seam (each piece moved by whole
+  periods), and a band between two rims (cut open along the segment joining their starts, welded back). Test 126, figure 80.
+
 ### Fixed
 
 - A sweep no longer leaves out the hull of a face moving out by less than the tolerance while travelling farther than it

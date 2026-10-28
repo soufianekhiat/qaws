@@ -38,7 +38,11 @@
  *     (loops wrapping round, a band) with a hole across its seam, filled by
  *     a disk of the same surface, by PARAMETRIC and RESTRICTED_DELAUNAY:
  *     valid, the rims the only borders, every vertex on the cylinder at
- *     its footpoint;
+ *     its footpoint; STRUCTURED on a band between two rims (the top one
+ *     starting a period and a quarter on) and on a four-sided patch across
+ *     the seam (a piece given a period on): all quads, one piece, the rims
+ *     (the patch's loop) the only borders, every vertex on the cylinder at
+ *     its footpoint, no edge across the cylinder;
  *   - footpoints through a Boolean: the union of two generated boxes keeps
  *     (face, u, v) footpoints, each on its operand's face at the vertex,
  *     known at the cuts' vertices too;
@@ -973,6 +977,99 @@ static void test_periodic_trimmed(void)
 	qaws_curve_destroy(prof); qaws_curve_destroy(bot); qaws_curve_destroy(top); qaws_curve_destroy(hole); qaws_curve_destroy(disk);
 }
 
+/* STRUCTURED on trimmed faces of the cylinder of test_periodic_trimmed: a band between two rims (the top one starting a
+   period and a quarter on: the cut joining their starts slants) and a four-sided patch across the seam (one piece given
+   a period on) */
+static void test_periodic_structured(void)
+{
+	qaws_curve* prof = tg_line(0.5, 0, 0.5, -3.14159265358979323846);
+	qaws_curve* c[6];
+	qaws_curve const *l1[1], *l2[1], *l4[4];
+	qaws_surface* s = NULL;
+	qaws_surface_revolution_desc rd;
+	qaws_path_2d pa[2];
+	qaws_shell_face_desc fd[1];
+	unsigned int m, i;
+	char msg[400];
+	memset(&rd, 0, sizeof rd);
+	rd.profile = prof;
+	rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&s, &rd);
+	c[0] = tg_line(0, 0.1, 1, 0.1);
+	c[1] = tg_line(2.25, 0.9, 1.25, 0.9);
+	c[2] = tg_line(-0.2, 0.3, 0.2, 0.3);
+	c[3] = tg_line(0.2, 0.3, 0.2, 0.7);
+	c[4] = tg_line(1.2, 0.7, 0.8, 0.7);
+	c[5] = tg_line(0.8, 0.7, 0.8, 0.3);
+	l1[0] = c[0]; l2[0] = c[1];
+	for (i = 0; i < 4; i++)
+		l4[i] = c[2 + i];
+	for (m = 0; m < 2; m++)
+	{
+		qaws_shell_atlas* a = NULL;
+		qaws_generate_desc d;
+		qaws_mesh_3d* out = NULL;
+		qaws_status st;
+		if (m == 0)
+		{
+			pa[0].curves = l1; pa[0].curve_count = 1; pa[0].closed = 1;
+			pa[1].curves = l2; pa[1].curve_count = 1; pa[1].closed = 1;
+			fd[0].trim_count = 2;
+		}
+		else
+		{
+			pa[0].curves = l4; pa[0].curve_count = 4; pa[0].closed = 1;
+			fd[0].trim_count = 1;
+		}
+		fd[0].surface = s; fd[0].trims = pa;
+		qaws_shell_atlas_create_trimmed(&a, fd, 1, 0);
+		memset(&d, 0, sizeof d);
+		d.method = QAWS_GENERATE_STRUCTURED;
+		d.elements = QAWS_ELEMENTS_QUADS;
+		d.target_length = (qaws_scalar)0.2;
+		st = a ? qaws_mesh_generate_shell(&out, NULL, a, &d) : QAWS_STATUS_INVALID_ARGUMENT;
+		if (st == QAWS_STATUS_OK && out)
+		{
+			tg_mesh t;
+			double off = 0, longest = 0, err, z0 = 1e300, z1 = -1e300;
+			unsigned int f, k;
+			tg_read(out, &t);
+			err = tg_foot_error(&t, NULL, a);
+			for (i = 0; i < t.nv; i++)
+			{
+				off = fmax(off, fabs(sqrt(t.x[3 * i] * t.x[3 * i] + t.x[3 * i + 1] * t.x[3 * i + 1]) - 0.5));
+				z0 = fmin(z0, t.x[3 * i + 2]);
+				z1 = fmax(z1, t.x[3 * i + 2]);
+			}
+			for (f = 0, k = 0; f < t.nf; k += t.fs[f++])
+				for (i = 0; i < t.fs[f]; i++)
+				{
+					double const *p = t.x + 3 * t.fv[k + i], *q = t.x + 3 * t.fv[k + (i + 1) % t.fs[f]];
+					longest = fmax(longest, sqrt((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2])));
+				}
+			sprintf(msg, "STRUCTURED on the cylinder, %s: %u faces (%u quads), %u irregular, border loops %u, genus %u, components %u, off it %.1e, footpoints %.1e, "
+				"longest edge %.3f, height %.4f..%.4f", m ? "a patch across the seam" : "a band", t.nf, t.q.quads, t.q.irregular, t.top.boundary_loops, t.top.genus,
+				t.top.components, off, err, longest, z0, z1);
+			printf("  %s\n", msg);
+			TEST_ASSERT(qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t.q.quads == t.nf && t.top.boundary_loops == (m ? 1u : 2u) && t.top.genus == 0
+				&& t.top.components == 1 && off < TEST_BOUND(1e-9, 32) && err < TEST_BOUND(1e-9, 32) && longest < 0.3
+				&& fabs(fabs(z1 - z0) - (m ? 0.4 : 0.8) * 3.14159265358979323846) < 1e-9 && (m || t.q.irregular == 0), msg);
+			tg_free(&t);
+		}
+		else
+		{
+			sprintf(msg, "STRUCTURED on the cylinder, %s: %s", m ? "a patch across the seam" : "a band", qaws_status_to_string(st));
+			TEST_ASSERT(0, msg);
+		}
+		qaws_mesh_3d_destroy(out);
+		qaws_shell_atlas_destroy(a);
+	}
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(prof);
+	for (i = 0; i < 6; i++)
+		qaws_curve_destroy(c[i]);
+}
+
 static void test_boolean_footpoints(void)
 {
 	static double const ha[3] = { 1, 0.7, 0.5 }, hb[3] = { 0.6, 1.2, 0.3 };
@@ -1086,6 +1183,7 @@ int test_126_mesh_generate_main(void)
 	test_restricted_delaunay();
 	test_trimmed();
 	test_periodic_trimmed();
+	test_periodic_structured();
 	test_boolean_footpoints();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
