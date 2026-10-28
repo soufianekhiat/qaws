@@ -11,6 +11,7 @@ qaws_motion_pose e = { ... };
 qaws_motion* m;
 qaws_motion_create_poses(&m, &s, &e, 0);                    /* cubic; QAWS_MOTION_QUINTIC: accelerations too */
 qaws_motion_create_curve(&m, curve, rotation);              /* along a 3D curve, a constant rotation */
+qaws_motion_create_curve_frames(&m, curve, rotation, QAWS_MOTION_FRAME_ROTATION_MINIMIZING);   /* turning along it */
 qaws_motion_create_vertices(&m, p0, p1, v0, v1, a0, a1, count, flags);   /* per vertex */
 
 qaws_motion_evaluate(&state, m, t);                         /* position, rotation (by rows), velocity, angular velocity */
@@ -37,7 +38,20 @@ qaws_motion_destroy(m);
   pose 0's frame, and its derivative for the angular accelerations.
 - **Along a curve:** T(t) is the curve at its parameter mapped linearly
   from t, its velocity the curve's derivative times the range; R(t) is the
-  given rotation.
+  given rotation. With `qaws_motion_create_curve_frames` and
+  `QAWS_MOTION_FRAME_ROTATION_MINIMIZING` the given rotation is the body's
+  at 0 and is carried along the curve with no turn about its tangent (a
+  pipe's cross-section, a tool following its path): R(t) = F(t) F(0)ᵀ R0,
+  F the frame of the unit tangent and a normal transported by double
+  reflection (Wang, Jüttler, Zheng and Liu 2008) from 512 samples, each
+  evaluation one reflection on from the sample before t, so the frame is
+  continuous; the angular velocity is c′ × c″ / |c′|² (none along the
+  tangent). A planar curve turns the body about the plane's normal only.
+  Test 179: the start the given rotation, orthonormal to 4e-16, the first
+  tangent carried to each one to 6e-16, the angular velocity against R's
+  differences 9e-9, along the tangent 8e-11; test 180: a square plate swept
+  along a space cubic has the section's area times the length (Pappus)
+  within 0.1%, where a fixed rotation falls 13% short (figure 60, key `Y`).
 - **Many turns:** a quaternion says where the body ends, not how many
   turns it took; the angular velocities say it. The total angle is the
   relative rotation's plus the whole turns that bring it nearest the

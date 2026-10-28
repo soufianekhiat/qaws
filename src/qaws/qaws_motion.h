@@ -49,7 +49,14 @@
  *     pieces meet. A half turn the velocities do not orient (either way
  *     round as near) is refused.
  *   - Along a curve (3D): T(t) the curve at the parameter mapped from t
- *     (its range's start at 0, end at 1), R(t) a given constant rotation.
+ *     (its range's start at 0, end at 1), R(t) a given constant rotation;
+ *     or, rotation-minimizing (qaws_motion_create_curve_frames), the given
+ *     rotation at 0 carried along the curve with no turn about its tangent
+ *     (a pipe's cross-section, a tool following its path): R(t) = F(t)
+ *     F(0)^T R0, F the frame of the unit tangent and a normal transported by
+ *     double reflection (Wang et al. 2008) from 512 samples, one reflection
+ *     on from the sample before t; the angular velocity c' x c'' / |c'|^2. A
+ *     planar curve turns the body about the plane's normal only.
  *
  * Vertex motions move each of count vertices on its own Hermite polynomial
  * (positions and velocities at both ends, accelerations with
@@ -88,6 +95,20 @@ qaws_status qaws_motion_create_poses(qaws_motion** out_motion, qaws_motion_pose 
 /* rotation: a quaternion (w, x, y, z), NULL the identity. The curve is borrowed: keep it until the motion is destroyed.
    INVALID_ARGUMENT for a curve not 3D */
 qaws_status qaws_motion_create_curve(qaws_motion** out_motion, qaws_curve const* curve, qaws_scalar const* rotation);
+
+#ifndef QAWS_ENUM_QAWS_MOTION_FRAME
+#define QAWS_ENUM_QAWS_MOTION_FRAME
+typedef enum qaws_motion_frame
+{
+	QAWS_MOTION_FRAME_FIXED = 0,             /* the rotation held (qaws_motion_create_curve) */
+	QAWS_MOTION_FRAME_ROTATION_MINIMIZING    /* the rotation carried along the curve, no turn about its tangent */
+} qaws_motion_frame;
+#endif
+
+/* As qaws_motion_create_curve, the rotation (NULL: the identity) the body's at t = 0, turned along the curve by the frame.
+   INVALID_ARGUMENT as qaws_motion_create_curve, or an unknown frame */
+qaws_status qaws_motion_create_curve_frames(qaws_motion** out_motion, qaws_curve const* curve, qaws_scalar const* rotation,
+	qaws_motion_frame frame);
 
 /* count vertices (3 each): positions and velocities at t = 0 and 1; accelerations (may be NULL) with QAWS_MOTION_QUINTIC */
 qaws_status qaws_motion_create_vertices(qaws_motion** out_motion, qaws_scalar const* positions0, qaws_scalar const* positions1,

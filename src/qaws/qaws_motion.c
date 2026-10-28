@@ -16,6 +16,7 @@
 #define MO_CURVE 1
 #define MO_VERTICES 2
 #define MO_PI 3.14159265358979323846
+#define MO_RMF_STEPS 512u   /* the rotation-minimizing frame tabulated at t = i / 512, each value one double reflection on */
 
 /* one piece of a pose motion over its own t in [0, 1] */
 typedef struct mo_seg
@@ -34,6 +35,8 @@ struct qaws_motion
 	unsigned int nseg;
 	qaws_curve const* curve;   /* CURVE: borrowed */
 	double u0, u1;             /* CURVE: its parameter range */
+	double* F;                 /* CURVE rotation-minimizing: per sample its point, unit tangent and normal (9 each); NULL: fixed */
+	double M[9];               /* CURVE rotation-minimizing: the first frame's transpose times the rotation (R = F(t) M) */
 	unsigned int n;            /* VERTICES: their count */
 	double* V;                 /* VERTICES: 18 each: p0, v0, a0, p1, v1, a1 (NULL: borrowed, P0 to P1 on chords) */
 	qaws_array_view P0, P1;    /* VERTICES borrowed: the host's positions at 0 and 1 */
@@ -385,6 +388,151 @@ qaws_status qaws_motion_create_curve(qaws_motion** out, qaws_curve const* curve,
 	return QAWS_STATUS_OK;
 }
 
+/* the curve at t of motion m: its point, its derivatives in t (d2 may be NULL) */
+static qaws_status mo_curve_at(qaws_motion const* m, double t, double* x, double* d1, double* d2)
+{
+	qaws_eval_result_3d r;
+	double ut = m->u1 - m->u0;
+	unsigned int k;
+	qaws_status st = qaws_curve_evaluate_3d(&r, m->curve, (qaws_scalar)(m->u0 + t * ut), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | (d2 ? QAWS_EVAL_FLAG_D2 : 0));
+	if (st != QAWS_STATUS_OK)
+		return st;
+	mo_vec(r.position, x);
+	mo_vec(r.d1, d1);
+	if (d2)
+		mo_vec(r.d2, d2);
+	for (k = 0; k < 3; k++)
+	{
+		d1[k] *= ut;
+		if (d2)
+			d2[k] *= ut * ut;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* the normal one double reflection (Wang, Juettler, Zheng, Liu 2008) carries from (x0, t0, r0) to (x1, t1): reflected in the
+   bisector plane of the chord, then in that of the tangents; made unit and normal to t1 */
+static void mo_reflect(double const* x0, double const* t0, double const* r0, double const* x1, double const* t1, double* r1)
+{
+	double v1[3], rl[3], tl[3], v2[3], c1, c2, a, b;
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+		v1[k] = x1[k] - x0[k];
+	c1 = mo_dot(v1, v1);
+	a = c1 > 0 ? 2 * mo_dot(v1, r0) / c1 : 0;
+	b = c1 > 0 ? 2 * mo_dot(v1, t0) / c1 : 0;
+	for (k = 0; k < 3; k++)
+	{
+		rl[k] = r0[k] - a * v1[k];
+		tl[k] = t0[k] - b * v1[k];
+		v2[k] = t1[k] - tl[k];
+	}
+	c2 = mo_dot(v2, v2);
+	a = c2 > 0 ? 2 * mo_dot(v2, rl) / c2 : 0;
+	for (k = 0; k < 3; k++)
+		r1[k] = rl[k] - a * v2[k];
+	a = mo_dot(r1, t1);
+	for (k = 0; k < 3; k++)
+		r1[k] -= a * t1[k];
+	a = sqrt(mo_dot(r1, r1));
+	for (k = 0; k < 3 && a > 0; k++)
+		r1[k] /= a;
+}
+
+/* the unit tangent of derivative d (zero: fallback) */
+static void mo_tangent(double const* d, double const* fallback, double* t)
+{
+	double l = sqrt(mo_dot(d, d));
+	unsigned int k;
+	for (k = 0; k < 3; k++)
+		t[k] = l > 0 ? d[k] / l : fallback[k];
+}
+
+qaws_status qaws_motion_create_curve_frames(qaws_motion** out, qaws_curve const* curve, qaws_scalar const* rotation, qaws_motion_frame frame)
+{
+	qaws_motion* m;
+	double F0[9], R0[9];
+	unsigned int i, k, j;
+	qaws_status st;
+	if (!out)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out = NULL;
+	if ((unsigned int)frame > QAWS_MOTION_FRAME_ROTATION_MINIMIZING)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if ((st = qaws_motion_create_curve(&m, curve, rotation)) != QAWS_STATUS_OK || frame == QAWS_MOTION_FRAME_FIXED)
+	{
+		*out = st == QAWS_STATUS_OK ? m : NULL;
+		return st;
+	}
+	m->F = (double*)qaws_internal_malloc(sizeof(double) * 9 * (MO_RMF_STEPS + 1));
+	if (!m->F)
+	{
+		qaws_motion_destroy(m);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i <= MO_RMF_STEPS; i++)
+	{
+		double* f = m->F + 9 * (size_t)i, d1[3], z[3] = { 0, 0, 0 };
+		if ((st = mo_curve_at(m, (double)i / MO_RMF_STEPS, f, d1, NULL)) != QAWS_STATUS_OK)
+		{
+			qaws_motion_destroy(m);
+			return st;
+		}
+		mo_tangent(d1, i ? f - 6 : z, f + 3);   /* (a stop: the tangent before it) */
+	}
+	{
+		/* (a first tangent of no length: the first one there is) */
+		for (i = 0; i <= MO_RMF_STEPS && !(mo_dot(m->F + 9 * (size_t)i + 3, m->F + 9 * (size_t)i + 3) > 0); i++) {}
+		if (i > MO_RMF_STEPS)
+		{
+			/* (the curve a point: no turn) */
+			qaws_internal_free(m->F);
+			m->F = NULL;
+			*out = m;
+			return QAWS_STATUS_OK;
+		}
+		for (j = 0; j < i; j++)
+			memcpy(m->F + 9 * (size_t)j + 3, m->F + 9 * (size_t)i + 3, sizeof(double) * 3);
+	}
+	{
+		/* the first normal: the axis least along the tangent, made normal */
+		double const* t0 = m->F + 3;
+		double* r0 = m->F + 6, a;
+		unsigned int ax = fabs(t0[0]) <= fabs(t0[1]) && fabs(t0[0]) <= fabs(t0[2]) ? 0u : fabs(t0[1]) <= fabs(t0[2]) ? 1u : 2u;
+		for (k = 0; k < 3; k++)
+			r0[k] = k == ax;
+		a = mo_dot(r0, t0);
+		for (k = 0; k < 3; k++)
+			r0[k] -= a * t0[k];
+		a = sqrt(mo_dot(r0, r0));
+		for (k = 0; k < 3; k++)
+			r0[k] /= a;
+	}
+	for (i = 1; i <= MO_RMF_STEPS; i++)
+	{
+		double* f = m->F + 9 * (size_t)i;
+		mo_reflect(f - 9, f - 6, f - 3, f, f + 3, f + 6);
+	}
+	/* M = F0^T R0: F0's columns the tangent, the normal and their cross */
+	for (k = 0; k < 3; k++)
+	{
+		F0[3 * k] = m->F[3 + k];
+		F0[3 * k + 1] = m->F[6 + k];
+	}
+	{
+		double s[3];
+		mo_cross(m->F + 3, m->F + 6, s);
+		for (k = 0; k < 3; k++)
+			F0[3 * k + 2] = s[k];
+	}
+	memcpy(R0, m->R0, sizeof R0);
+	for (k = 0; k < 3; k++)
+		for (j = 0; j < 3; j++)
+			m->M[3 * k + j] = F0[k] * R0[j] + F0[3 + k] * R0[3 + j] + F0[6 + k] * R0[6 + j];
+	*out = m;
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_motion_create_vertices_borrowed(qaws_motion** out, qaws_array_view const* p0, qaws_array_view const* p1)
 {
 	qaws_motion* m;
@@ -458,6 +606,7 @@ void qaws_motion_destroy(qaws_motion* m)
 		return;
 	qaws_internal_free(m->V);
 	qaws_internal_free(m->seg);
+	qaws_internal_free(m->F);
 	qaws_internal_free(m);
 }
 
@@ -477,18 +626,41 @@ static qaws_status mo_rigid(qaws_motion const* m, double t, double* R, double* T
 	unsigned int k, j;
 	if (m->kind == MO_CURVE)
 	{
-		qaws_eval_result_3d r;
-		qaws_status st = qaws_curve_evaluate_3d(&r, m->curve, (qaws_scalar)(m->u0 + t * (m->u1 - m->u0)), QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+		double d2[3], tu[3], r[3], s[3], F[9], l2;
+		double tc = t < 0 ? 0 : t > 1 ? 1 : t;
+		unsigned int i = (unsigned int)(tc * MO_RMF_STEPS);
+		double const* f;
+		qaws_status st = mo_curve_at(m, t, T, dT, m->F ? d2 : NULL);
 		if (st != QAWS_STATUS_OK)
 			return st;
-		memcpy(R, m->R0, sizeof(double) * 9);
-		mo_vec(r.position, T);
-		mo_vec(r.d1, dT);
+		if (!m->F)
+		{
+			memcpy(R, m->R0, sizeof(double) * 9);
+			for (k = 0; k < 3; k++)
+				w[k] = 0;
+			return QAWS_STATUS_OK;
+		}
+		/* rotation-minimizing: one reflection on from the sample before t, R = F(t) M; its angular velocity c' x c'' / |c'|^2
+		   (no turn about the tangent) */
+		if (i >= MO_RMF_STEPS)
+			i = MO_RMF_STEPS - 1;
+		f = m->F + 9 * (size_t)i;
+		mo_tangent(dT, f + 3, tu);
+		mo_reflect(f, f + 3, f + 6, T, tu, r);
+		mo_cross(tu, r, s);
 		for (k = 0; k < 3; k++)
 		{
-			dT[k] *= m->u1 - m->u0;
-			w[k] = 0;
+			F[3 * k] = tu[k];
+			F[3 * k + 1] = r[k];
+			F[3 * k + 2] = s[k];
 		}
+		for (k = 0; k < 3; k++)
+			for (j = 0; j < 3; j++)
+				R[3 * k + j] = F[3 * k] * m->M[j] + F[3 * k + 1] * m->M[3 + j] + F[3 * k + 2] * m->M[6 + j];
+		l2 = mo_dot(dT, dT);
+		mo_cross(dT, d2, w);
+		for (k = 0; k < 3; k++)
+			w[k] = l2 > 0 ? w[k] / l2 : 0;
 		return QAWS_STATUS_OK;
 	}
 	{

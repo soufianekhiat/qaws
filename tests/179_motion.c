@@ -12,7 +12,11 @@
  *     angular velocities 6 pi) moving along x: within 2e-3 of the uniform
  *     spin and the segment throughout, continuous where its pieces meet; a
  *     half turn the velocities orient (w -pi) turns their way;
- *   - a half turn its velocities do not orient refused.
+ *   - a half turn its velocities do not orient refused;
+ *   - rotation-minimizing frames along a space and a planar cubic: the start
+ *     the given rotation, orthonormal, the first tangent carried to each
+ *     one, the angular velocity the finite differences' with none along the
+ *     tangent, the planar curve turning about z only.
  */
 
 #include "test_common.h"
@@ -231,6 +235,88 @@ static void test_reproduction(void)
 	qaws_curve_destroy(cv);
 }
 
+/* rotation-minimizing frames along a cubic Bezier in space (the body turned at 0) and a planar one: R(0) the given rotation,
+   R orthonormal, R(t) R0^T taking the first unit tangent to the one at t, the angular velocity the finite differences' and
+   none of it along the tangent; the planar curve turning the body about z only */
+static void test_frames(void)
+{
+	qaws_scalar cp[2][12] = { { 0, 0, 0, 1, 2, 0, 2, -1, 1, 3, 0, 2 }, { 0, 0, 0, 1, 1.5f, 0, 2, -1.5f, 0, 3, 0.5f, 0 } };
+	double orth = 0, tang = 0, wfd = 0, twist = 0, start = 0, planar = 0;
+	unsigned int c, k, i, j;
+	qaws_status st = QAWS_STATUS_OK;
+	char msg[400];
+	for (c = 0; c < 2; c++)
+	{
+		qaws_curve* cv = NULL;
+		qaws_motion* m = NULL;
+		qaws_bezier_desc bd;
+		qaws_scalar rot[4];
+		double R0[9], t0[3];
+		qaws_motion_state s0;
+		qaws_eval_result_3d r;
+		mt_quat(rot, c ? 0 : 1, c ? 0 : 2, 1, c ? 0 : 0.7);
+		memset(&bd, 0, sizeof bd);
+		bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = cp[c]; bd.control_point_count = 4;
+		qaws_curve_create_bezier(&cv, &bd);
+		if (st == QAWS_STATUS_OK)
+			st = qaws_motion_create_curve_frames(&m, cv, rot, QAWS_MOTION_FRAME_ROTATION_MINIMIZING);
+		if (st != QAWS_STATUS_OK)
+		{
+			qaws_curve_destroy(cv);
+			break;
+		}
+		qaws_motion_evaluate(&s0, m, 0);
+		start = fmax(start, mt_quat_err(rot, s0.rotation));
+		for (k = 0; k < 9; k++)
+			R0[k] = (double)s0.rotation[k];
+		qaws_curve_evaluate_3d(&r, cv, 0, QAWS_EVAL_FLAG_D1);
+		{
+			double l = sqrt((double)r.d1.x * r.d1.x + (double)r.d1.y * r.d1.y + (double)r.d1.z * r.d1.z);
+			t0[0] = r.d1.x / l; t0[1] = r.d1.y / l; t0[2] = r.d1.z / l;
+		}
+		for (k = 0; k <= 16; k++)
+		{
+			double t = k / 16.0, R[9], b[3], q[3], w[3], tu[3], l, h = 1e-5;
+			qaws_motion_state s;
+			qaws_motion_evaluate(&s, m, (qaws_scalar)t);
+			qaws_curve_evaluate_3d(&r, cv, (qaws_scalar)t, QAWS_EVAL_FLAG_D1);
+			l = sqrt((double)r.d1.x * r.d1.x + (double)r.d1.y * r.d1.y + (double)r.d1.z * r.d1.z);
+			tu[0] = r.d1.x / l; tu[1] = r.d1.y / l; tu[2] = r.d1.z / l;
+			for (i = 0; i < 9; i++)
+				R[i] = (double)s.rotation[i];
+			for (i = 0; i < 3; i++)
+				for (j = 0; j < 3; j++)
+				{
+					double d = R[i] * R[j] + R[3 + i] * R[3 + j] + R[6 + i] * R[6 + j];
+					orth = fmax(orth, fabs(d - (i == j)));
+				}
+			/* (R R0^T t0: R0^T t0 in the body, then R) */
+			for (i = 0; i < 3; i++)
+				b[i] = R0[i] * t0[0] + R0[3 + i] * t0[1] + R0[6 + i] * t0[2];
+			for (i = 0; i < 3; i++)
+			{
+				q[i] = R[3 * i] * b[0] + R[3 * i + 1] * b[1] + R[3 * i + 2] * b[2];
+				tang = fmax(tang, fabs(q[i] - tu[i]));
+			}
+			mt_fd_omega(m, t < h ? h : t > 1 - h ? 1 - h : t, h, w);
+			if (t >= h && t <= 1 - h)
+			{
+				wfd = fmax(wfd, mt_d3(mt_v(w[0], w[1], w[2]), s.angular_velocity));
+				twist = fmax(twist, fabs(w[0] * tu[0] + w[1] * tu[1] + w[2] * tu[2]));
+			}
+			if (c == 1)
+				planar = fmax(planar, fmax(fabs((double)s.angular_velocity.x), fmax(fabs((double)s.angular_velocity.y), fmax(fabs(R[2]), fmax(fabs(R[5]),
+					fabs(R[8] - 1))))));
+		}
+		qaws_motion_destroy(m);
+		qaws_curve_destroy(cv);
+	}
+	sprintf(msg, "rotation-minimizing frames: the start off its rotation by %.1e, orthonormal to %.1e, tangents carried to %.1e, angular velocity off "
+		"the finite differences' by %.1e, along the tangent %.1e, the planar curve off z by %.1e", start, orth, tang, wfd, twist, planar);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && start < 1e-14 && orth < 1e-13 && tang < 1e-12 && wfd < 1e-6 && twist < 1e-6 && planar < 1e-14, msg);
+}
+
 static void test_turns(void)
 {
 	qaws_motion_pose s, e;
@@ -302,6 +388,7 @@ int test_179_motion_main(void)
 	test_poses();
 	test_reproduction();
 	test_turns();
+	test_frames();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

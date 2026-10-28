@@ -8,7 +8,10 @@
  *   - a ball along a Hermite curve: a tube;
  *   - a thin box turned a quarter about an axis beside it: an annular sector;
  *   - carving (qaws_mesh_sweep_boolean): a block less a ball tool's sweep along
- *     a curved path dipping into it, then a straight slot (two moves).
+ *     a curved path dipping into it, then a straight slot (two moves);
+ *   - a square plate along a cubic in space (qaws_motion_create_curve_frames):
+ *     rotation-minimizing frames keep it across the path (a pipe), a fixed
+ *     rotation lets it lie along it.
  * Printed: slabs, faces, closed, the chords' deviation.
  */
 
@@ -49,7 +52,7 @@ static void ms_sw_panel(er_canvas* c, int px, qaws_mesh_3d const* body, qaws_mot
 static void demo_sweep(void)
 {
 	static double const tan[3] = { 232, 196, 120 }, blue[3] = { 140, 170, 220 }, green[3] = { 150, 200, 150 };
-	er_canvas* c = er_create(2400, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(3600, 640, 3, 252, 252, 250);
 	qaws_motion_pose s, e;
 	qaws_motion* m = NULL;
 	if (!c)
@@ -153,7 +156,7 @@ static void demo_sweep(void)
 		d.simplify = 1;   /* (the flat regions and straight creases without the slabs' extra vertices) */
 		if (block && ball && mv[0] && mv[1] && qaws_mesh_sweep_boolean(&o, &br, ball, cm, block, 2, QAWS_BOOLEAN_DIFFERENCE, &d) == QAWS_STATUS_OK && o)
 		{
-			sprintf(sub, "%u moves, %u slabs, removed %.4f of %.1f, closed %d", br.moves, br.slabs, (double)br.changed_volume, (double)br.stock_volume, br.closed);
+			sprintf(sub, "%u moves, %u slabs, removed %.4f of %.0f, closed %d", br.moves, br.slabs, (double)br.changed_volume, (double)br.stock_volume, br.closed);
 			ms_panel(c, 1800, 0, 600, 640, o, -0.4, 0.8, "carving: two moves", sub);
 			ms_draw(c, o, wood, NULL, 0, wire, 0.3);
 			printf("  carving: %s\n", sub);
@@ -163,6 +166,46 @@ static void demo_sweep(void)
 		qaws_mesh_3d_destroy(ball);
 		qaws_motion_destroy(mv[0]);
 		qaws_motion_destroy(mv[1]);
+	}
+	{
+		/* a square plate along a cubic in space, turned to face along it at the start: rotation-minimizing frames keep it
+		   across the path (a pipe), a fixed rotation lets it lie along it */
+		qaws_scalar cp[12] = { 0, 0, 0, 1.5f, 1, 0.5f, 3, -1, 1, 4.5f, 0, 1.2f }, q[4];
+		qaws_bezier_desc bd;
+		qaws_curve* cv = NULL;
+		double t0[3] = { 1.5, 1, 0.5 }, l = sqrt(1.5 * 1.5 + 1 + 0.25);
+		unsigned int f;
+		t0[0] /= l; t0[1] /= l; t0[2] /= l;
+		l = sqrt((1 + t0[0]) * (1 + t0[0]) + t0[1] * t0[1] + t0[2] * t0[2]);
+		q[0] = (qaws_scalar)((1 + t0[0]) / l); q[1] = 0; q[2] = (qaws_scalar)(-t0[2] / l); q[3] = (qaws_scalar)(t0[1] / l);
+		memset(&bd, 0, sizeof bd);
+		bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = cp; bd.control_point_count = 4;
+		qaws_curve_create_bezier(&cv, &bd);
+		for (f = 0; cv && f < 2; f++)
+		{
+			qaws_mesh_3d* plate = ms_sw_box(-0.02, 0.02, -0.2, 0.2, -0.2, 0.2);
+			qaws_mesh_3d* o = NULL;
+			qaws_sweep_desc d;
+			qaws_sweep_report r;
+			memset(&d, 0, sizeof d);
+			d.tolerance = (qaws_scalar)0.004;
+			d.simplify = 1;
+			if (qaws_motion_create_curve_frames(&m, cv, q, f ? QAWS_MOTION_FRAME_FIXED : QAWS_MOTION_FRAME_ROTATION_MINIMIZING) == QAWS_STATUS_OK &&
+				qaws_mesh_3d_sweep(&o, &r, plate, m, &d) == QAWS_STATUS_OK && o)
+			{
+				char sub[200];
+				static double const wire[3] = { 60, 66, 80 };
+				sprintf(sub, "volume %.4f, %u faces, closed %d", ms_sm_volume(o), qaws_mesh_3d_get_face_count(o), r.closed);
+				ms_panel(c, 2400 + 600 * (int)f, 0, 600, 640, o, -0.9, 0.35, f ? "a plate held: fixed" : "a pipe: rotation-minimizing", sub);
+				ms_draw(c, o, f ? tan : green, NULL, 0, wire, 0.4);
+				printf("  %s: %s\n", f ? "fixed" : "rotation-minimizing", sub);
+			}
+			qaws_mesh_3d_destroy(o);
+			qaws_motion_destroy(m);
+			m = NULL;
+			qaws_mesh_3d_destroy(plate);
+		}
+		qaws_curve_destroy(cv);
 	}
 	er_save(c, "showcase/mesh60_sweep.png");
 	printf("mesh60_sweep.png\n");

@@ -1069,6 +1069,7 @@
 #define qaws_minkowski_sum_2d QAWS_SFX(qaws_minkowski_sum_2d)
 #define qaws_motion QAWS_SFX(qaws_motion)
 #define qaws_motion_create_curve QAWS_SFX(qaws_motion_create_curve)
+#define qaws_motion_create_curve_frames QAWS_SFX(qaws_motion_create_curve_frames)
 #define qaws_motion_create_poses QAWS_SFX(qaws_motion_create_poses)
 #define qaws_motion_create_vertices QAWS_SFX(qaws_motion_create_vertices)
 #define qaws_motion_create_vertices_borrowed QAWS_SFX(qaws_motion_create_vertices_borrowed)

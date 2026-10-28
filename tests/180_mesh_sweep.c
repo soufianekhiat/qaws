@@ -12,6 +12,9 @@
  *   - a small ball along a Hermite curve: a tube, its volume the ball's
  *     cross-section along the length plus the ball (within the polyhedra's
  *     own error);
+ *   - a pipe: a thin square plate along a space cubic with rotation-minimizing
+ *     frames, its volume the section's area times the length (Pappus) within
+ *     1%, closed; held at its first rotation it falls short by over 10%;
  *   - carving (qaws_mesh_sweep_boolean): a cube tool through a block's top
  *     along x, the slot removed exactly (0.5); along an L of two moves, the
  *     removed volume by inclusion and exclusion (0.375), and the intersection
@@ -51,6 +54,8 @@
 
 #include "test_common.h"
 #include "qaws_mesh_sweep.h"
+#include "qaws_bezier.h"
+#include "qaws_eval.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -273,6 +278,65 @@ static void test_tube(void)
 	qaws_mesh_3d_destroy(b);
 	qaws_mesh_3d_destroy(o);
 	qaws_motion_destroy(m);
+}
+
+/* a pipe: a thin square plate (0.2 x 0.2, 0.02 thick along x) turned to face along a cubic Bezier in space and swept along
+   it with rotation-minimizing frames: the plate stays across the path, so the volume is the section's area times the
+   length (Pappus) plus the plate's own; held at its first rotation (FIXED) the plate lies along the path and the volume
+   falls short */
+static void test_pipe(void)
+{
+	qaws_scalar cp[12] = { 0, 0, 0, 1.5f, 1, 0.5f, 3, -1, 1, 4.5f, 0, 1.2f };
+	qaws_curve* cv = NULL;
+	qaws_bezier_desc bd;
+	qaws_scalar q[4];
+	double L = 0, v[2] = { 0, 0 }, want, t0[3], l;
+	int closed[2] = { 0, 0 };
+	unsigned int f, k;
+	qaws_status st = QAWS_STATUS_OK;
+	char msg[300];
+	memset(&bd, 0, sizeof bd);
+	bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = cp; bd.control_point_count = 4;
+	qaws_curve_create_bezier(&cv, &bd);
+	/* (the rotation taking x to the first tangent: q = (1 + x . t, x cross t) normalized) */
+	l = sqrt(1.5 * 1.5 + 1 + 0.25);
+	t0[0] = 1.5 / l; t0[1] = 1 / l; t0[2] = 0.5 / l;
+	l = sqrt((1 + t0[0]) * (1 + t0[0]) + t0[2] * t0[2] + t0[1] * t0[1]);
+	q[0] = (qaws_scalar)((1 + t0[0]) / l); q[1] = 0; q[2] = (qaws_scalar)(-t0[2] / l); q[3] = (qaws_scalar)(t0[1] / l);
+	{
+		qaws_eval_result_3d r0, r1;
+		qaws_curve_evaluate_3d(&r0, cv, 0, QAWS_EVAL_FLAG_POSITION);
+		for (k = 1; k <= 4000; k++)
+		{
+			qaws_curve_evaluate_3d(&r1, cv, (qaws_scalar)(k / 4000.0), QAWS_EVAL_FLAG_POSITION);
+			L += sqrt(pow((double)r1.position.x - r0.position.x, 2) + pow((double)r1.position.y - r0.position.y, 2) + pow((double)r1.position.z - r0.position.z, 2));
+			r0 = r1;
+		}
+	}
+	for (f = 0; f < 2; f++)
+	{
+		qaws_mesh_3d *b = sw_box(-0.01, 0.01, -0.1, 0.1, -0.1, 0.1), *o = NULL;
+		qaws_motion* m = NULL;
+		qaws_sweep_desc d;
+		qaws_sweep_report r;
+		memset(&d, 0, sizeof d);
+		memset(&r, 0, sizeof r);
+		d.tolerance = (qaws_scalar)0.002;
+		if (st == QAWS_STATUS_OK)
+			st = qaws_motion_create_curve_frames(&m, cv, q, f ? QAWS_MOTION_FRAME_FIXED : QAWS_MOTION_FRAME_ROTATION_MINIMIZING);
+		if (st == QAWS_STATUS_OK)
+			st = qaws_mesh_3d_sweep(&o, &r, b, m, &d);
+		v[f] = sw_volume(o);
+		closed[f] = st == QAWS_STATUS_OK && r.closed;
+		qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
+		qaws_motion_destroy(m);
+	}
+	want = 0.04 * L + 0.04 * 0.02;
+	sprintf(msg, "a pipe along a curve of length %.4f: rotation-minimizing volume %.5f (area times length %.5f), closed %d; fixed %.5f",
+		L, v[0], want, closed[0], v[1]);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && closed[0] && fabs(v[0] - want) < 0.01 * want && v[1] < 0.9 * want, msg);
+	qaws_curve_destroy(cv);
 }
 
 static qaws_motion* sw_move(double x0, double y0, double z0, double x1, double y1, double z1)
@@ -853,6 +917,7 @@ int test_180_mesh_sweep_main(void)
 	test_translation();
 	test_turn();
 	test_tube();
+	test_pipe();
 	test_carving();
 	test_spin();
 	test_spin_more();

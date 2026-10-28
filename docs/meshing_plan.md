@@ -265,7 +265,8 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    Done (2026-10-26): `qaws_motion.h` (docs/api/motion.md, test 179): two poses (Hermite translations, cubic or
    quintic; R0 Cay(c(t)) with c a Hermite polynomial in the Gibbs vector, rational and orthonormal), a 3D curve with a
    constant rotation, or per vertex; ends to 3e-16, cubics exact, the angular velocity against R's differences 5e-10.
-   Not done: affine motions; a curve motion with a rotation along it (frames).
+   Not done: affine motions. A curve motion with a rotation along it: done 2026-10-28 (rotation-minimizing frames by
+   double reflection, `qaws_motion_create_curve_frames`; tests 179 and 180, figure 60).
 2. **The swept solid, conservative and certified.** Time cut adaptively until each slab's motion is within the
    tolerance of a straight one (bounded by the trajectory's derivatives); each triangle's slab sweep enclosed (its start,
    its end, its edges' ruled surfaces, the bulge bound); the union of the slabs' sweeps by the Booleans. The envelope's

@@ -187,6 +187,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Rotation-minimizing frames along curves: `qaws_motion_create_curve_frames` with `QAWS_MOTION_FRAME_ROTATION_MINIMIZING`
+  carries the body's rotation along a 3D curve with no turn about its tangent (double reflection, Wang et al. 2008; the
+  angular velocity c' x c'' / |c'|^2): a plate swept along a space cubic is a pipe of the section's area times the length.
+  Tests 179, 180, figure 60.
 - Booleans flag coplanar overlaps: where B lies on A, A's faces standing for both carry the face attribute `overlap` (1;
   present only when there are any) and `qaws_boolean_report.overlapped` counts them. Test 163.
 - Weighted promotion: `qaws_attribute_promote_desc.weighted` and `qaws_mesh_3d_reduce_attribute_weighted` weigh each source
