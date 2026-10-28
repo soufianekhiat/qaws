@@ -60,8 +60,12 @@
  *           its face; isotropic in space whatever the parametrization.
  *           Trimmed faces: their trim loops sampled alike (the counts the
  *           larger across shared edges), ear-clipped with their holes
- *           bridged, remeshed the same (not on surfaces closed in u or v:
- *           UNSUPPORTED_OPERATION). Triangles only (UNSUPPORTED_OPERATION for
+ *           bridged, remeshed the same; on a surface closed in u or v
+ *           its loops unwrapped (moved by whole periods, holes into their
+ *           outside loop), a band (two loops round the surface opposite
+ *           ways) cut open along the shortest segment between them (its
+ *           points given on both sides, welded); a loop round twice or
+ *           round both ways: UNSUPPORTED_OPERATION. Triangles only (UNSUPPORTED_OPERATION for
  *           quads).
  *   RESTRICTED_DELAUNAY  PARAMETRIC's mesh made Delaunay (edge flips,
  *           never across a feature or border edge) and refined as Chew and

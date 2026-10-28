@@ -845,7 +845,9 @@ with tolerances), its boundary split alike from both faces of an edge and
 pinned, then lifts every vertex onto the face: triangles exactly on the
 surface, isotropic in space (figure 78, second row). Triangles only;
 trimmed faces too (their loops ear-clipped with holes bridged; figure 80),
-but not on surfaces closed in u or v.
+on surfaces closed in u or v as well: loops unwrapped and holes moved into
+their outside loop by whole periods, a band (a cylinder between its rims)
+cut open along a segment between its loops and welded back (test 126).
 
 `RESTRICTED_DELAUNAY` takes that mesh further: Delaunay by edge flips (never
 across features), then Chew and Ruppert refinement at circumcentres snapped

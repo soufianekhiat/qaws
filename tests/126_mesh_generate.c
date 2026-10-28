@@ -34,6 +34,11 @@
  *     annular sector (four trim pieces: its grid the Coons map of them): all
  *     quads, no irregular vertex, the inner arc's vertices on its circle; on
  *     the plate with a hole (not four-sided) refused;
+ *   - trimmed faces of a surface closed in u: a cylinder trimmed by its rims
+ *     (loops wrapping round, a band) with a hole across its seam, filled by
+ *     a disk of the same surface, by PARAMETRIC and RESTRICTED_DELAUNAY:
+ *     valid, the rims the only borders, every vertex on the cylinder at
+ *     its footpoint;
  *   - footpoints through a Boolean: the union of two generated boxes keeps
  *     (face, u, v) footpoints, each on its operand's face at the vertex,
  *     known at the cuts' vertices too;
@@ -905,6 +910,69 @@ static void test_trimmed(void)
 	qaws_surface_destroy(s[1]);
 }
 
+static void test_periodic_trimmed(void)
+{
+	/* the cylinder of radius 1/2 and height pi round z (u round it, period 1), trimmed by its rims and a hole of radius 0.1
+	   on the seam; the disk filling it, its circle starting in another copy */
+	qaws_curve *prof = tg_line(0.5, 0, 0.5, -3.14159265358979323846), *bot = tg_line(0, 0, 1, 0), *top = tg_line(1, 1, 0, 1);
+	qaws_curve *hole = tg_arc(0, 0.5, 0.1, 0, 2 * 3.14159265358979323846), *disk = tg_arc(1, 0.5, 0.1, 2, 2 + 2 * 3.14159265358979323846);
+	qaws_curve const *l1[1], *l2[1], *l3[1], *l4[1];
+	qaws_surface* s = NULL;
+	qaws_surface_revolution_desc rd;
+	qaws_path_2d pa[3], pb[1];
+	qaws_shell_face_desc fd[2];
+	qaws_shell_atlas* a = NULL;
+	unsigned int m, i;
+	char msg[400];
+	memset(&rd, 0, sizeof rd);
+	rd.profile = prof;
+	rd.axis_direction.z = 1;
+	qaws_surface_create_revolution(&s, &rd);
+	l1[0] = bot; l2[0] = top; l3[0] = hole; l4[0] = disk;
+	pa[0].curves = l1; pa[0].curve_count = 1; pa[0].closed = 1;
+	pa[1].curves = l2; pa[1].curve_count = 1; pa[1].closed = 1;
+	pa[2].curves = l3; pa[2].curve_count = 1; pa[2].closed = 1;
+	pb[0].curves = l4; pb[0].curve_count = 1; pb[0].closed = 1;
+	fd[0].surface = s; fd[0].trims = pa; fd[0].trim_count = 3;
+	fd[1].surface = s; fd[1].trims = pb; fd[1].trim_count = 1;
+	qaws_shell_atlas_create_trimmed(&a, fd, 2, 0);
+	for (m = 0; m < 2; m++)
+	{
+		qaws_generate_desc d;
+		qaws_mesh_3d* out = NULL;
+		qaws_status st;
+		memset(&d, 0, sizeof d);
+		d.method = m ? QAWS_GENERATE_RESTRICTED_DELAUNAY : QAWS_GENERATE_PARAMETRIC;
+		d.target_length = (qaws_scalar)0.25;
+		st = a ? qaws_mesh_generate_shell(&out, NULL, a, &d) : QAWS_STATUS_INVALID_ARGUMENT;
+		if (st == QAWS_STATUS_OK && out)
+		{
+			tg_mesh t;
+			double off = 0, err;
+			tg_read(out, &t);
+			err = tg_foot_error(&t, NULL, a);
+			for (i = 0; i < t.nv; i++)
+				off = fmax(off, fabs(sqrt(t.x[3 * i] * t.x[3 * i] + t.x[3 * i + 1] * t.x[3 * i + 1]) - 0.5));
+			sprintf(msg, "trimmed cylinder (a band, a hole on the seam) by %s: %u triangles, valid %d, border loops %u, genus %u, components %u, off the cylinder %.1e, "
+				"footpoints %.1e, angles %.3g..%.3g", m ? "RESTRICTED_DELAUNAY" : "PARAMETRIC", t.nf, qaws_mesh_3d_validate(out) == QAWS_STATUS_OK, t.top.boundary_loops,
+				t.top.genus, t.top.components, off, err, (double)t.q.min_angle, (double)t.q.max_angle);
+			printf("  %s\n", msg);
+			TEST_ASSERT(qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t.top.boundary_loops == 2 && t.top.genus == 0 && t.top.components == 1
+				&& off < TEST_BOUND(1e-9, 32) && err < TEST_BOUND(1e-9, 32) && t.q.min_angle > (m ? 29.99 : 20), msg);
+			tg_free(&t);
+		}
+		else
+		{
+			sprintf(msg, "trimmed cylinder by %s: %s", m ? "RESTRICTED_DELAUNAY" : "PARAMETRIC", qaws_status_to_string(st));
+			TEST_ASSERT(0, msg);
+		}
+		qaws_mesh_3d_destroy(out);
+	}
+	qaws_shell_atlas_destroy(a);
+	qaws_surface_destroy(s);
+	qaws_curve_destroy(prof); qaws_curve_destroy(bot); qaws_curve_destroy(top); qaws_curve_destroy(hole); qaws_curve_destroy(disk);
+}
+
 static void test_boolean_footpoints(void)
 {
 	static double const ha[3] = { 1, 0.7, 0.5 }, hb[3] = { 0.6, 1.2, 0.3 };
@@ -1017,6 +1085,7 @@ int test_126_mesh_generate_main(void)
 	test_parametric();
 	test_restricted_delaunay();
 	test_trimmed();
+	test_periodic_trimmed();
 	test_boolean_footpoints();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

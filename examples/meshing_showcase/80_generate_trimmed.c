@@ -7,7 +7,10 @@
  *     remeshed in its metric) by RESTRICTED_DELAUNAY: every angle at least
  *     30 degrees;
  *   - an annular sector (four trim pieces) by STRUCTURED: its grid the Coons
- *     map of its sides, quads following the arcs.
+ *     map of its sides, quads following the arcs;
+ *   - a cylinder between its rims (two loops round it: a band, cut open and
+ *     welded back) with a hole across its seam and the disk filling it, by
+ *     PARAMETRIC.
  */
 
 static qaws_curve* ms_tr_line(double x0, double y0, double x1, double y1)
@@ -76,7 +79,7 @@ static void demo_generate_trimmed(void)
 	static double const wire[3] = { 40, 45, 60 };
 	static double const pal[6][3] = { { 178, 192, 212 }, { 232, 196, 120 }, { 170, 205, 160 }, { 205, 185, 220 }, { 120, 198, 121 }, { 49, 130, 189 } };
 	static double const A[4][3] = { { -2, -2, 0 }, { 2, -2, 0 }, { -2, 2, 0 }, { 2, 2, 0 } }, B[4][3] = { { 1, -1, 0 }, { 1, 1, 0 }, { -1, -1, 0 }, { -1, 1, 0 } };
-	er_canvas* c = er_create(2100, 700, 3, 252, 252, 250);
+	er_canvas* c = er_create(2800, 700, 3, 252, 252, 250);
 	qaws_surface *sa = ms_tr_plane(A), *sb = ms_tr_plane(B), *sl = ms_tr_plane(A);
 	qaws_curve *oc[4], *hole, *disk, *lc[6], *holes[3];
 	qaws_curve const *ol[4], *hl[1], *dl[1], *ll[6], *hh[3][1];
@@ -181,6 +184,51 @@ static void demo_generate_trimmed(void)
 		qaws_shell_atlas_destroy(as);
 		for (i = 0; i < 4; i++)
 			qaws_curve_destroy(sc[i]);
+	}
+	{
+		/* the cylinder of radius 1/2 and height pi round z, u round it: its rims (lines wrapping round once) and a hole of
+		   radius 0.12 on the seam; the disk filling it starts in another copy */
+		qaws_curve *prof = ms_tr_line(0.5, -MS_PI, 0.5, 0), *bot = ms_tr_line(0, 0, 1, 0), *top = ms_tr_line(1, 1, 0, 1);
+		qaws_curve *ch = ms_tr_arc(0, 0.5, 0.12, 0, 2 * MS_PI), *cd = ms_tr_arc(1, 0.5, 0.12, 2, 2 + 2 * MS_PI);
+		qaws_curve const *l1[1], *l2[1], *l3[1], *l4[1];
+		qaws_surface* cy = NULL;
+		qaws_surface_revolution_desc rd;
+		qaws_path_2d qa[3], qb[1];
+		qaws_shell_face_desc fc[2];
+		qaws_shell_atlas* ac = NULL;
+		memset(&rd, 0, sizeof rd);
+		rd.profile = prof;
+		rd.axis_direction.z = 1;
+		qaws_surface_create_revolution(&cy, &rd);
+		l1[0] = bot; l2[0] = top; l3[0] = ch; l4[0] = cd;
+		qa[0].curves = l1; qa[0].curve_count = 1; qa[0].closed = 1;
+		qa[1].curves = l2; qa[1].curve_count = 1; qa[1].closed = 1;
+		qa[2].curves = l3; qa[2].curve_count = 1; qa[2].closed = 1;
+		qb[0].curves = l4; qb[0].curve_count = 1; qb[0].closed = 1;
+		fc[0].surface = cy; fc[0].trims = qa; fc[0].trim_count = 3;
+		fc[1].surface = cy; fc[1].trims = qb; fc[1].trim_count = 1;
+		qaws_shell_atlas_create_trimmed(&ac, fc, 2, 0);
+		memset(&d, 0, sizeof d);
+		d.method = QAWS_GENERATE_PARAMETRIC;
+		d.target_length = (qaws_scalar)0.15;
+		g = NULL;
+		if (ac && qaws_mesh_generate_shell(&g, &rep, ac, &d) == QAWS_STATUS_OK && g)
+		{
+			qaws_mesh_topology top;
+			qaws_mesh_3d_get_topology(&top, g);
+			sprintf(sub, "%u triangles, %u border loops, angles %.0f..%.0f", qaws_mesh_3d_get_face_count(g), top.boundary_loops, (double)rep.quality.min_angle,
+				(double)rep.quality.max_angle);
+			ms_panel(c, 2100, 0, 700, 700, g, -1.3, 0.5, "a cylinder's band, a hole on its seam", sub);
+			ms_tr_draw(c, g, pal, wire);
+			printf("  cylinder band: %u triangles, %u border loops, %u components, angles %.1f..%.1f\n", qaws_mesh_3d_get_face_count(g), top.boundary_loops, top.components,
+				(double)rep.quality.min_angle, (double)rep.quality.max_angle);
+		}
+		else
+			printf("  cylinder band failed\n");
+		qaws_mesh_3d_destroy(g);
+		qaws_shell_atlas_destroy(ac);
+		qaws_surface_destroy(cy);
+		qaws_curve_destroy(prof); qaws_curve_destroy(bot); qaws_curve_destroy(top); qaws_curve_destroy(ch); qaws_curve_destroy(cd);
 	}
 	er_save(c, "showcase/mesh80_generate_trimmed.png");
 	printf("mesh80_generate_trimmed.png\n");

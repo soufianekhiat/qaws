@@ -344,7 +344,8 @@ cheapest and most reused first:
    2026-10-28; four-sided trimmed faces by a Coons map 2026-10-28, figure 80; test 126, figure 78); PARAMETRIC done 2026-10-27 (mg_parametric: sides
    by their own curvature, a fan start remeshed by LOCAL in (u, v) with the first fundamental form as a metric sampled
    on a 64 x 64 reference grid, boundary pinned; figure 78 second row; trimmed faces 2026-10-28: trim pieces as sides,
-   ear clipping with bridged holes, figure 80); RESTRICTED_DELAUNAY done 2026-10-27 (mg_delaunay: Lawson
+   ear clipping with bridged holes, figure 80; on surfaces closed in u or v 2026-10-28: loops unwrapped, a band cut
+   open, mg_periodic_loops); RESTRICTED_DELAUNAY done 2026-10-27 (mg_delaunay: Lawson
    flips, Chew/Ruppert circumcentre insertion snapped on the faces, encroached feature edges split on their curves; 30
    degrees, Delaunay off the features; test 126, figure 78). Generation complete.
 4. **Tetrahedra:** STUFFING done 2026-10-27 (tt_stuffing: BCC lattice, winding-signed distance, secant cuts,

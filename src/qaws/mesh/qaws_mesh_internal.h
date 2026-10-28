@@ -69,7 +69,7 @@ int sh_face_grid_sides(struct qaws_shell_atlas const* a, unsigned int f, unsigne
 /* (qaws_shell_region.c, for PARAMETRIC) a face's sides: the domain's 4 (first 0) or its trim pieces (first 4, in loops);
    a side's (u, v) at s in [0, 1]; the face and side across it */
 unsigned int sh_face_sides(struct qaws_shell_atlas const* a, unsigned int f, unsigned int* first, unsigned int* nl, unsigned int const** lfirst,
-	int* periodic);
+	double* period);
 void sh_face_side_point(struct qaws_shell_atlas const* a, unsigned int f, unsigned int side, double s, double* uv);
 void sh_face_side_across(struct qaws_shell_atlas const* a, unsigned int f, unsigned int side, unsigned int* nb, int* nbside);
 

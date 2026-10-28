@@ -133,21 +133,22 @@ int sh_face_grid_sides(qaws_shell_atlas const* a, unsigned int f, unsigned int* 
 static void sh_side_uv(qaws_shell_atlas const* a, unsigned int f, int side, double s, double* uv, double* duv);
 
 /* (internal, the generator's PARAMETRIC) face f's sides: untrimmed, the domain's four (first 0, one loop); trimmed, its
-   pieces (first 4, loops lfirst[0 .. nl]); periodic: a trimmed face on a surface closed in u or v */
-unsigned int sh_face_sides(qaws_shell_atlas const* a, unsigned int f, unsigned int* first, unsigned int* nl, unsigned int const** lfirst, int* periodic)
+   pieces (first 4, loops lfirst[0 .. nl]); period: a trimmed face's periods in u and v (0: open; untrimmed: 0) */
+unsigned int sh_face_sides(qaws_shell_atlas const* a, unsigned int f, unsigned int* first, unsigned int* nl, unsigned int const** lfirst, double* period)
 {
 	if (!SH_TRIMMED(a, f))
 	{
 		*first = 0;
 		*nl = 1;
 		*lfirst = NULL;
-		*periodic = 0;
+		period[0] = period[1] = 0;
 		return 4;
 	}
 	*first = 4;
 	*nl = a->tr[f].nl;
 	*lfirst = a->tr[f].lfirst;
-	*periodic = a->tr[f].pu > 0 || a->tr[f].pv > 0;
+	period[0] = a->tr[f].pu > 0 ? a->tr[f].pu : 0;
+	period[1] = a->tr[f].pv > 0 ? a->tr[f].pv : 0;
 	return a->tr[f].np;
 }
 
