@@ -371,8 +371,7 @@ figure 64. Open:
 - volume attributes: done (vertex, corner, cell and facet ones through cloning, the border, improvement,
   tetrahedralization, hexahedralization, boundary layers and the connector; test 182, figures 65 and 66);
 - features along a sweep's walls: done (the rails of every feature edge's vertices, a rim's envelope included; test 181,
-  figure 67); known open: a sweep's union can leave a sliver within the tolerance by a reflex corner of a wall (a
-  16-sided cylinder along a curve at tolerance 0.004: a fold whose faces turn back on each other);
+  figure 67);
 - footpoints through Booleans: done (each vertex's within its source face, mixed on one patch, A's where shared; test 126).
 
 ## 0. Scope

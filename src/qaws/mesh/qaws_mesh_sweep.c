@@ -184,14 +184,15 @@ static unsigned int swp_flat_faces(unsigned int* gv, unsigned int* gc, unsigned 
 
 /* the convex hull of a flat face's two positions (its gn vertices tv, 3 or 4, at layers oa and ob of positions x; tc their
    corners), when a corner moves out of
-   the solid by more than out_min (less is within the tolerance: a face sliding along itself): its triangles (3 soup vertices each) into out, their face flags (f; bit 31 a cap turned against the face, bit 30
+   the solid: by more than out_min, or at all when a corner moves by more than out_min (a face moving within the tolerance
+   left out; one sliding along itself far, as a rim by a reflex bend of the path, kept, else the sliver beside it is lost): its triangles (3 soup vertices each) into out, their face flags (f; bit 31 a cap turned against the face, bit 30
    a side) into of, their corners (the face's) into oc; their count, at most 12 (0: none, or flat). caps: the caps it has (1 the
    start's, 2 the end's; 4 and 8 when turned), those in skip left out. Coplanar hull points (a translated face's sides) make one polygon, fanned
    once; eps: the plane distance below which points are on it */
 static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* oc, unsigned int* caps, qaws_scalar const* x, unsigned int const* tv,
 	unsigned int const* tc, unsigned int gn, unsigned int f, unsigned int oa, unsigned int ob, double eps, double out_min, unsigned int skip)
 {
-	double P[8][3], fn[3], u[3], w[3], fl, smax = 0;
+	double P[8][3], fn[3], u[3], w[3], fl, smax = 0, dmax = 0;
 	unsigned int id[8], cor[8], np = 0, i, j, k, m, n = 0, masks[56], nm = 0;
 	int side[56];
 	*caps = 0;
@@ -221,12 +222,17 @@ static unsigned int swp_hull(unsigned int* out, unsigned int* of, unsigned int* 
 		return 0;
 	for (i = 0; i < gn; i++)
 	{
-		double s = 0;
+		double s = 0, d2 = 0;
 		for (k = 0; k < 3; k++)
-			s += ((double)x[3 * ((size_t)ob + tv[i]) + k] - (double)x[3 * ((size_t)oa + tv[i]) + k]) * fn[k] / fl;
+		{
+			double d = (double)x[3 * ((size_t)ob + tv[i]) + k] - (double)x[3 * ((size_t)oa + tv[i]) + k];
+			s += d * fn[k] / fl;
+			d2 += d * d;
+		}
 		smax = fmax(smax, s);
+		dmax = fmax(dmax, d2);
 	}
-	if (!(smax > out_min))
+	if (!(smax > out_min) && !(smax > 1e3 * eps && dmax > out_min * out_min))
 		return 0;
 	/* the supporting planes: every triple with all the points on one side, by the points on it (a mask) */
 	for (i = 0; i < np; i++)

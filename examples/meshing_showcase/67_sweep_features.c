@@ -179,7 +179,7 @@ static void demo_sweep_features(void)
 		s.velocity.x = e.velocity.x = 5; s.velocity.y = 2.4; e.velocity.y = -2.4;
 		qaws_motion_create_poses(&m, &s, &e, 0);
 		memset(&d, 0, sizeof d);
-		d.tolerance = (qaws_scalar)0.01;
+		d.tolerance = (qaws_scalar)0.004;
 		d.simplify = 1;
 		if (cyl && m && qaws_mesh_3d_sweep(&o, NULL, cyl, m, &d) == QAWS_STATUS_OK && o)
 		{

@@ -46,7 +46,8 @@
  *     long edges its corners trace included; along (1, 0, 0) (its x edges
  *     sliding along themselves): 16 of each; a 16-sided prism swept along
  *     (1, 0, 0): its features exactly its creases past 0.5 radians, the
- *     lines its rims trace where they run along the motion included;
+ *     lines its rims trace where they run along the motion included; along
+ *     a curve at tolerance 0.004: no fold (no edge whose faces turn back);
  *     swept along a curve while
  *     turning a quarter (16 slabs): closed, one piece (no sliver left between
  *     two slabs' twisted walls), its features exactly its edges turning by
@@ -999,6 +1000,35 @@ static void test_sweep_features(void)
 			feat, crease, mism);
 		printf("  %s\n", msg);
 		TEST_ASSERT(st == QAWS_STATUS_OK && o && mism == 0 && fabs(feat - crease) < 1e-12 && crease > 4, msg);
+		qaws_mesh_3d_destroy(pr); qaws_mesh_3d_destroy(o);
+		qaws_motion_destroy(m);
+	}
+	{
+		/* the prism along a curve, not turning: no fold (two faces turned back on each other) where the walls bend */
+		qaws_mesh_3d* pr = ac_prism();
+		qaws_motion_pose s, e;
+		qaws_sweep_desc sd;
+		qaws_sweep_report sr;
+		o = NULL;
+		m = NULL;
+		mism = 1000;
+		feat = crease = 0;
+		memset(&s, 0, sizeof s);
+		memset(&e, 0, sizeof e);
+		s.rotation[0] = e.rotation[0] = 1;
+		s.position.x = -0.5; s.position.y = 1; s.position.z = 1.05;
+		e.position.x = 4.5; e.position.y = 1; e.position.z = 1.05;
+		s.velocity.x = e.velocity.x = 5; s.velocity.y = (qaws_scalar)2.4; e.velocity.y = (qaws_scalar)-2.4;
+		qaws_motion_create_poses(&m, &s, &e, 0);
+		memset(&sd, 0, sizeof sd);
+		sd.tolerance = (qaws_scalar)0.004;
+		memset(&sr, 0, sizeof sr);
+		st = qaws_mesh_3d_sweep(&o, &sr, pr, m, &sd);
+		if (st == QAWS_STATUS_OK && o)
+			ac_crease_check(o, 1.9, &feat, &crease, &mism);
+		sprintf(msg, "a 16-sided prism along a curve: folds along %.6f, closed %d", crease, sr.closed);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && o && crease == 0, msg);
 		qaws_mesh_3d_destroy(pr); qaws_mesh_3d_destroy(o);
 		qaws_motion_destroy(m);
 	}

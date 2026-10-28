@@ -185,6 +185,12 @@ All notable changes to Qaws are documented here.
 - BILATERAL smoothing moves each vertex to the least-squares point of its filtered
   planes (a corner to where they meet) instead of their mean. Test 165.
 
+### Fixed
+
+- A sweep no longer leaves out the hull of a face moving out by less than the tolerance while travelling farther than it
+  (a rim sliding nearly along itself by a bend of the path): the sliver beside it was lost and the wall folded back on
+  itself (a 16-sided prism along a curve at tolerance 0.004). Test 181.
+
 ### Added
 
 - Sweeps mark the creases a rim traces where it runs along the motion (its envelope): every vertex of a feature edge
