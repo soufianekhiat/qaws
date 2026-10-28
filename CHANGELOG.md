@@ -218,6 +218,8 @@ All notable changes to Qaws are documented here.
 
 ### Fixed
 
+- A sweep's result no longer carries the internal "source" face attribute (the soup's faces), which made every face's
+  border a seam: decimating it did nothing (a slowing cube's 164 faces stayed 164; now 24, the volume kept). Test 180.
 - A sweep no longer leaves out the hull of a face moving out by less than the tolerance while travelling farther than it
   (a rim sliding nearly along itself by a bend of the path): the sliver beside it was lost and the wall folded back on
   itself (a 16-sided prism along a curve at tolerance 0.004). Test 181.

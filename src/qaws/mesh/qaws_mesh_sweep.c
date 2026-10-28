@@ -2745,6 +2745,12 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 oom:
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
 done:
+	{
+		/* (the union's "source" numbers the internal soup's faces: of no use outside, and a seam at every face for the decimation) */
+		unsigned int sa;
+		if (st == QAWS_STATUS_OK && *out && qaws_mesh_3d_find_attribute(&sa, *out, "source") == QAWS_STATUS_OK)
+			st = qaws_mesh_3d_remove_attribute(*out, sa);
+	}
 	qaws_internal_free(px); qaws_internal_free(c.buf); qaws_internal_free(t);
 	qaws_internal_free(Xa); qaws_internal_free(Xb); qaws_internal_free(Xm); qaws_internal_free(times);
 	qaws_internal_free(gv); qaws_internal_free(gc); qaws_internal_free(gs); qaws_internal_free(tg);

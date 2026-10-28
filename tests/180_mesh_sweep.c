@@ -12,6 +12,7 @@
  *   - a small ball along a Hermite curve: a tube, its volume the ball's
  *     cross-section along the length plus the ball (within the polyhedra's
  *     own error);
+ *   - a sweep decimated: no internal "source" left, the moved cube's box decimates to 24 faces, volume 2;
  *   - a pipe: a thin square plate along a space cubic with rotation-minimizing
  *     frames, its volume the section's area times the length (Pappus) within
  *     1%, closed; held at its first rotation it falls short by over 10%;
@@ -56,6 +57,7 @@
 #include "qaws_mesh_sweep.h"
 #include "qaws_bezier.h"
 #include "qaws_eval.h"
+#include "qaws_mesh_decimate.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -353,6 +355,48 @@ static qaws_motion* sw_move(double x0, double y0, double z0, double x1, double y
 	s.velocity.z = e.velocity.z = (qaws_scalar)(z1 - z0);
 	qaws_motion_create_poses(&m, &s, &e, 0);
 	return m;
+}
+
+/* a sweep's result decimated: the cube moved by 1 along x slowing to a stop (its slabs leave 164 faces) keeps no internal "source" (it would make every face's border
+   a seam), so its 2 x 1 x 1 box decimates to 24 faces, its volume kept exactly (the sweep's within the
+   tolerance of 2: the last eighth of the motion moves less than it) */
+static void test_decimate_after(void)
+{
+	qaws_mesh_3d *b = sw_box(0, 1, 0, 1, 0, 1), *o = NULL;
+	qaws_motion* m = NULL;
+	qaws_motion_pose s, e;
+	qaws_sweep_desc d;
+	qaws_decimate_desc dd;
+	unsigned int sa, f0 = 0, f1 = 0;
+	int has_source = -1;
+	double v = 0, v0 = 0;
+	qaws_status st;
+	char msg[300];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	e.position.x = 1;
+	s.velocity.x = 3;   /* (slowing to a stop: many slabs) */
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)0.002;
+	st = qaws_mesh_3d_sweep(&o, NULL, b, m, &d);
+	if (st == QAWS_STATUS_OK && o)
+	{
+		has_source = qaws_mesh_3d_find_attribute(&sa, o, "source") == QAWS_STATUS_OK;
+		f0 = qaws_mesh_3d_get_face_count(o);
+		v0 = sw_volume(o);
+		memset(&dd, 0, sizeof dd);
+		dd.target_faces = 24;
+		st = qaws_mesh_3d_decimate(NULL, o, &dd);
+		f1 = qaws_mesh_3d_get_face_count(o);
+		v = sw_volume(o);
+	}
+	sprintf(msg, "a sweep decimated: \"source\" left %d, %u faces to %u, volume %.12f to %.12f", has_source, f0, f1, v0, v);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && has_source == 0 && f0 > 100 && f1 <= 24 && fabs(v - v0) < 1e-12 && fabs(v - 2) < 0.002, msg);
+	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
+	qaws_motion_destroy(m);
 }
 
 static void test_carving(void)
@@ -918,6 +962,7 @@ int test_180_mesh_sweep_main(void)
 	test_turn();
 	test_tube();
 	test_pipe();
+	test_decimate_after();
 	test_carving();
 	test_spin();
 	test_spin_more();
