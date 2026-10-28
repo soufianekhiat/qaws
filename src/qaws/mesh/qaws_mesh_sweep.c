@@ -741,8 +741,9 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 				nfe++;
 			}
 		}
-		/* the rails a feature corner runs along (its positions at two layers: a swept box's long edges) and a feature edge's
-		   chords across two layers (where it slides along itself: its envelope), unless two hull faces meet flat there; each
+		/* the rails a vertex of a feature edge runs along (its positions at two layers: a swept box's long edges, or where a
+		   swept rim runs along the motion, its envelope) and a feature edge's chords across two layers (where it slides along
+		   itself), unless two hull faces meet flat there; each
 		   hull holds its own copy of one (the soup's vertices split there), so the copies are grouped by their given vertices;
 		   the result keeps those that are creases of it */
 		{
@@ -754,8 +755,9 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 				qaws_internal_free(rl); qaws_internal_free(corner);
 				goto done;
 			}
-			for (i = 0; i < nv; i++)
-				corner[i] = (unsigned char)qaws_mesh_3d_is_feature_corner(mesh, i);
+			for (i = 0; i < 2 * nfeat; i++)
+				if (ie[i] < nv)
+					corner[ie[i]] = 1;
 			for (i = 0; i < md->face_count; i++)
 			{
 				unsigned int t[3], g[3];
@@ -776,7 +778,7 @@ static qaws_status swp_soup(qaws_mesh_3d** out, qaws_mesh_3d const* mesh, qaws_m
 					if (ga / nv == gb / nv)
 						continue;
 					if (ga % nv == gb % nv ? !corner[ga % nv] : cy_find(ik, ine, ga % nv, gb % nv) == QAWS_MESH_NONE || !ifeat[cy_find(ik, ine, ga % nv, gb % nv)])
-						continue;   /* (a corner's rail, or a feature edge's chord across two layers: where it slides along itself, its envelope) */
+						continue;   /* (a feature vertex's rail, or a feature edge's chord across two layers) */
 					rl[nr].key = ((unsigned long long)(ga < gb ? ga : gb) << 32) | (ga < gb ? gb : ga);
 					rl[nr].a = t[j];
 					rl[nr].b = t[(j + 1) % 3];

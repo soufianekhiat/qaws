@@ -93,10 +93,11 @@
  * TANGENT, VECTOR, and NORMALIZED of 3 components) turn with a rigid
  * motion's rotation, a QUATERNION is composed with it, and a NORMAL face
  * attribute on a wall is the wall's own normal. Features: the mesh's copies,
- * the paths its feature corners trace and the cuts, kept where the result
- * turns by more than half the mesh's softest feature angle (the mesh's own
- * at the first and last poses wherever it turns); an edge sliding along
- * itself (an envelope) traces no feature.
+ * the paths the vertices of its feature edges trace (a box's corners, a
+ * rim's envelope where it runs along the motion), its feature edges' chords
+ * across two poses and the cuts, kept where the result turns by more than
+ * half the mesh's softest feature angle (the mesh's own at the first and
+ * last poses wherever it turns).
  */
 
 /* Attributes a sweep can add (qaws_sweep_desc.generate, ORed), per corner of the result, from the time its place was swept

@@ -43,7 +43,11 @@
  *     Loop level (2 each);
  *   - features along a sweep's walls: a cube (its creases features) swept
  *     along (1, 0.5, 0): the result's features are exactly its creases, the
- *     long edges its corners trace included; swept along a curve while
+ *     long edges its corners trace included; along (1, 0, 0) (its x edges
+ *     sliding along themselves): 16 of each; a 16-sided prism swept along
+ *     (1, 0, 0): its features exactly its creases past 0.5 radians, the
+ *     lines its rims trace where they run along the motion included;
+ *     swept along a curve while
  *     turning a quarter (16 slabs): closed, one piece (no sliver left between
  *     two slabs' twisted walls), its features exactly its edges turning by
  *     more than 25 degrees (the slabs' chords bend less), and the cube at
@@ -918,6 +922,35 @@ static void ac_crease_check(qaws_mesh_3d const* m, double turn_min, double* feat
 	free(e); free(fe); free(t); free(fn);
 }
 
+/* a closed 16-sided prism of radius 0.5 round the z axis, z in [0, 1], its caps fanned */
+static qaws_mesh_3d* ac_prism(void)
+{
+	qaws_scalar x[96];
+	unsigned int t[3 * 60], i, k = 0;
+	qaws_mesh_3d_desc d;
+	qaws_mesh_3d* m = NULL;
+	for (i = 0; i < 32; i++)
+	{
+		double a = 2 * 3.14159265358979323846 * (i % 16) / 16;
+		x[3 * i] = (qaws_scalar)(0.5 * cos(a)); x[3 * i + 1] = (qaws_scalar)(0.5 * sin(a)); x[3 * i + 2] = (qaws_scalar)(i < 16 ? 0 : 1);
+	}
+	for (i = 0; i < 16; i++)
+	{
+		unsigned int a = i, b = (i + 1) % 16;
+		t[k++] = a; t[k++] = b; t[k++] = b + 16;
+		t[k++] = a; t[k++] = b + 16; t[k++] = a + 16;
+	}
+	for (i = 1; i + 1 < 16; i++)
+	{
+		t[k++] = 0; t[k++] = i + 1; t[k++] = i;
+		t[k++] = 16; t[k++] = 16 + i; t[k++] = 17 + i;
+	}
+	memset(&d, 0, sizeof d);
+	d.positions = x; d.vertex_count = 32; d.face_vertices = t; d.face_count = k / 3;
+	qaws_mesh_3d_create(&m, &d);
+	return m;
+}
+
 static void test_sweep_features(void)
 {
 	qaws_mesh_3d *c = ac_box(0, 1, 0, 1, 0, 1), *o = NULL;
@@ -934,8 +967,41 @@ static void test_sweep_features(void)
 		feat, crease, mism);
 	printf("  %s\n", msg);
 	TEST_ASSERT(st == QAWS_STATUS_OK && o && mism == 0 && fabs(feat - crease) < 1e-12 && feat > 12, msg);
+	qaws_mesh_3d_destroy(o);
+	qaws_motion_destroy(m);
+	/* along (1, 0, 0): its x edges slide along themselves */
+	o = NULL;
+	mism = 1000;
+	feat = crease = 0;
+	m = ac_move(0, 0, 0, 1, 0, 0);
+	st = qaws_mesh_3d_sweep(&o, NULL, c, m, NULL);
+	if (st == QAWS_STATUS_OK && o)
+		ac_crease_check(o, 1e-9, &feat, &crease, &mism);
+	sprintf(msg, "a featured cube swept along (1, 0, 0): features along %.12f, creases along %.12f, %u edges a feature without a crease or the reverse",
+		feat, crease, mism);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && o && mism == 0 && fabs(feat - 16) < 1e-12 && fabs(crease - 16) < 1e-12, msg);
 	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o);
 	qaws_motion_destroy(m);
+	{
+		/* a prism's rims swept sideways: the creases where the rims run along the motion (their envelope) traced by
+		   vertices that are no feature corners */
+		qaws_mesh_3d* pr = ac_prism();
+		o = NULL;
+		mism = 1000;
+		feat = crease = 0;
+		m = ac_move(0, 0, 0, 1, 0, 0);
+		qaws_mesh_3d_detect_features(pr, (qaws_scalar)0.5, 0, 0);
+		st = qaws_mesh_3d_sweep(&o, NULL, pr, m, NULL);
+		if (st == QAWS_STATUS_OK && o)
+			ac_crease_check(o, 1 - cos(0.5), &feat, &crease, &mism);
+		sprintf(msg, "a featured 16-sided prism swept along (1, 0, 0): features along %.12f, creases along %.12f, %u edges a feature without a crease or the reverse",
+			feat, crease, mism);
+		printf("  %s\n", msg);
+		TEST_ASSERT(st == QAWS_STATUS_OK && o && mism == 0 && fabs(feat - crease) < 1e-12 && crease > 4, msg);
+		qaws_mesh_3d_destroy(pr); qaws_mesh_3d_destroy(o);
+		qaws_motion_destroy(m);
+	}
 	{
 		/* along a curve, turning a quarter */
 		qaws_mesh_3d* cube = ac_box(-0.3, 0.3, -0.3, 0.3, -0.3, 0.3);

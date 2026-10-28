@@ -187,6 +187,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Sweeps mark the creases a rim traces where it runs along the motion (its envelope): every vertex of a feature edge
+  traces a rail, the result keeping its creases only. Test 181 (a 16-sided prism swept sideways), figure 67.
 - Sweeps mark the paths their feature corners trace as features (a swept box's long edges), keeping the result's creases
   only. The surface connector keeps edge attributes. Test 181, figure 67.
 - Volume attributes through hexahedralization, boundary layers and the volume connector (test 182, figure 66).

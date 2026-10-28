@@ -111,7 +111,7 @@
  *   mesh64_subdivide_rules.png  subdivision by data type: a phase as LINEAR and ANGLE, edge values through Catmull-Clark and Loop
  *   mesh65_volume_attributes.png  volume attributes: a ball's colours inside, facet labels, two materials through improvement
  *   mesh66_volume_attributes_more.png  volume attributes through hexahedra, boundary layers and the volume connector
- *   mesh67_sweep_features.png  features through sweeps (traced corners, a carved slot), edge values through the connector
+ *   mesh67_sweep_features.png  features through sweeps (traced corners, a carved slot, a rim's envelope), edge values through the connector
  *
  * Each figure lives in meshing_showcase/NN_*.c, compiled as one translation
  * unit with the rasterizer in example_raster.h.
