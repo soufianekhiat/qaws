@@ -30,7 +30,10 @@
  *     it (another plane's parametrization, the circle their shared edge), by
  *     PARAMETRIC and RESTRICTED_DELAUNAY: valid, the plate's outer square
  *     the only border (the circle shared), every vertex on the plane, the
- *     circle's vertices on the circle;
+ *     circle's vertices on the circle; STRUCTURED on a plane trimmed to an
+ *     annular sector (four trim pieces: its grid the Coons map of them): all
+ *     quads, no irregular vertex, the inner arc's vertices on its circle; on
+ *     the plate with a hole (not four-sided) refused;
  *   - refusals: RESTRICTED_DELAUNAY and PARAMETRIC in quads, no
  *     description, a negative length.
  *
@@ -817,6 +820,77 @@ static void test_trimmed(void)
 			&& err < TEST_BOUND(1e-9, 32) && near >= 16 && oncircle < 1e-6 && t.q.min_angle > (m ? 29.99 : 20), msg);
 		tg_free(&t);
 		qaws_mesh_3d_destroy(out);
+	}
+	if (a)
+	{
+		/* STRUCTURED: the plate (not four-sided) refused */
+		qaws_generate_desc d;
+		qaws_mesh_3d* out = NULL;
+		qaws_status st;
+		memset(&d, 0, sizeof d);
+		d.method = QAWS_GENERATE_STRUCTURED;
+		d.target_length = (qaws_scalar)0.25;
+		st = qaws_mesh_generate_shell(&out, NULL, a, &d);
+		sprintf(msg, "STRUCTURED on the plate with a hole: %s", qaws_status_to_string(st));
+		TEST_ASSERT(st == QAWS_STATUS_UNSUPPORTED_OPERATION && !out, msg);
+	}
+	{
+		/* an annular sector of the plate's plane: radii 0.1 and 0.3 round (0.5, 0.5) (0.4 and 1.2 in space), a quarter turn */
+		qaws_curve *sc[4];
+		qaws_curve const* sl[4];
+		qaws_path_2d ps[1];
+		qaws_shell_face_desc fs1[1];
+		qaws_shell_atlas* as = NULL;
+		qaws_generate_desc d;
+		qaws_mesh_3d* out = NULL;
+		qaws_status st;
+		double hp = 0.5 * 3.14159265358979323846;
+		sc[0] = tg_line(0.6, 0.5, 0.8, 0.5);
+		sc[1] = tg_arc(0.5, 0.5, 0.3, 0, hp);
+		sc[2] = tg_line(0.5, 0.8, 0.5, 0.6);
+		sc[3] = tg_arc(0.5, 0.5, 0.1, hp, 0);
+		for (i = 0; i < 4; i++)
+			sl[i] = sc[i];
+		ps[0].curves = sl; ps[0].curve_count = 4; ps[0].closed = 1;
+		fs1[0].surface = s[0]; fs1[0].trims = ps; fs1[0].trim_count = 1;
+		qaws_shell_atlas_create_trimmed(&as, fs1, 1, 0);
+		memset(&d, 0, sizeof d);
+		d.method = QAWS_GENERATE_STRUCTURED;
+		d.elements = QAWS_ELEMENTS_QUADS;
+		d.target_length = (qaws_scalar)0.1;
+		st = as ? qaws_mesh_generate_shell(&out, NULL, as, &d) : QAWS_STATUS_INVALID_ARGUMENT;
+		if (st == QAWS_STATUS_OK && out)
+		{
+			tg_mesh t;
+			double inner = 0, err;
+			unsigned int on = 0;
+			tg_read(out, &t);
+			err = tg_foot_error(&t, NULL, as);
+			for (i = 0; i < t.nv; i++)
+			{
+				double r = sqrt(t.x[3 * i] * t.x[3 * i] + t.x[3 * i + 1] * t.x[3 * i + 1]);
+				if (fabs(r - 0.4) < 0.01)
+				{
+					on++;
+					inner = fmax(inner, fabs(r - 0.4));
+				}
+			}
+			sprintf(msg, "STRUCTURED annular sector: %u faces (%u quads), %u irregular, border loops %u, footpoints %.1e, %u on the inner arc (to %.1e)",
+				t.nf, t.q.quads, t.q.irregular, t.top.boundary_loops, err, on, inner);
+			printf("  %s\n", msg);
+			TEST_ASSERT(qaws_mesh_3d_validate(out) == QAWS_STATUS_OK && t.q.quads == t.nf && t.q.irregular == 0 && t.top.boundary_loops == 1
+				&& err < TEST_BOUND(1e-9, 32) && on >= 3 && inner < 1e-9, msg);
+			tg_free(&t);
+		}
+		else
+		{
+			sprintf(msg, "STRUCTURED annular sector: %s", qaws_status_to_string(st));
+			TEST_ASSERT(0, msg);
+		}
+		qaws_mesh_3d_destroy(out);
+		qaws_shell_atlas_destroy(as);
+		for (i = 0; i < 4; i++)
+			qaws_curve_destroy(sc[i]);
 	}
 	qaws_shell_atlas_destroy(a);
 	for (i = 0; i < 4; i++)

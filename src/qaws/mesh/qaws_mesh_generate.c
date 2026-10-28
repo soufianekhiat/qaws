@@ -590,8 +590,19 @@ static void mg_at(qaws_surface const* s, double u, double v, double* p)
 	mg_v3(e.position, p);
 }
 
+/* STRUCTURED's side k of face f at t (k as mg_side_uv: 0 and 2 along u, 1 and 3 along v, each by increasing parameter):
+   the domain's (tp < 0), or a four-sided trimmed face's pieces from shell side tp (its loop counter-clockwise: pieces 2 and 3
+   read backward) */
+static void mg_sq_side(mg_src const* src, unsigned int f, double const* dom, int tp, int k, double t, double* uv)
+{
+	if (tp < 0)
+		mg_side_uv(dom, k, t, uv);
+	else
+		sh_face_side_point(src->shell, f, (unsigned int)(tp + k), k >= 2 ? 1 - t : t, uv);
+}
+
 /* side k's length, and n + 1 fractions along it at equal lengths (equal in parameter on a side of no length: a pole) */
-static double mg_side_params(qaws_surface const* s, double const* dom, int k, unsigned int n, double* out)
+static double mg_side_params(qaws_surface const* s, mg_src const* src, unsigned int f, double const* dom, int tp, int k, unsigned int n, double* out)
 {
 	enum { K = 128 };
 	double cum[K + 1], prev[3], uv[2];
@@ -600,7 +611,7 @@ static double mg_side_params(qaws_surface const* s, double const* dom, int k, un
 	for (i = 0; i <= K; i++)
 	{
 		double p[3];
-		mg_side_uv(dom, k, (double)i / K, uv);
+		mg_sq_side(src, f, dom, tp, k, (double)i / K, uv);
 		mg_at(s, uv[0], uv[1], p);
 		if (i)
 			cum[i] = cum[i - 1] + sqrt((p[0] - prev[0]) * (p[0] - prev[0]) + (p[1] - prev[1]) * (p[1] - prev[1]) + (p[2] - prev[2]) * (p[2] - prev[2]));
@@ -630,21 +641,33 @@ static unsigned int mg_root(unsigned int* uf, unsigned int i)
 }
 
 /* face f's grid: (nu + 1) (nw + 1) nodes' (u, v), node (i, j) at i + (nu + 1) j; each side split at equal lengths, the nodes
-   inside blending opposite sides' fractions (u from sides 0 and 2 by j, v from sides 3 and 1 by i) */
-static void mg_grid_uv(qaws_surface const* s, double const* dom, unsigned int nu, unsigned int nw, double* a, double* b, double* c, double* d,
-	double* uv)
+   inside by the discrete Coons map of the four sides' points in (u, v) (on the domain's rectangle: opposite sides'
+   fractions blended) */
+static void mg_grid_uv(qaws_surface const* s, mg_src const* src, unsigned int f, double const* dom, int tp, unsigned int nu, unsigned int nw, double* a,
+	double* b, double* c, double* d, double* uv)
 {
 	unsigned int i, j;
-	mg_side_params(s, dom, 0, nu, a);
-	mg_side_params(s, dom, 2, nu, b);
-	mg_side_params(s, dom, 3, nw, c);
-	mg_side_params(s, dom, 1, nw, d);
+	double C[4][2];
+	mg_side_params(s, src, f, dom, tp, 0, nu, a);
+	mg_side_params(s, src, f, dom, tp, 2, nu, b);
+	mg_side_params(s, src, f, dom, tp, 3, nw, c);
+	mg_side_params(s, src, f, dom, tp, 1, nw, d);
+	mg_sq_side(src, f, dom, tp, 0, 0, C[0]);
+	mg_sq_side(src, f, dom, tp, 0, 1, C[1]);
+	mg_sq_side(src, f, dom, tp, 2, 0, C[2]);
+	mg_sq_side(src, f, dom, tp, 2, 1, C[3]);
 	for (j = 0; j <= nw; j++)
 		for (i = 0; i <= nu; i++)
 		{
-			double t = (double)j / nw, r = (double)i / nu, fu = (1 - t) * a[i] + t * b[i], fv = (1 - r) * c[j] + r * d[j];
-			uv[2 * (i + (size_t)(nu + 1) * j)] = dom[0] + fu * (dom[1] - dom[0]);
-			uv[2 * (i + (size_t)(nu + 1) * j) + 1] = dom[2] + fv * (dom[3] - dom[2]);
+			double et = (double)j / nw, xi = (double)i / nu, B[2], T[2], Lf[2], R[2];
+			int q;
+			mg_sq_side(src, f, dom, tp, 0, a[i], B);
+			mg_sq_side(src, f, dom, tp, 2, b[i], T);
+			mg_sq_side(src, f, dom, tp, 3, c[j], Lf);
+			mg_sq_side(src, f, dom, tp, 1, d[j], R);
+			for (q = 0; q < 2; q++)
+				uv[2 * (i + (size_t)(nu + 1) * j) + q] = (1 - et) * B[q] + et * T[q] + (1 - xi) * Lf[q] + xi * R[q]
+					- ((1 - xi) * (1 - et) * C[0][q] + xi * (1 - et) * C[1][q] + (1 - xi) * et * C[2][q] + xi * et * C[3][q]);
 		}
 }
 
@@ -1860,7 +1883,8 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 {
 	unsigned int *uf = NULL, *cnt = NULL, f, k, round, *fv = NULL, *fs = NULL, *map = NULL, *slot = NULL, nv = 0, nface = 0, nc = 0, mask;
 	unsigned int *fface = NULL, total = 0, maxn = 0;
-	double *alu = NULL, *alv = NULL;
+	int* tp = NULL;
+	double *alu = NULL, *alv = NULL, minstep = HUGE_VAL;
 	double *dom = NULL, *len = NULL, *x = NULL, *uvbuf = NULL, *par = NULL, ext = 0, cell, lo[3] = { 1e300, 1e300, 1e300 }, hi[3] = { -1e300, -1e300, -1e300 };
 	qaws_mesh_location* foot = NULL;
 	int adaptive = desc->target_length == 0 && (desc->chord_tolerance > 0 || desc->angle_tolerance > 0);
@@ -1870,7 +1894,8 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 	cnt = (unsigned int*)qaws_internal_scratch_zalloc(2 * (size_t)nf + 2, sizeof(unsigned int));
 	dom = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4, (size_t)nf + 1));
 	len = (double*)qaws_internal_scratch_zalloc(4 * (size_t)nf + 4, sizeof(double));
-	if (!uf || !cnt || !dom || !len)
+	tp = (int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(int), (size_t)nf + 1));
+	if (!uf || !cnt || !dom || !len || !tp)
 		goto done;
 	/* the domains, the sides' lengths, the classes */
 	for (f = 0; f < nf; f++)
@@ -1883,30 +1908,42 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 		dom[4 * (size_t)f + 1] = (double)ur.max_value;
 		dom[4 * (size_t)f + 2] = (double)vr.min_value;
 		dom[4 * (size_t)f + 3] = (double)vr.max_value;
-		for (k = 0; k < 4; k++)
-			len[4 * (size_t)f + k] = mg_side_params(s, dom + 4 * (size_t)f, (int)k, 1, NULL);
-		uf[2 * f] = 2 * f;
-		uf[2 * f + 1] = 2 * f + 1;
+		tp[f] = -1;
 		if (src->shell && !sh_face_grid_sides(src->shell, f, nb, nbs))
 		{
-			st = QAWS_STATUS_UNSUPPORTED_OPERATION;   /* (a trimmed face: no grid) */
-			goto done;
+			/* (a trimmed face: a grid when its one loop has four pieces, its sides) */
+			unsigned int first, nl;
+			unsigned int const* lf;
+			int per;
+			sh_face_sides(src->shell, f, &first, &nl, &lf, &per);
+			if (per || nl != 1 || lf[1] - lf[0] != 4)
+			{
+				st = QAWS_STATUS_UNSUPPORTED_OPERATION;
+				goto done;
+			}
+			tp[f] = (int)(first + lf[0]);
 		}
-		(void)nbs;
+		for (k = 0; k < 4; k++)
+			len[4 * (size_t)f + k] = mg_side_params(s, src, f, dom + 4 * (size_t)f, tp[f], (int)k, 1, NULL);
+		uf[2 * f] = 2 * f;
+		uf[2 * f + 1] = 2 * f + 1;
 	}
 	for (f = 0; src->shell && f < nf; f++)
-	{
-		unsigned int nb[4];
-		int nbs[4];
-		sh_face_grid_sides(src->shell, f, nb, nbs);
 		for (k = 0; k < 4; k++)
-			if (nb[k] < nf && nbs[k] >= 0 && nbs[k] < 4)
+		{
+			unsigned int nbf, kk;
+			int nbs;
+			sh_face_side_across(src->shell, f, tp[f] < 0 ? k : (unsigned int)tp[f] + k, &nbf, &nbs);
+			if (nbf >= nf || nbs < 0)
+				continue;
+			kk = tp[nbf] < 0 ? (unsigned int)nbs : (unsigned int)(nbs - tp[nbf]);
+			if (kk < 4)
 			{
-				unsigned int ra = mg_root(uf, 2 * f + (k & 1)), rb = mg_root(uf, 2 * nb[k] + ((unsigned int)nbs[k] & 1));
+				unsigned int ra = mg_root(uf, 2 * f + (k & 1)), rb = mg_root(uf, 2 * nbf + (kk & 1));
 				if (ra != rb)
 					uf[ra] = rb;
 			}
-	}
+		}
 	/* (a class's count: its sides' longest over L; sides 0 and 2 count along u, 1 and 3 along v) */
 	for (f = 0; f < nf; f++)
 		for (k = 0; k < 4; k++)
@@ -1943,7 +1980,7 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 			c = b + nu + 1;
 			d = c + nw + 1;
 			uv = uvbuf;
-			mg_grid_uv(s, dom + 4 * (size_t)f, nu, nw, a, b, c, d, uv);
+			mg_grid_uv(s, src, f, dom + 4 * (size_t)f, tp[f], nu, nw, a, b, c, d, uv);
 			for (j = 0; j < nw && bad != 3; j++)
 				for (i = 0; i < nu && bad != 3; i++)
 				{
@@ -2025,7 +2062,7 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 			{
 				double p[3], uv[2];
 				unsigned int q;
-				mg_side_uv(dom + 4 * (size_t)f, (int)k, 0, uv);
+				mg_sq_side(src, f, dom + 4 * (size_t)f, tp[f], (int)k, 0, uv);
 				mg_at(mg_face(src, f), uv[0], uv[1], p);
 				for (q = 0; q < 3; q++)
 				{
@@ -2036,7 +2073,12 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 		for (k = 0; k < nf; k++)
 			ext = fmax(ext, len[4 * (size_t)k] + len[4 * (size_t)k + 1]);
 		ext = fmax(ext, sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2])));
-		cell = 1e-7 * (ext > 0 ? ext : 1);
+		/* (and no more than a ten-thousandth of the finest step: one curve read through two faces' parametrizations) */
+		for (f = 0; f < nf; f++)
+			for (k = 0; k < 4; k++)
+				if (len[4 * (size_t)f + k] > 1e-12 * ext)
+					minstep = fmin(minstep, len[4 * (size_t)f + k] / cnt[mg_root(uf, 2 * f + (k & 1))]);
+		cell = fmax(1e-7 * (ext > 0 ? ext : 1), minstep < HUGE_VAL ? 1e-4 * minstep : 0);
 	}
 	total = 0;
 	nc = 0;
@@ -2047,7 +2089,7 @@ static qaws_status mg_structured(mg_src const* src, unsigned int nf, qaws_genera
 		double *uv = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 2, ((size_t)nu + 1) * ((size_t)nw + 1)));
 		if (!uv)
 			goto done;
-		mg_grid_uv(s, dom + 4 * (size_t)f, nu, nw, par, par + nu + 1, par + 2 * (nu + 1), par + 2 * (nu + 1) + nw + 1, uv);
+		mg_grid_uv(s, src, f, dom + 4 * (size_t)f, tp[f], nu, nw, par, par + nu + 1, par + 2 * (nu + 1), par + 2 * (nu + 1) + nw + 1, uv);
 		if (alu)
 			for (j = 0; j <= nw; j++)
 				for (i = 0; i <= nu; i++)
@@ -2113,7 +2155,7 @@ done:
 	qaws_mesh_3d_destroy(out);
 	qaws_internal_free(uf); qaws_internal_free(cnt); qaws_internal_free(dom); qaws_internal_free(len); qaws_internal_free(x); qaws_internal_free(foot);
 	qaws_internal_free(map); qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(fface); qaws_internal_free(par); qaws_internal_free(uvbuf);
-	qaws_internal_free(slot); qaws_internal_free(alu); qaws_internal_free(alv);
+	qaws_internal_free(slot); qaws_internal_free(alu); qaws_internal_free(alv); qaws_internal_free(tp);
 	return st;
 }
 

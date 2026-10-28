@@ -43,8 +43,11 @@
  *           Quads (QUADS and QUAD_DOMINANT; a cell at a pole a triangle) or
  *           triangles by the shorter diagonal; nodes welded where faces,
  *           seams and poles meet; every vertex exactly on its face, edges
- *           between faces features. A shell's faces must be untrimmed
- *           (UNSUPPORTED_OPERATION otherwise).
+ *           between faces features. A trimmed face takes a grid when its
+ *           one loop has four pieces (its sides; the nodes inside by the
+ *           discrete Coons map of the sides' points in (u, v)); other
+ *           trimmed faces, and trims on surfaces closed in u or v:
+ *           UNSUPPORTED_OPERATION.
  *   PARAMETRIC  triangles meshed in each face's (u, v) and lifted: the
  *           boundary split in space (each side by equal steps of its length
  *           over the size: the target, or with tolerances the side curve's

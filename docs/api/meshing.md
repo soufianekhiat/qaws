@@ -836,7 +836,8 @@ corners on its corners.
 at equal lengths (a shared edge alike from both faces), counts matched
 across edges, doubled per direction to meet chord or angle tolerances.
 Quads or triangles, exactly on the faces, no irregular vertex but at shell
-corners (figure 78). Trimmed faces are refused.
+corners (figure 78). A trimmed face with one loop of four pieces takes a
+Coons grid of them (figure 80); other trimmed faces are refused.
 
 `PARAMETRIC` meshes each face in its (u, v) in the surface's metric (the
 first fundamental form over the size squared, the size from the curvature

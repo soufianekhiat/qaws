@@ -5,7 +5,9 @@
  *     coloured, their triangles meeting along the circle;
  *   - an L-shaped plate with three round holes (its trims ear-clipped,
  *     remeshed in its metric) by RESTRICTED_DELAUNAY: every angle at least
- *     30 degrees.
+ *     30 degrees;
+ *   - an annular sector (four trim pieces) by STRUCTURED: its grid the Coons
+ *     map of its sides, quads following the arcs.
  */
 
 static qaws_curve* ms_tr_line(double x0, double y0, double x1, double y1)
@@ -74,7 +76,7 @@ static void demo_generate_trimmed(void)
 	static double const wire[3] = { 40, 45, 60 };
 	static double const pal[6][3] = { { 178, 192, 212 }, { 232, 196, 120 }, { 170, 205, 160 }, { 205, 185, 220 }, { 120, 198, 121 }, { 49, 130, 189 } };
 	static double const A[4][3] = { { -2, -2, 0 }, { 2, -2, 0 }, { -2, 2, 0 }, { 2, 2, 0 } }, B[4][3] = { { 1, -1, 0 }, { 1, 1, 0 }, { -1, -1, 0 }, { -1, 1, 0 } };
-	er_canvas* c = er_create(1400, 700, 3, 252, 252, 250);
+	er_canvas* c = er_create(2100, 700, 3, 252, 252, 250);
 	qaws_surface *sa = ms_tr_plane(A), *sb = ms_tr_plane(B), *sl = ms_tr_plane(A);
 	qaws_curve *oc[4], *hole, *disk, *lc[6], *holes[3];
 	qaws_curve const *ol[4], *hl[1], *dl[1], *ll[6], *hh[3][1];
@@ -148,6 +150,38 @@ static void demo_generate_trimmed(void)
 	else
 		printf("  L with holes failed\n");
 	qaws_mesh_3d_destroy(g);
+	{
+		qaws_curve *sc[4];
+		qaws_curve const* sl[4];
+		qaws_path_2d ps[1];
+		qaws_shell_face_desc fs1[1];
+		qaws_shell_atlas* as = NULL;
+		double hp = 0.5 * MS_PI;
+		sc[0] = ms_tr_line(0.6, 0.5, 0.85, 0.5);
+		sc[1] = ms_tr_arc(0.5, 0.5, 0.35, 0, hp);
+		sc[2] = ms_tr_line(0.5, 0.85, 0.5, 0.6);
+		sc[3] = ms_tr_arc(0.5, 0.5, 0.1, hp, 0);
+		for (i = 0; i < 4; i++)
+			sl[i] = sc[i];
+		ps[0].curves = sl; ps[0].curve_count = 4; ps[0].closed = 1;
+		fs1[0].surface = sa; fs1[0].trims = ps; fs1[0].trim_count = 1;
+		qaws_shell_atlas_create_trimmed(&as, fs1, 1, 0);
+		d.method = QAWS_GENERATE_STRUCTURED;
+		d.elements = QAWS_ELEMENTS_QUADS;
+		d.target_length = (qaws_scalar)0.1;
+		g = NULL;
+		if (as && qaws_mesh_generate_shell(&g, &rep, as, &d) == QAWS_STATUS_OK && g)
+		{
+			sprintf(sub, "%u quads, %u irregular", rep.quality.quads, rep.quality.irregular);
+			ms_panel(c, 1400, 0, 700, 700, g, 0.3, 0.9, "STRUCTURED, an annular sector", sub);
+			ms_tr_draw(c, g, pal + 2, wire);
+			printf("  annular sector: %u quads, %u irregular\n", rep.quality.quads, rep.quality.irregular);
+		}
+		qaws_mesh_3d_destroy(g);
+		qaws_shell_atlas_destroy(as);
+		for (i = 0; i < 4; i++)
+			qaws_curve_destroy(sc[i]);
+	}
 	er_save(c, "showcase/mesh80_generate_trimmed.png");
 	printf("mesh80_generate_trimmed.png\n");
 	qaws_shell_atlas_destroy(a);
