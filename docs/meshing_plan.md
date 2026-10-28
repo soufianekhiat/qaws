@@ -276,9 +276,10 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    tolerance (measured at the middles and quarters, not certified from the derivatives), each slab's front faces
    extruded between layers of vertices shared by consecutive slabs, the solid at 0 and all extrusions through the
    Boolean's self-union. A cube translated is exact (volume 3 to 1e-15); a box turned a quarter 2.37525 against 2.37627;
-   a ball's tube within 1.7%. Not done: the certified bound (the trajectories' derivatives), the twist of rotating walls
-   (bilinear quads split), the envelope's characteristic curves; the Boolean sometimes leaves a planar motion's
-   coplanar walls open.
+   a ball's tube within 1.7%. Since 2026-10-26 (f6356fb) each slab adds the convex hull of every outgoing face's two
+   positions, so rotating walls never twist; checked 2026-10-28: a thin box turned a quarter and a half and a cube
+   turning along a planar curve all close as one piece at every tolerance from 0.02 to 0.001 (the planar motion's
+   coplanar walls once left open no longer are). Not done: the certified bound (the trajectories' derivatives).
 3. **Exact where the motion allows.** Translations along polylines and polynomial paths with the exact kernel:
    the sweep of a polyhedron along a segment is exact (its faces' prisms and the union), so G-code's linear moves give
    exact carving; polynomial and rational motions exact up to the slabs' certified bound, the Booleans exact on them.
