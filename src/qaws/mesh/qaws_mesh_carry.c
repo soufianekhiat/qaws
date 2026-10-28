@@ -194,6 +194,89 @@ static void cy_part_free(cy_part* p)
 	qaws_internal_free(p->ef);
 }
 
+/* the result's footpoints from the operands' (when one has them): each vertex located in its faces' source faces, the
+   corners weighing in on one patch mixed (in a and b, each operand's patches as numbered there), the first operand's
+   location preferred at a vertex they share, unknown where the corners lie on several patches */
+static qaws_status cy_footpoints(qaws_mesh_3d* out, cy_part const* P, unsigned int np, qaws_scalar const* rx, unsigned int const* rt,
+	qaws_scalar const* rsrc, unsigned int nt)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(out), i, f, c, j, any = 0;
+	qaws_mesh_location** fp = (qaws_mesh_location**)qaws_internal_zalloc((size_t)np + 1, sizeof(qaws_mesh_location*));
+	qaws_mesh_location* rf = NULL;
+	unsigned int* rp = NULL;
+	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (!fp)
+		return st;
+	for (i = 0; i < np; i++)
+		if (qaws_mesh_3d_has_footpoints(P[i].m))
+		{
+			if (!(fp[i] = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * ((size_t)P[i].nv + 1))))
+				goto done;
+			qaws_mesh_3d_get_footpoints(fp[i], P[i].m);
+			any = 1;
+		}
+	st = QAWS_STATUS_OK;
+	if (!any)
+		goto done;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	rf = (qaws_mesh_location*)qaws_internal_malloc(sizeof(qaws_mesh_location) * ((size_t)nv + 1));
+	rp = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nv + 1));
+	if (!rf || !rp)
+		goto done;
+	for (i = 0; i < nv; i++)
+	{
+		rf[i].patch = QAWS_MESH_NONE;
+		rf[i].a = rf[i].b = 0;
+		rp[i] = np;
+	}
+	for (f = 0; f < nt; f++)
+	{
+		unsigned int s = (unsigned int)rsrc[f], pi = 0, sf;
+		cy_part const* p;
+		while (pi + 1 < np && P[pi + 1].base <= s)
+			pi++;
+		p = &P[pi];
+		sf = s - p->base;
+		if (!fp[pi])
+			continue;
+		for (c = 0; c < 3; c++)
+		{
+			unsigned int v = rt[3 * (size_t)f + c], r[3], patch = QAWS_MESH_NONE;
+			double q[3], w[3], a = 0, b = 0;
+			if (rp[v] <= pi)
+				continue;
+			for (j = 0; j < 3; j++)
+				q[j] = (double)rx[3 * (size_t)v + j];
+			cy_locate(p, sf, q, r, w);
+			for (j = 0; j < 3; j++)
+			{
+				qaws_mesh_location const* l = &fp[pi][p->fv[p->fo[sf] + r[j]]];
+				if (!(w[j] > 1e-12))
+					continue;
+				if (l->patch == QAWS_MESH_NONE || (patch != QAWS_MESH_NONE && l->patch != patch))
+					break;
+				patch = l->patch;
+				a += w[j] * (double)l->a;
+				b += w[j] * (double)l->b;
+			}
+			if (j < 3 || patch == QAWS_MESH_NONE)
+				continue;
+			rf[v].patch = patch;
+			rf[v].a = (qaws_scalar)a;
+			rf[v].b = (qaws_scalar)b;
+			rp[v] = pi;
+		}
+	}
+	st = qaws_mesh_3d_set_footpoints(out, rf);
+done:
+	for (i = 0; i < np; i++)
+		qaws_internal_free(fp[i]);
+	qaws_internal_free(fp);
+	qaws_internal_free(rf);
+	qaws_internal_free(rp);
+	return st;
+}
+
 qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mesh_3d const* const* a, unsigned int na,
 	qaws_mesh_3d const* const* b, unsigned int nb, qaws_boolean_op op, qaws_intersect_desc const* desc)
 {
@@ -454,6 +537,8 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 			nfe++;
 		}
 	if (nfe && (st = qaws_mesh_3d_set_feature_edges(*out, re, nfe)) != QAWS_STATUS_OK)
+		goto done;
+	if ((st = cy_footpoints(*out, P, np, rx, rt, rsrc, nt)) != QAWS_STATUS_OK)
 		goto done;
 	/* each result corner's values within its source face, each edge's from the input edge it lies on */
 	for (k = 0; k < nattr && st == QAWS_STATUS_OK; k++)

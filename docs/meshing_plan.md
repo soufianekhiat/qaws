@@ -370,7 +370,7 @@ figure 64. Open:
 - volume attributes: done (vertex, corner, cell and facet ones through cloning, the border, improvement,
   tetrahedralization, hexahedralization, boundary layers and the connector; test 182, figures 65 and 66);
 - features along a sweep's walls: done for feature corners' paths; envelopes (an edge sliding along itself) not marked;
-- footpoints through Booleans.
+- footpoints through Booleans: done (each vertex's within its source face, mixed on one patch, A's where shared; test 126).
 
 ## 0. Scope
 

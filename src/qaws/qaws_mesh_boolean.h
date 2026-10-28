@@ -87,7 +87,11 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out_mesh, qaws_boolean_report* repo
  *     not coplanar: where the operands meet) become features.
  * With attributes, edges inside flat regions are turned only between pieces
  * of one source face (values are never carried across faces). Footpoints
- * are not carried.
+ * (when an operand has them): each result vertex's within its source face,
+ * mixed in (a, b) from the corners weighing in when they lie on one patch
+ * (exact on a triangle reference), unknown where they lie on several; each
+ * operand's patches keep their own numbering (the "source" attribute tells
+ * the operand), and a vertex the operands share takes A's.
  */
 qaws_status qaws_mesh_3d_boolean(qaws_mesh_3d** out_mesh, qaws_boolean_report* report, qaws_mesh_3d const* a, qaws_mesh_3d const* b,
 	qaws_boolean_op op, qaws_intersect_desc const* desc);

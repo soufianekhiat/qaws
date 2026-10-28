@@ -34,6 +34,9 @@
  *     annular sector (four trim pieces: its grid the Coons map of them): all
  *     quads, no irregular vertex, the inner arc's vertices on its circle; on
  *     the plate with a hole (not four-sided) refused;
+ *   - footpoints through a Boolean: the union of two generated boxes keeps
+ *     (face, u, v) footpoints, each on its operand's face at the vertex,
+ *     known at the cuts' vertices too;
  *   - refusals: RESTRICTED_DELAUNAY and PARAMETRIC in quads, no
  *     description, a negative length.
  *
@@ -43,6 +46,7 @@
 
 #include "test_common.h"
 #include "qaws_mesh_generate.h"
+#include "qaws_mesh_boolean.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -901,6 +905,81 @@ static void test_trimmed(void)
 	qaws_surface_destroy(s[1]);
 }
 
+static void test_boolean_footpoints(void)
+{
+	static double const ha[3] = { 1, 0.7, 0.5 }, hb[3] = { 0.6, 1.2, 0.3 };
+	qaws_surface *fa[6], *fb[6];
+	qaws_shell_atlas *sa = NULL, *sb = NULL;
+	qaws_mesh_3d *ma = NULL, *mb = NULL, *o = NULL;
+	qaws_generate_desc d;
+	unsigned int i, k, j, known = 0, cut = 0;
+	double worst = 0;
+	char msg[300];
+	tg_box(fa, ha);
+	tg_box(fb, hb);
+	qaws_shell_atlas_create(&sa, (qaws_surface const* const*)fa, 6, 0);
+	qaws_shell_atlas_create(&sb, (qaws_surface const* const*)fb, 6, 0);
+	memset(&d, 0, sizeof d);
+	d.target_length = (qaws_scalar)0.25;
+	if (sa && sb && qaws_mesh_generate_shell(&ma, NULL, sa, &d) == QAWS_STATUS_OK && qaws_mesh_generate_shell(&mb, NULL, sb, &d) == QAWS_STATUS_OK
+		&& qaws_mesh_3d_boolean(&o, NULL, ma, mb, QAWS_BOOLEAN_UNION, NULL) == QAWS_STATUS_OK && o)
+	{
+		tg_mesh t, ta, tb;
+		tg_read(o, &t);
+		tg_read(ma, &ta);
+		tg_read(mb, &tb);
+		/* each known footpoint on A's or B's face (the patches numbered alike): the nearer */
+		for (i = 0; i < t.nv; i++)
+		{
+			double best = HUGE_VAL;
+			int input = 0;
+			if (t.foot[i].patch == QAWS_MESH_NONE)
+				continue;
+			known++;
+			for (k = 0; k < 2; k++)
+			{
+				qaws_surface const* s = qaws_shell_atlas_get_face(k ? sb : sa, t.foot[i].patch);
+				qaws_surface_eval_result e;
+				double dd;
+				if (!s)
+					continue;
+				memset(&e, 0, sizeof e);
+				qaws_surface_evaluate(&e, s, t.foot[i].a, t.foot[i].b, QAWS_SURFACE_EVAL_POSITION);
+				dd = sqrt(((double)e.position.x - t.x[3 * i]) * ((double)e.position.x - t.x[3 * i]) + ((double)e.position.y - t.x[3 * i + 1]) * ((double)e.position.y - t.x[3 * i + 1])
+					+ ((double)e.position.z - t.x[3 * i + 2]) * ((double)e.position.z - t.x[3 * i + 2]));
+				best = fmin(best, dd);
+			}
+			worst = fmax(worst, best);
+			/* (a cut's vertex: at no input vertex) */
+			for (k = 0; k < 2 && !input; k++)
+			{
+				tg_mesh const* q = k ? &tb : &ta;
+				for (j = 0; j < q->nv && !input; j++)
+					input = fabs(q->x[3 * j] - t.x[3 * i]) + fabs(q->x[3 * j + 1] - t.x[3 * i + 1]) + fabs(q->x[3 * j + 2] - t.x[3 * i + 2]) < 1e-12;
+			}
+			cut += !input;
+		}
+		sprintf(msg, "Boolean footpoints: %u of %u vertices known (%u at the cuts), on their faces to %.1e", known, t.nv, cut, worst);
+		printf("  %s\n", msg);
+		TEST_ASSERT(known * 10 >= t.nv * 9 && cut > 0 && worst < TEST_BOUND(1e-9, 32), msg);
+		tg_free(&t);
+		tg_free(&ta);
+		tg_free(&tb);
+	}
+	else
+		TEST_ASSERT(0, "Boolean footpoints: the boxes and their union");
+	qaws_mesh_3d_destroy(o);
+	qaws_mesh_3d_destroy(ma);
+	qaws_mesh_3d_destroy(mb);
+	qaws_shell_atlas_destroy(sa);
+	qaws_shell_atlas_destroy(sb);
+	for (i = 0; i < 6; i++)
+	{
+		qaws_surface_destroy(fa[i]);
+		qaws_surface_destroy(fb[i]);
+	}
+}
+
 static void test_refusals(void)
 {
 	qaws_surface* s = tg_patch();
@@ -938,6 +1017,7 @@ int test_126_mesh_generate_main(void)
 	test_parametric();
 	test_restricted_delaunay();
 	test_trimmed();
+	test_boolean_footpoints();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
