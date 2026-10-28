@@ -11,7 +11,9 @@
  *   - the whole mesh (reduce): values 1 2 2 3 3 3 7 7 give MODE 3 (from vertex 3), MEDIAN 3 (the higher middle), RMS
  *     sqrt(134 / 8), MAXIMUM 7 (vertex 6);
  *   - a NORMAL averaged to the faces stays unit;
- *   - refused: the same element without a piece, no such attribute, a new name another attribute holds.
+ *   - refused: the same element without a piece, no such attribute, a new name another attribute holds;
+ *   - weighted: x integrated over the surface 3 and its area mean 0.5, the area 6, the edges' length 12 + 6 sqrt 2, a face
+ *     1 summed onto the vertices (their faces' area), x averaged onto the faces by area shares.
  */
 
 #include "test_common.h"
@@ -175,6 +177,66 @@ static void test_reduce_and_rules(void)
 	qaws_mesh_3d_destroy(m);
 }
 
+/* weighted (desc.weighted, qaws_mesh_3d_reduce_attribute_weighted): the cube's x integrated over its surface (3, exact: x linear
+   on each triangle), its area mean 0.5; a face 1 summed: the area 6; an edge 1 summed: the edges' length 12 + 6 sqrt 2; a face
+   1 summed onto the vertices: each vertex its faces' area; x averaged onto the faces: each face its vertices' x weighed by
+   their area shares */
+static void test_weighted(void)
+{
+	double x[24], wv[8] = { 0 }, worst = 0, eg = 0;
+	qaws_mesh_3d* m = pr_cube(x);
+	qaws_scalar xv[8], one[18], s[1], a[1], area[1], len[1], *fa = NULL, *vx = NULL;
+	unsigned int i, k, ne = qaws_mesh_3d_get_edge_count(m);
+	qaws_attribute_promote_desc d;
+	char msg[300];
+	for (i = 0; i < 8; i++)
+		xv[i] = (qaws_scalar)x[3 * i];
+	for (i = 0; i < 18; i++)
+		one[i] = 1;
+	pr_add(m, "x", QAWS_MESH_VERTEX, 1, QAWS_ATTRIBUTE_LINEAR, xv);
+	pr_add(m, "one", QAWS_MESH_FACE, 1, QAWS_ATTRIBUTE_LINEAR, one);
+	pr_add(m, "len", QAWS_MESH_EDGE, 1, QAWS_ATTRIBUTE_LINEAR, one);
+	qaws_mesh_3d_reduce_attribute_weighted(s, NULL, m, "x", QAWS_PROMOTE_SUM);
+	qaws_mesh_3d_reduce_attribute_weighted(a, NULL, m, "x", QAWS_PROMOTE_AVERAGE);
+	qaws_mesh_3d_reduce_attribute_weighted(area, NULL, m, "one", QAWS_PROMOTE_SUM);
+	qaws_mesh_3d_reduce_attribute_weighted(len, NULL, m, "len", QAWS_PROMOTE_SUM);
+	/* (each vertex's area share: a third of each triangle about it, 0.5 each) */
+	for (i = 0; i < 36; i++)
+		wv[pr_tri[i]] += 0.5 / 3;
+	memset(&d, 0, sizeof d);
+	d.name = "one"; d.element = QAWS_MESH_VERTEX; d.method = QAWS_PROMOTE_SUM; d.new_name = "vertex_area"; d.weighted = 1;
+	qaws_mesh_3d_promote_attribute(m, &d);
+	d.name = "x"; d.element = QAWS_MESH_FACE; d.method = QAWS_PROMOTE_AVERAGE; d.new_name = "face_x";
+	qaws_mesh_3d_promote_attribute(m, &d);
+	vx = pr_get(m, "vertex_area", 8);
+	fa = pr_get(m, "face_x", 12);
+	for (i = 0; vx && i < 8; i++)
+	{
+		double want = 0;
+		for (k = 0; k < 36; k++)
+			want += pr_tri[k] == i ? 0.5 : 0;
+		worst = fmax(worst, fabs((double)vx[i] - want));
+	}
+	for (i = 0; fa && i < 12; i++)
+	{
+		double sw = 0, sx = 0;
+		for (k = 0; k < 3; k++)
+		{
+			sw += wv[pr_tri[3 * i + k]];
+			sx += wv[pr_tri[3 * i + k]] * x[3 * pr_tri[3 * i + k]];
+		}
+		worst = fmax(worst, fabs((double)fa[i] - sx / sw));
+	}
+	eg = fabs((double)len[0] - (12 + 6 * sqrt(2.0)));
+	sprintf(msg, "weighted: x integrated %.12f (3), its mean %.12f (0.5), area %.12f (6), %u edges' length off by %.1e, promoted off by %.1e",
+		(double)s[0], (double)a[0], (double)area[0], ne, eg, worst);
+	printf("  %s\n", msg);
+	TEST_ASSERT(vx && fa && fabs((double)s[0] - 3) < 1e-12 && fabs((double)a[0] - 0.5) < 1e-12 && fabs((double)area[0] - 6) < 1e-12 && ne == 18 && eg < 1e-12
+		&& worst < 1e-12, msg);
+	free(vx); free(fa);
+	qaws_mesh_3d_destroy(m);
+}
+
 int test_186_mesh_promote_main(void)
 {
 	g_pass = 0;
@@ -182,6 +244,7 @@ int test_186_mesh_promote_main(void)
 	printf("Test 186: attribute promotion\n");
 	test_relations();
 	test_reduce_and_rules();
+	test_weighted();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

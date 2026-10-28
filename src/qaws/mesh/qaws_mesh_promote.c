@@ -36,12 +36,17 @@ static int pmo_cmp_rec(void const* a, void const* b)
 }
 
 /* the method over the sources src (ns of them, values vals of n components each) into out, the giving source into *idx;
-   w and tmp: ns scratch each */
+   ms (NULL: none) each source's measure, weighing AVERAGE, SUM, SUM_OF_SQUARES and RMS; w and tmp: ns scratch each */
 static void pmo_combine(double* out, int* idx, double const* vals, unsigned int const* src, unsigned int ns, unsigned int n, unsigned int rule,
-	qaws_promote_method method, double* w, double* tmp)
+	qaws_promote_method method, double const* ms, double* w, double* tmp)
 {
 	unsigned int i, k;
+	double tw = 0;
 	*idx = -1;
+	for (i = 0; ms && i < ns; i++)
+		tw += ms[src[i]];
+	if (ms && !(tw > 0))
+		ms = NULL;   /* (no measure at all: as unweighted) */
 	for (k = 0; k < n; k++)
 		out[k] = 0;
 	if (!ns)
@@ -66,7 +71,7 @@ static void pmo_combine(double* out, int* idx, double const* vals, unsigned int 
 		break;
 	case QAWS_PROMOTE_AVERAGE:
 		for (i = 0; i < ns; i++)
-			w[i] = 1.0 / ns;
+			w[i] = ms ? ms[src[i]] / tw : 1.0 / ns;
 		hm_blend(out, vals, n, src, w, ns, n, rule);
 		break;
 	case QAWS_PROMOTE_MODE:
@@ -121,9 +126,9 @@ static void pmo_combine(double* out, int* idx, double const* vals, unsigned int 
 			for (i = 0; i < ns; i++)
 			{
 				double v = vals[(size_t)n * src[i] + k];
-				s += method == QAWS_PROMOTE_SUM ? v : v * v;
+				s += (ms ? ms[src[i]] : 1) * (method == QAWS_PROMOTE_SUM ? v : v * v);
 			}
-			out[k] = method == QAWS_PROMOTE_RMS ? sqrt(s / ns) : s;
+			out[k] = method == QAWS_PROMOTE_RMS ? sqrt(s / (ms ? tw : ns)) : s;
 		}
 		break;
 	case QAWS_PROMOTE_FIRST:
@@ -145,6 +150,69 @@ static unsigned int pmo_count(qaws_mesh_3d const* m, unsigned int el)
 {
 	return el == QAWS_MESH_VERTEX ? qaws_mesh_3d_get_vertex_count(m) : el == QAWS_MESH_CORNER ? qaws_mesh_3d_get_corner_count(m)
 		: el == QAWS_MESH_FACE ? qaws_mesh_3d_get_face_count(m) : qaws_mesh_3d_get_edge_count(m);
+}
+
+/* each element's measure (scratch, the caller frees it; NULL on failure): a face its area (its fan's), a corner its face's
+   over the face's corner count, a vertex the sum of its corners', an edge its length */
+static double* pmo_measures(qaws_mesh_3d const* m, unsigned int el)
+{
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), nf = qaws_mesh_3d_get_face_count(m), nc = qaws_mesh_3d_get_corner_count(m), ne = qaws_mesh_3d_get_edge_count(m);
+	unsigned int cnt = pmo_count(m, el), i, j, c, k;
+	double* ms = (double*)qaws_internal_scratch_zalloc((size_t)cnt + 1, sizeof(double));
+	qaws_scalar* x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nv + 1));
+	unsigned int *fv = NULL, *fs = NULL, *e = NULL;
+	if (!ms || !x)
+		goto fail;
+	qaws_mesh_3d_get_positions(x, m);
+	if (el == QAWS_MESH_EDGE)
+	{
+		if (!(e = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, (size_t)ne + 1))))
+			goto fail;
+		qaws_mesh_3d_get_edges(e, m);
+		for (i = 0; i < ne; i++)
+		{
+			double d2 = 0;
+			for (k = 0; k < 3; k++)
+			{
+				double d = (double)x[3 * (size_t)e[2 * (size_t)i + 1] + k] - (double)x[3 * (size_t)e[2 * (size_t)i] + k];
+				d2 += d * d;
+			}
+			ms[i] = sqrt(d2);
+		}
+		qaws_internal_free(e);
+		qaws_internal_free(x);
+		return ms;
+	}
+	fv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nc + 1));
+	fs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nf + 1));
+	if (!fv || !fs)
+		goto fail;
+	qaws_mesh_3d_get_faces(fv, fs, m);
+	for (i = 0, c = 0; i < nf; c += fs[i++])
+	{
+		double a = 0;
+		for (j = 1; j + 1 < fs[i]; j++)
+		{
+			double u[3], w[3], n[3];
+			for (k = 0; k < 3; k++)
+			{
+				u[k] = (double)x[3 * (size_t)fv[c + j] + k] - (double)x[3 * (size_t)fv[c] + k];
+				w[k] = (double)x[3 * (size_t)fv[c + j + 1] + k] - (double)x[3 * (size_t)fv[c] + k];
+			}
+			n[0] = u[1] * w[2] - u[2] * w[1]; n[1] = u[2] * w[0] - u[0] * w[2]; n[2] = u[0] * w[1] - u[1] * w[0];
+			a += 0.5 * sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		}
+		if (el == QAWS_MESH_FACE)
+			ms[i] = a;
+		else
+			for (j = 0; j < fs[i]; j++)
+				ms[el == QAWS_MESH_CORNER ? c + j : fv[c + j]] += a / fs[i];
+	}
+	qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(x);
+	return ms;
+fail:
+	qaws_internal_free(ms); qaws_internal_free(x); qaws_internal_free(fv); qaws_internal_free(fs); qaws_internal_free(e);
+	return NULL;
 }
 
 /* the (target, source) pairs of the relation to <- from, sorted and unique, into *out (target << 32 | source), their count;
@@ -255,7 +323,7 @@ qaws_status qaws_mesh_3d_promote_attribute(qaws_mesh_3d* mesh, qaws_attribute_pr
 	unsigned int id, pid = 0, from, to, n, cs, ct, np, i, k, j;
 	char const* out_name;
 	qaws_scalar *sv = NULL, *ov = NULL, *pv = NULL, *iv = NULL;
-	double *dv = NULL, *w = NULL, *tmp = NULL, *pc = NULL, y[16];
+	double *dv = NULL, *w = NULL, *tmp = NULL, *pc = NULL, *ms = NULL, y[16];
 	unsigned long long* pairs = NULL;
 	unsigned int *off = NULL, *gather = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -285,7 +353,7 @@ qaws_status qaws_mesh_3d_promote_attribute(qaws_mesh_3d* mesh, qaws_attribute_pr
 	ov = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), n, (size_t)ct + 1));
 	iv = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), (size_t)ct + 1));
 	off = (unsigned int*)qaws_internal_scratch_zalloc((size_t)ct + 2, sizeof(unsigned int));
-	if (!sv || !dv || !ov || !iv || !off)
+	if (!sv || !dv || !ov || !iv || !off || (desc->weighted && !(ms = pmo_measures(mesh, from))))
 		goto done;
 	qaws_mesh_3d_get_attribute(sv, mesh, id);
 	for (i = 0; i < n * cs; i++)
@@ -309,7 +377,7 @@ qaws_status qaws_mesh_3d_promote_attribute(qaws_mesh_3d* mesh, qaws_attribute_pr
 		for (i = 0; i < ct; i++)
 		{
 			int ix;
-			pmo_combine(y, &ix, dv, gather + off[i], off[i + 1] - off[i], n, (unsigned int)sd.rule, desc->method, w, tmp);
+			pmo_combine(y, &ix, dv, gather + off[i], off[i + 1] - off[i], n, (unsigned int)sd.rule, desc->method, ms, w, tmp);
 			for (k = 0; k < n; k++)
 				ov[(size_t)n * i + k] = (qaws_scalar)y[k];
 			iv[i] = (qaws_scalar)ix;
@@ -353,7 +421,7 @@ qaws_status qaws_mesh_3d_promote_attribute(qaws_mesh_3d* mesh, qaws_attribute_pr
 			for (u = 0, m2 = 0; u < ns; u++)
 				if (!m2 || src[u] != src[m2 - 1])
 					src[m2++] = src[u];
-			pmo_combine(y, &ix, dv, src, m2, n, (unsigned int)sd.rule, desc->method, w, tmp);
+			pmo_combine(y, &ix, dv, src, m2, n, (unsigned int)sd.rule, desc->method, ms, w, tmp);
 			for (u = i; u < j; u++)
 			{
 				unsigned int t = (unsigned int)pc[2 * (size_t)u + 1];
@@ -389,16 +457,16 @@ qaws_status qaws_mesh_3d_promote_attribute(qaws_mesh_3d* mesh, qaws_attribute_pr
 	}
 done:
 	qaws_internal_free(sv); qaws_internal_free(dv); qaws_internal_free(ov); qaws_internal_free(iv); qaws_internal_free(off); qaws_internal_free(pairs);
-	qaws_internal_free(gather); qaws_internal_free(w); qaws_internal_free(tmp); qaws_internal_free(pv); qaws_internal_free(pc);
+	qaws_internal_free(gather); qaws_internal_free(w); qaws_internal_free(tmp); qaws_internal_free(pv); qaws_internal_free(pc); qaws_internal_free(ms);
 	return st;
 }
 
-qaws_status qaws_mesh_3d_reduce_attribute(qaws_scalar* out_values, int* out_index, qaws_mesh_3d const* mesh, char const* name, qaws_promote_method method)
+static qaws_status pmo_reduce(qaws_scalar* out_values, int* out_index, qaws_mesh_3d const* mesh, char const* name, qaws_promote_method method, int weighted)
 {
 	qaws_attribute_desc sd;
 	unsigned int id, cs, n, i;
 	qaws_scalar* sv;
-	double *dv, *w, *tmp, y[16];
+	double *dv, *w, *tmp, *ms = NULL, y[16];
 	unsigned int* all;
 	int ix;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -412,20 +480,33 @@ qaws_status qaws_mesh_3d_reduce_attribute(qaws_scalar* out_values, int* out_inde
 	w = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)cs + 1));
 	tmp = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), (size_t)cs + 1));
 	all = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)cs + 1));
-	if (sv && dv && w && tmp && all)
+	if (weighted)
+		ms = pmo_measures(mesh, (unsigned int)sd.element);
+	if (sv && dv && w && tmp && all && (!weighted || ms))
 	{
 		qaws_mesh_3d_get_attribute(sv, mesh, id);
 		for (i = 0; i < n * cs; i++)
 			dv[i] = (double)sv[i];
 		for (i = 0; i < cs; i++)
 			all[i] = i;
-		pmo_combine(y, &ix, dv, all, cs, n, (unsigned int)sd.rule, method, w, tmp);
+		pmo_combine(y, &ix, dv, all, cs, n, (unsigned int)sd.rule, method, ms, w, tmp);
 		for (i = 0; i < n; i++)
 			out_values[i] = (qaws_scalar)y[i];
 		if (out_index)
 			*out_index = ix;
 		st = QAWS_STATUS_OK;
 	}
-	qaws_internal_free(sv); qaws_internal_free(dv); qaws_internal_free(w); qaws_internal_free(tmp); qaws_internal_free(all);
+	qaws_internal_free(sv); qaws_internal_free(dv); qaws_internal_free(w); qaws_internal_free(tmp); qaws_internal_free(all); qaws_internal_free(ms);
 	return st;
+}
+
+qaws_status qaws_mesh_3d_reduce_attribute(qaws_scalar* out_values, int* out_index, qaws_mesh_3d const* mesh, char const* name, qaws_promote_method method)
+{
+	return pmo_reduce(out_values, out_index, mesh, name, method, 0);
+}
+
+qaws_status qaws_mesh_3d_reduce_attribute_weighted(qaws_scalar* out_values, int* out_index, qaws_mesh_3d const* mesh, char const* name,
+	qaws_promote_method method)
+{
+	return pmo_reduce(out_values, out_index, mesh, name, method, 1);
 }

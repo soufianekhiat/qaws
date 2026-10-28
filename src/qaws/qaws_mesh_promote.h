@@ -35,7 +35,13 @@
  * a NORMAL renormalized, colours averaged in their space, quaternions on one
  * side): MAXIMUM, MINIMUM, AVERAGE, MODE (the most common value, a tie the
  * least), MEDIAN (an even count: the higher middle), SUM, SUM_OF_SQUARES,
- * RMS, FIRST and LAST (the source of least and greatest index). The index
+ * RMS, FIRST and LAST (the source of least and greatest index). Weighted
+ * (desc.weighted), each source counts by its measure in AVERAGE, SUM,
+ * SUM_OF_SQUARES and RMS: a face its area, a corner its face's over the
+ * face's corner count, a vertex the sum of its corners', an edge its length
+ * (a weighted SUM of a face or vertex attribute over the mesh is its
+ * integral over the surface, exact for values linear on each triangle). The
+ * index
  * attribute, when named, receives the source element that gave the value
  * (MAXIMUM and MINIMUM: the first component's; MODE, FIRST, LAST; others
  * none, -1). An element no source meets (an isolated vertex) takes zeros.
@@ -67,6 +73,7 @@ typedef struct qaws_attribute_promote_desc
 	int delete_original;                /* nonzero: the original removed (always when the names are one) */
 	char const* piece;                  /* NULL, or a 1-component attribute of the target element: its equal values pieces */
 	char const* index_name;             /* NULL, or an attribute to receive the index of the source that gave each value */
+	int weighted;                       /* nonzero: sources weighed by their area or length (see above) */
 } qaws_attribute_promote_desc;
 
 /* INVALID_ARGUMENT for no such attribute, an unknown element or method, the same element without a piece, a piece that is
@@ -76,6 +83,11 @@ qaws_status qaws_mesh_3d_promote_attribute(qaws_mesh_3d* mesh, qaws_attribute_pr
 /* The whole mesh's value (Houdini's detail class): the method over every element of the attribute into out_values (its
    components), out_index (may be NULL) the element that gave it (or -1). INVALID_ARGUMENT as above. */
 qaws_status qaws_mesh_3d_reduce_attribute(qaws_scalar* out_values, int* out_index, qaws_mesh_3d const* mesh, char const* name,
+	qaws_promote_method method);
+
+/* The same, each element weighed by its measure (as desc.weighted): SUM the attribute's integral over the surface (an edge
+   attribute's along the edges), AVERAGE its mean by area (length). */
+qaws_status qaws_mesh_3d_reduce_attribute_weighted(qaws_scalar* out_values, int* out_index, qaws_mesh_3d const* mesh, char const* name,
 	qaws_promote_method method);
 
 #endif /* QAWS_MESH_PROMOTE_H */

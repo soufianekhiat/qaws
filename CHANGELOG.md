@@ -187,6 +187,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Weighted promotion: `qaws_attribute_promote_desc.weighted` and `qaws_mesh_3d_reduce_attribute_weighted` weigh each source
+  by its area (a face; a corner its share; a vertex the sum of its corners') or length (an edge) in AVERAGE, SUM,
+  SUM_OF_SQUARES and RMS: a weighted SUM over the mesh is the attribute's integral over the surface. Test 186.
 - Sweeps by slabs find every pass: with `PASSES` or `DWELL` generated or a combine other than `FIRST`, the result's values
   come per vertex from the motion (the runs of time the body is within twice the tolerance, as the implicit sweep finds
   them), no longer the first touch alone. Test 184.

@@ -34,9 +34,14 @@ which qaws does not have.
 - `index_name`: an attribute (NEAREST, one component) receiving the source element that gave each value (`MAXIMUM` and
   `MINIMUM`: the first component's; `MODE`, `FIRST`, `LAST`); -1 for the others.
 - `new_name`, `delete_original`: the original is removed when asked, and always when the names are one.
+- `weighted`: each source counts by its measure in `AVERAGE`, `SUM`, `SUM_OF_SQUARES` and `RMS`: a face its area, a
+  corner its face's over the face's corner count, a vertex the sum of its corners', an edge its length. The others are
+  unweighted.
 
 **The whole mesh.** Houdini's detail class has no element here: `qaws_mesh_3d_reduce_attribute(values, &index, mesh, name,
-method)` writes the method over every element into the caller's buffer.
+method)` writes the method over every element into the caller's buffer; `qaws_mesh_3d_reduce_attribute_weighted` weighs
+them as `weighted` does: `SUM` is the attribute's integral over the surface (along the edges for an edge attribute),
+exact for values linear on each triangle, and `AVERAGE` its mean by area.
 
 **Refused** (INVALID_ARGUMENT): no such attribute, an unknown element or method, the same element without a piece, a
 piece that is not a one-component attribute of the target element, a new name another attribute holds.
@@ -45,7 +50,9 @@ piece that is not a one-component attribute of the target element, a new name an
 face numbers to vertices by `MAXIMUM` with the index (exact), corner values to vertices by `AVERAGE` (1.8e-15), the
 height to edges by `SUM` (exact), face numbers averaged per side through a piece (exact); reduce of 1 2 2 3 3 3 7 7:
 `MODE` 3 from vertex 3, `MEDIAN` 3, `RMS` sqrt(134 / 8), `MAXIMUM` 7 from vertex 6; a vertex `NORMAL` averaged to faces
-stays unit; the refusals.
+stays unit; the refusals; weighted: x integrated over the cube's surface 3 and its mean 0.5 (exact), the area 6, the
+edges' length 12 + 6 sqrt 2, a face 1 summed onto the vertices (their faces' area) and x averaged onto the faces by area
+shares (1.1e-16).
 
 **Figure 75** (key `!`, `qaws_meshing_showcase`): a ball with a colour per face in six regions, promoted to vertices by
 `AVERAGE` (the borders blend) and by `MODE` (each vertex one region's colour), and a field averaged per region through a
