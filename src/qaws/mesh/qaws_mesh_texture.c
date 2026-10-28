@@ -8,6 +8,7 @@
 #include "../internal/qaws_internal_memory.h"
 #include "../qaws_mesh_texture.h"
 #include "../qaws_mesh_bvh.h"
+#include "../qaws_inspect.h"
 #include "qaws_mesh_internal.h"
 #include <stdlib.h>
 #include <string.h>
@@ -36,18 +37,38 @@ static void tx_faces_free(tx_faces* t)
 
 static qaws_status tx_faces_read(tx_faces* t, qaws_mesh_3d const* m, qaws_texture_desc const* desc)
 {
-	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), id, i, c;
+	unsigned int nv = qaws_mesh_3d_get_vertex_count(m), id = 0, i, c;
 	qaws_attribute_desc ad;
 	qaws_scalar* v = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
+	qaws_mesh_location* loc = NULL;
+	int foot = desc && desc->footpoints;
 	memset(t, 0, sizeof *t);
 	t->nf = qaws_mesh_3d_get_face_count(m);
 	t->nc = qaws_mesh_3d_get_corner_count(m);
-	if (qaws_mesh_3d_find_attribute(&id, m, desc && desc->uv ? desc->uv : "uv") != QAWS_STATUS_OK)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	qaws_mesh_3d_get_attribute_desc(&ad, m, id);
-	if (ad.components != 2 || (ad.element != QAWS_MESH_CORNER && ad.element != QAWS_MESH_VERTEX))
-		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (foot)
+	{
+		/* (the patch's own (u, v), from the footpoints, over its domain) */
+		if (!((double)desc->domain[1] != (double)desc->domain[0]) || !((double)desc->domain[3] != (double)desc->domain[2]))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		loc = (qaws_mesh_location*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_mesh_location), (size_t)nv + 1));
+		if (!loc)
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		if (qaws_mesh_3d_get_footpoints(loc, m) != QAWS_STATUS_OK)
+		{
+			qaws_internal_free(loc);
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		}
+		ad.element = QAWS_MESH_VERTEX;
+	}
+	else
+	{
+		if (qaws_mesh_3d_find_attribute(&id, m, desc && desc->uv ? desc->uv : "uv") != QAWS_STATUS_OK)
+			return QAWS_STATUS_INVALID_ARGUMENT;
+		qaws_mesh_3d_get_attribute_desc(&ad, m, id);
+		if (ad.components != 2 || (ad.element != QAWS_MESH_CORNER && ad.element != QAWS_MESH_VERTEX))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	}
 	t->fv = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)t->nc + 1));
 	t->fs = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)t->nf + 1));
 	t->fo = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)t->nf + 1));
@@ -59,14 +80,54 @@ static qaws_status tx_faces_read(tx_faces* t, qaws_mesh_3d const* m, qaws_textur
 	qaws_mesh_3d_get_faces(t->fv, t->fs, m);
 	for (i = 0, c = 0; i < t->nf; c += t->fs[i++])
 		t->fo[i] = c;
-	qaws_mesh_3d_get_attribute(v, m, id);
-	for (c = 0; c < t->nc; c++)
-	{
-		unsigned int e = ad.element == QAWS_MESH_CORNER ? c : t->fv[c];
-		t->uv[2 * (size_t)c] = (double)v[2 * (size_t)e];
-		t->uv[2 * (size_t)c + 1] = (double)v[2 * (size_t)e + 1];
-	}
 	memset(t->use, 1, t->nf);
+	if (foot)
+	{
+		double u0 = (double)desc->domain[0], du = (double)desc->domain[1] - u0, v0 = (double)desc->domain[2], dv = (double)desc->domain[3] - v0;
+		for (c = 0; c < t->nc; c++)
+		{
+			qaws_mesh_location const* l = loc + t->fv[c];
+			t->uv[2 * (size_t)c] = ((double)l->a - u0) / du;
+			t->uv[2 * (size_t)c + 1] = ((double)l->b - v0) / dv;
+		}
+		/* (a face counts when its corners all lie on the patch; given its surface, when one does, the others projected) */
+		for (i = 0; i < t->nf; i++)
+		{
+			unsigned int on = 0;
+			for (c = t->fo[i]; c < t->fo[i] + t->fs[i]; c++)
+				on += loc[t->fv[c]].patch == desc->patch;
+			if (on == t->fs[i])
+				continue;
+			if (!on || !desc->surface)
+			{
+				t->use[i] = 0;
+				continue;
+			}
+			for (c = t->fo[i]; c < t->fo[i] + t->fs[i]; c++)
+				if (loc[t->fv[c]].patch != desc->patch)
+				{
+					qaws_scalar pu, pv;
+					qaws_vec3 cp;
+					if (qaws_surface_find_closest_point(&pu, &pv, &cp, desc->surface, qaws_mesh_3d_get_vertex(m, t->fv[c])) != QAWS_STATUS_OK)
+					{
+						t->use[i] = 0;
+						break;
+					}
+					t->uv[2 * (size_t)c] = ((double)pu - u0) / du;
+					t->uv[2 * (size_t)c + 1] = ((double)pv - v0) / dv;
+				}
+		}
+	}
+	else
+	{
+		qaws_mesh_3d_get_attribute(v, m, id);
+		for (c = 0; c < t->nc; c++)
+		{
+			unsigned int e = ad.element == QAWS_MESH_CORNER ? c : t->fv[c];
+			t->uv[2 * (size_t)c] = (double)v[2 * (size_t)e];
+			t->uv[2 * (size_t)c + 1] = (double)v[2 * (size_t)e + 1];
+		}
+	}
 	if (desc && desc->texture_id)
 	{
 		if (qaws_mesh_3d_find_attribute(&id, m, desc->texture_id) != QAWS_STATUS_OK)
@@ -82,12 +143,14 @@ static qaws_status tx_faces_read(tx_faces* t, qaws_mesh_3d const* m, qaws_textur
 		}
 		qaws_mesh_3d_get_attribute(v, m, id);
 		for (i = 0; i < t->nf; i++)
-			t->use[i] = (unsigned char)((double)v[i] == (double)desc->id);
+			t->use[i] &= (unsigned char)((double)v[i] == (double)desc->id);
 	}
 	qaws_internal_free(v);
+	qaws_internal_free(loc);
 	return QAWS_STATUS_OK;
 fail:
 	qaws_internal_free(v);
+	qaws_internal_free(loc);
 	tx_faces_free(t);
 	return st;
 }

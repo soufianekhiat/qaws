@@ -15,6 +15,7 @@
 #define QAWS_MESH_TEXTURE_H
 
 #include "qaws_mesh.h"
+#include "qaws_surface_types.h"
 
 /*
  * Texture attributes: an attribute held on a grid of texels over a mesh's
@@ -30,6 +31,18 @@
  * texture stays valid on the meshes made from it. With a face attribute of
  * texture ids (texture_id, one component), only the faces of one id are
  * baked or read: a Boolean of two textured meshes keeps each face's id.
+ *
+ * Or a texture over a surface patch's own (u, v) (footpoints): each vertex's
+ * footpoint (qaws_mesh_3d_get_footpoints: generated meshes, and the meshes
+ * Booleans make of them) mapped from the patch's domain to the unit square,
+ * only the faces whose corners all lie on the patch; a surface closed in u or
+ * v takes repeat_u or repeat_v (a triangle across its seam unwrapped). Such a
+ * texture belongs to the surface, not to any mesh: every mesh generated from
+ * it reads it alike. A vertex on a border between patches has one footpoint,
+ * on one of them: given the patch's surface, a face with a corner on the patch
+ * takes its other corners' (u, v) as their closest points on the surface
+ * (qaws_surface_find_closest_point), so the faces along the border count too;
+ * without it only faces wholly on the patch do.
  *
  * Texel (i, j) is at (j width + i) components in the array, its centre at
  * ((i + 0.5) / width, (j + 0.5) / height). Reading is bilinear between the
@@ -61,6 +74,10 @@ typedef struct qaws_texture_desc
 	char const* texture_id;             /* NULL, or a 1-component face attribute: only the faces whose value is id */
 	unsigned int id;
 	qaws_scalar max_distance;            /* baking from a source: texels whose point is farther from it left untouched; 0: no limit */
+	int footpoints;                     /* nonzero: a surface patch's texture: (u, v) from the vertices' footpoints, not uv */
+	unsigned int patch;                 /* footpoints: the patch; only faces whose corners all lie on it */
+	qaws_scalar domain[4];              /* footpoints: the patch's u0, u1, v0, v1, mapped to the texture's [0, 1] x [0, 1] */
+	qaws_surface const* surface;        /* footpoints, may be NULL: the patch's surface, for the faces along its border (below) */
 } qaws_texture_desc;
 
 /* The vertex, corner or face attribute name baked into texture (its size and components given, its texels written, its
