@@ -393,6 +393,10 @@ double swp_table_time(double const* tab, double angle);
    passes' values (n each) combined into out */
 unsigned int swp_combine_of(qaws_sweep_desc const* desc, char const* name);
 int swp_passes_wanted(qaws_sweep_desc const* desc);
+/* a sweep by slabs' attributes pass by pass (qaws_mesh_sweep_implicit.c): each out vertex's runs of time within reach of the
+   moving body (sampled as the implicit sweep's, reach its cells' 1.5), the body's values carried and generated per pass
+   and combined; the body's edge values left as they are */
+qaws_status swp_slab_passes(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_sweep_desc const* desc, double reach);
 void swp_combine(double* out, double const* vals, unsigned int np, unsigned int n, unsigned int rule, unsigned int combine);
 /* the sweep's track of an attribute by name (NULL: none); the tracks checked against the body (INVALID_ARGUMENT); element e's
    value of a track at t (count elements of n components, blended by rule) */

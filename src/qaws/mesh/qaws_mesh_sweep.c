@@ -1853,6 +1853,8 @@ qaws_status swp_carry(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, unsigned int 
 		qaws_mesh_3d_get_attribute(val, mesh, a);
 		if (d.element == QAWS_MESH_EDGE)
 		{
+			if (!edges && qaws_mesh_3d_find_attribute(&id, out, d.name) == QAWS_STATUS_OK)
+				continue;   /* (values out already has: a sweep by slabs carried again pass by pass) */
 			memset(sv, 0, sizeof(qaws_scalar) * n * (size_t)qaws_mesh_3d_get_edge_count(out));
 			if (edges)
 				st = swp_carry_edges(sv, val, n, out, tri, nto, mesh, fv, tc, cpo ? fsrc : csrc, cpo ? fw : cw, cpo ? fR : cR, xo);
@@ -2733,6 +2735,8 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 				st = swp_crease_features(*out, 0.5 * swp_feature_angle(mesh), mesh, sx, nv, report->slabs);   /* (half the input's softest crease: the slabs' chords bend far less) */
 			if (st == QAWS_STATUS_OK && *out && desc && desc->simplify)
 				st = swp_tidy(*out, tol);
+			if (st == QAWS_STATUS_OK && *out && swp_passes_wanted(desc) && (qaws_mesh_3d_get_attribute_count(mesh) || desc->generate))
+				st = swp_slab_passes(*out, mesh, motion, desc, 2 * tol);   /* (the slabs know only the first touch: every pass from the motion) */
 			qaws_mesh_3d_destroy(soup);
 		}
 		report->closed = report->boolean.closed;

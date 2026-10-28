@@ -187,6 +187,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Sweeps by slabs find every pass: with `PASSES` or `DWELL` generated or a combine other than `FIRST`, the result's values
+  come per vertex from the motion (the runs of time the body is within twice the tolerance, as the implicit sweep finds
+  them), no longer the first touch alone. Test 184.
 - STRUCTURED on trimmed faces of surfaces closed in u or v: a four-sided loop across the seam (each piece moved by whole
   periods), and a band between two rims (cut open along the segment joining their starts, welded back). Test 126, figure 80.
 

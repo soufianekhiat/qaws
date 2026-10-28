@@ -10,7 +10,8 @@
  *   - an attribute track: a vertex "heat" animated from 0 to 1 equals the generated time at every corner;
  *   - passes: a ball out along x and back (x = 3 t (1 - t), even about t = 0.5): most corners passed twice, at t and 1 - t
  *     (a ball's sweep is touched at an instant, unlike a face sliding along itself, touched over a span), so the heat track
- *     combined by SUM is 1 there (within the pass times' refinement), the others once;
+ *     combined by SUM is 1 there (within the pass times' refinement), the others once; the same swept by slabs (tolerance
+ *     0.01: the slabs know only the first touch, the passes found from the motion within twice the tolerance);
  *   - generated attributes (qaws_sweep_desc.generate): the cube moved by (1, 1, 0) at a constant rate: velocity (1, 1, 0)
  *     at every corner, distance sqrt 2 times the time, orientation the identity, and each corner its source point (its
  *     source_face and source_uv on the cube) moved by (time, time, 0), within a cell;
@@ -480,7 +481,7 @@ static qaws_mesh_3d* si_ball(double r, unsigned int nu, unsigned int nv)
 	return m;
 }
 
-static void test_passes(void)
+static void test_passes(int slabs)
 {
 	qaws_mesh_3d* c = si_ball(0.2, 24, 12), *o = NULL;
 	qaws_motion* m = NULL;
@@ -511,7 +512,13 @@ static void test_passes(void)
 	d.tracks = &tr; d.track_count = 1;
 	d.combines = &cb; d.combine_count = 1;
 	d.generate = QAWS_SWEEP_GENERATE_PASSES;
-	qaws_mesh_3d_sweep_implicit(&o, NULL, c, m, &d);
+	if (slabs)
+	{
+		d.tolerance = (qaws_scalar)0.01;
+		qaws_mesh_3d_sweep(&o, NULL, c, m, &d);
+	}
+	else
+		qaws_mesh_3d_sweep_implicit(&o, NULL, c, m, &d);
 	if (o)
 	{
 		nc = qaws_mesh_3d_get_corner_count(o);
@@ -529,7 +536,7 @@ static void test_passes(void)
 		else
 			more++;
 	}
-	sprintf(msg, "passes there and back: %u corners passed twice (heat summed off 1 by %.3f), %u once, %u other", two, wh, one, more);
+	sprintf(msg, "passes there and back%s: %u corners passed twice (heat summed off 1 by %.3f), %u once, %u other", slabs ? " (by slabs)" : "", two, wh, one, more);
 	printf("  %s\n", msg);
 	TEST_ASSERT(o && pv && hv && two > nc / 2 && wh < 0.05 && !more, msg);
 	free(pv); free(hv); free(zero); free(keys);
@@ -547,7 +554,8 @@ int test_184_sweep_implicit_main(void)
 	test_attributes();
 	test_generate();
 	test_track();
-	test_passes();
+	test_passes(0);
+	test_passes(1);
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

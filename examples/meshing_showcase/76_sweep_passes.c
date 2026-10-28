@@ -1,12 +1,14 @@
 /*
  * Figure 76: passes over one place (qaws_sweep_desc.combines, the
- * generated "passes" and "dwell"), swept implicitly.
+ * generated "passes" and "dwell"), swept implicitly, and by slabs.
  *   - a box beside z turning three turns while drifting along x: each place
  *     coloured by how many turns passed over it;
  *   - the same by the time it stayed within reach (dwell);
  *   - a ball out along x and back the way it came: "time" combined FIRST,
  *     the way out (0 to 0.5);
- *   - the same combined LAST: the way back (1 to 0.5), the far end once.
+ *   - the same combined LAST: the way back (1 to 0.5), the far end once;
+ *   - the same swept by slabs (tolerance 0.005), combined LAST: the passes
+ *     found from the motion as the implicit sweep finds them.
  * Printed: the ranges.
  */
 
@@ -32,7 +34,7 @@ static double* ms_ps_colours(qaws_mesh_3d const* m, char const* name, double lo,
 
 static void demo_sweep_passes(void)
 {
-	er_canvas* c = er_create(2400, 640, 3, 252, 252, 250);
+	er_canvas* c = er_create(3000, 640, 3, 252, 252, 250);
 	qaws_motion_pose s, e;
 	qaws_motion* m = NULL;
 	qaws_sweep_desc d;
@@ -85,20 +87,22 @@ static void demo_sweep_passes(void)
 		s.velocity.x = 3;
 		e.velocity.x = -3;   /* (x = 3 t (1 - t): back the way it came) */
 		qaws_motion_create_poses(&m, &s, &e, 0);
-		for (pass = 0; pass < 2; pass++)
+		for (pass = 0; pass < 3; pass++)
 		{
 			memset(&d, 0, sizeof d);
 			d.resolution = 64;
 			d.generate = QAWS_SWEEP_GENERATE_TIME;
 			cb.name = "time";
 			cb.combine = pass ? QAWS_SWEEP_COMBINE_LAST : QAWS_SWEEP_COMBINE_FIRST;
+			d.tolerance = (qaws_scalar)0.005;
 			d.combines = &cb;
 			d.combine_count = 1;
 			o = NULL;
-			if (qaws_mesh_3d_sweep_implicit(&o, NULL, ball, m, &d) == QAWS_STATUS_OK && o && (cc = ms_ps_colours(o, "time", 0, 1, &lo, &hi)) != NULL)
+			if ((pass == 2 ? qaws_mesh_3d_sweep(&o, NULL, ball, m, &d) : qaws_mesh_3d_sweep_implicit(&o, NULL, ball, m, &d)) == QAWS_STATUS_OK && o &&
+				(cc = ms_ps_colours(o, "time", 0, 1, &lo, &hi)) != NULL)
 			{
 				sprintf(sub, "\"time\" %s: %.2f to %.2f", pass ? "LAST" : "FIRST", lo, hi);
-				ms_panel(c, 1200 + 600 * (int)pass, 0, 600, 640, o, -0.3, 1.1, pass ? "out and back: the last pass" : "out and back: the first pass", sub);
+				ms_panel(c, 1200 + 600 * (int)pass, 0, 600, 640, o, -0.3, 1.1, pass == 2 ? "by slabs: the last pass" : pass ? "out and back: the last pass" : "out and back: the first pass", sub);
 				ms_at_draw(c, o, cc, NULL, NULL, NULL, 0);
 				printf("  %s\n", sub);
 				free(cc);

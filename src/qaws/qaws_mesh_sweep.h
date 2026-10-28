@@ -111,8 +111,9 @@
      DISTANCE     "distance" (LINEAR): the length its origin had travelled by then;
      SOURCE       "source_face" (NEAREST): the body's face of that point, and "source_uv" (LINEAR, 2): the point's weights on
                   the face's triangle's second and third corners (any of the body's values can be looked up from them);
-     PASSES       "passes" (NEAREST): how many times the body passed there (see qaws_sweep_combine; by slabs 1);
-     DWELL        "dwell" (LINEAR): the time it stayed within reach over them (the implicit sweep: within 1.5 cells; else 0).
+     PASSES       "passes" (NEAREST): how many times the body passed there (see qaws_sweep_combine);
+     DWELL        "dwell" (LINEAR): the time it stayed within reach over them (the implicit sweep: within 1.5 cells; by slabs:
+                  within twice the tolerance; a spin 0).
    A vertex motion has no turn, pose or origin: INDEX, ANGLE and DISTANCE 0, ORIENTATION the identity, POSITION 0 (its
    VELOCITY the point's). A generated name replaces an attribute of that name on the body. */
 #ifndef QAWS_ENUM_QAWS_SWEEP_GENERATE
@@ -134,7 +135,8 @@ typedef enum qaws_sweep_generate
 
 /* How the values of the passes over one place combine (qaws_sweep_desc.combines, per attribute by name: the body's, a
    track's or a generated one). A place is passed again when the body comes back to it: a spin each turn, the implicit
-   sweep each run of time it comes within 1.5 cells; by slabs only the first pass is known. FIRST (the default) the first
+   sweep each run of time it comes within 1.5 cells, a sweep by slabs within twice the tolerance (with passes wanted, its
+   values found per vertex from the motion as the implicit sweep's, the slabs knowing only the first touch). FIRST (the default) the first
    touch's; LAST the last pass's; MINIMUM, MAXIMUM and SUM per component; AVERAGE by the attribute's rule. */
 #ifndef QAWS_ENUM_QAWS_SWEEP_COMBINE
 #define QAWS_ENUM_QAWS_SWEEP_COMBINE

@@ -815,120 +815,157 @@ done:
 	return st;
 }
 
-qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion,
-	qaws_sweep_desc const* desc)
+/* the context for a mesh under a motion: its triangles, positions and BVH buffers; the box of every position (65 times, grown by
+   the most a vertex moves between them) and that speed (half again) */
+static qaws_status swi_open(swi_ctx* c, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_sweep_desc const* desc, double* lo, double* hi, double* vmax)
 {
-	qaws_sweep_report local;
-	swi_ctx c;
-	wt_contour_info info;
-	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, vmax = 0, ext = 0, cell, step, slack;
-	unsigned int i, j, k, res = desc && desc->resolution ? desc->resolution : 64, maxs = desc && desc->max_slabs ? desc->max_slabs : 4096;
+	unsigned int i, j, k;
+	double slack;
 	qaws_scalar* vel = NULL;
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
-	if (!report)
-		report = &local;
-	memset(report, 0, sizeof *report);
-	if (!out_mesh || !mesh || !motion)
+	memset(c, 0, sizeof *c);
+	c->m = motion;
+	c->pv = qaws_motion_is_per_vertex(motion);
+	c->nv = qaws_mesh_3d_get_vertex_count(mesh);
+	c->nt = qaws_mesh_3d_get_triangle_count(mesh);
+	c->ex = desc ? desc->executor : NULL;
+	c->cur = ~0u;
+	if (!c->nt || (c->pv && qaws_motion_get_vertex_count(motion) != c->nv) || swp_tracks_check(desc, mesh) != QAWS_STATUS_OK)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	*out_mesh = NULL;
-	memset(&c, 0, sizeof c);
-	memset(&info, 0, sizeof info);
-	c.m = motion;
-	c.pv = qaws_motion_is_per_vertex(motion);
-	c.nv = qaws_mesh_3d_get_vertex_count(mesh);
-	c.nt = qaws_mesh_3d_get_triangle_count(mesh);
-	c.ex = desc ? desc->executor : NULL;
-	c.cur = ~0u;
-	if (!c.nt || (c.pv && qaws_motion_get_vertex_count(motion) != c.nv) || swp_tracks_check(desc, mesh) != QAWS_STATUS_OK)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-	c.t = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 3 * (size_t)c.nt + 1));
-	c.x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c.nv + 1));
-	c.buf = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c.nv + 1));
-	vel = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c.nv + 1));
-	c.q = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * 4 * SWI_CHUNK);
-	c.h = (qaws_mesh_hit*)qaws_internal_scratch_malloc(sizeof(qaws_mesh_hit) * SWI_CHUNK);
-	c.best = (double*)qaws_internal_scratch_malloc(sizeof(double) * 8 * SWI_CHUNK);
-	c.bj = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * 3 * SWI_CHUNK);
-	if (!c.t || !c.x || !c.buf || !vel || !c.q || !c.h || !c.best || !c.bj)
+	c->t = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), 3 * (size_t)c->nt + 1));
+	c->x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c->nv + 1));
+	c->buf = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c->nv + 1));
+	vel = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_scalar), 3 * (size_t)c->nv + 1));
+	c->q = (qaws_scalar*)qaws_internal_scratch_malloc(sizeof(qaws_scalar) * 4 * SWI_CHUNK);
+	c->h = (qaws_mesh_hit*)qaws_internal_scratch_malloc(sizeof(qaws_mesh_hit) * SWI_CHUNK);
+	c->best = (double*)qaws_internal_scratch_malloc(sizeof(double) * 8 * SWI_CHUNK);
+	c->bj = (unsigned int*)qaws_internal_scratch_malloc(sizeof(unsigned int) * 3 * SWI_CHUNK);
+	if (!c->t || !c->x || !c->buf || !vel || !c->q || !c->h || !c->best || !c->bj)
 		goto done;
-	c.d = c.q + 3 * SWI_CHUNK;
-	c.bt = c.best + SWI_CHUNK;
-	c.hp = c.best + 2 * SWI_CHUNK;
-	c.hw = c.best + 5 * SWI_CHUNK;
-	c.idx = c.bj + SWI_CHUNK;
-	c.htri = c.bj + 2 * SWI_CHUNK;
-	qaws_mesh_3d_get_triangles(c.t, mesh);
-	qaws_mesh_3d_get_positions(c.x, mesh);
-	/* the fastest vertex and the box of every position (65 times, grown by the most a vertex moves between them) */
+	c->d = c->q + 3 * SWI_CHUNK;
+	c->bt = c->best + SWI_CHUNK;
+	c->hp = c->best + 2 * SWI_CHUNK;
+	c->hw = c->best + 5 * SWI_CHUNK;
+	c->idx = c->bj + SWI_CHUNK;
+	c->htri = c->bj + 2 * SWI_CHUNK;
+	qaws_mesh_3d_get_triangles(c->t, mesh);
+	qaws_mesh_3d_get_positions(c->x, mesh);
+	for (k = 0; k < 3; k++)
+	{
+		lo[k] = HUGE_VAL;
+		hi[k] = -HUGE_VAL;
+	}
+	*vmax = 0;
 	for (i = 0; i <= 64; i++)
 	{
-		if ((st = qaws_motion_transform_points(c.buf, vel, motion, (qaws_scalar)(i / 64.0), c.pv ? NULL : c.x, c.nv)) != QAWS_STATUS_OK)
+		if ((st = qaws_motion_transform_points(c->buf, vel, motion, (qaws_scalar)(i / 64.0), c->pv ? NULL : c->x, c->nv)) != QAWS_STATUS_OK)
 			goto done;
-		for (j = 0; j < c.nv; j++)
+		for (j = 0; j < c->nv; j++)
 		{
-			vmax = fmax(vmax, sqrt((double)vel[3 * j] * vel[3 * j] + (double)vel[3 * j + 1] * vel[3 * j + 1] + (double)vel[3 * j + 2] * vel[3 * j + 2]));
+			*vmax = fmax(*vmax, sqrt((double)vel[3 * j] * vel[3 * j] + (double)vel[3 * j + 1] * vel[3 * j + 1] + (double)vel[3 * j + 2] * vel[3 * j + 2]));
 			for (k = 0; k < 3; k++)
 			{
-				lo[k] = fmin(lo[k], (double)c.buf[3 * (size_t)j + k]);
-				hi[k] = fmax(hi[k], (double)c.buf[3 * (size_t)j + k]);
+				lo[k] = fmin(lo[k], (double)c->buf[3 * (size_t)j + k]);
+				hi[k] = fmax(hi[k], (double)c->buf[3 * (size_t)j + k]);
 			}
 		}
 	}
-	vmax *= 1.5;
-	slack = vmax / 128;
+	*vmax *= 1.5;
+	slack = *vmax / 128;
 	for (k = 0; k < 3; k++)
 	{
 		lo[k] -= slack;
 		hi[k] += slack;
-		ext = fmax(ext, hi[k] - lo[k]);
 	}
-	cell = ext / res;
-	/* the samples: no vertex moving past two cells between two (refined between them; a vertex motion: a quarter cell, its
-	   values not refined) */
-	step = c.pv ? cell / 4 : 2 * cell;
-	c.ns = vmax > 0 ? (unsigned int)fmin((double)maxs, ceil(vmax / step)) + 1 : 1;
-	report->slabs = c.ns;
-	report->deviation = (qaws_scalar)(c.ns > 1 ? 0.5 * vmax / (c.ns - 1) : 0);
-	st = QAWS_STATUS_ALLOCATION_FAILURE;
-	c.ts = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), c.ns));
-	c.cen = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4, c.ns));
-	c.pose = c.pv ? NULL : (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 12, c.ns));
-	if (!c.ts || !c.cen || (!c.pv && !c.pose))
-		goto done;
-	for (j = 0; j < c.ns; j++)
+	st = QAWS_STATUS_OK;
+done:
+	qaws_internal_free(vel);
+	return st;
+}
+
+/* the samples: no vertex moving past two cells between two (refined between them; a vertex motion: a quarter cell, its values
+   not refined), at most maxs; their poses and bounding spheres; the BVH; ext the box's size */
+static qaws_status swi_times(swi_ctx* c, double cell, double vmax, unsigned int maxs, double ext)
+{
+	unsigned int i, j, k;
+	double step = c->pv ? cell / 4 : 2 * cell;
+	qaws_status st;
+	c->ns = vmax > 0 ? (unsigned int)fmin((double)maxs, ceil(vmax / step)) + 1 : 1;
+	c->ts = (double*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(double), c->ns));
+	c->cen = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 4, c->ns));
+	c->pose = c->pv ? NULL : (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), 12, c->ns));
+	if (!c->ts || !c->cen || (!c->pv && !c->pose))
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (j = 0; j < c->ns; j++)
 	{
-		double* s = c.cen + 4 * (size_t)j;
-		c.ts[j] = c.ns > 1 ? (double)j / (c.ns - 1) : 0;
-		if ((st = qaws_motion_transform_points(c.buf, NULL, motion, (qaws_scalar)c.ts[j], c.pv ? NULL : c.x, c.nv)) != QAWS_STATUS_OK ||
-			(!c.pv && (st = swi_pose(motion, c.ts[j], c.pose + 12 * (size_t)j)) != QAWS_STATUS_OK))
-			goto done;
+		double* s = c->cen + 4 * (size_t)j;
+		c->ts[j] = c->ns > 1 ? (double)j / (c->ns - 1) : 0;
+		if ((st = qaws_motion_transform_points(c->buf, NULL, c->m, (qaws_scalar)c->ts[j], c->pv ? NULL : c->x, c->nv)) != QAWS_STATUS_OK ||
+			(!c->pv && (st = swi_pose(c->m, c->ts[j], c->pose + 12 * (size_t)j)) != QAWS_STATUS_OK))
+			return st;
 		s[0] = s[1] = s[2] = s[3] = 0;
-		for (i = 0; i < c.nv; i++)
+		for (i = 0; i < c->nv; i++)
 			for (k = 0; k < 3; k++)
-				s[k] += (double)c.buf[3 * (size_t)i + k] / c.nv;
-		for (i = 0; i < c.nv; i++)
+				s[k] += (double)c->buf[3 * (size_t)i + k] / c->nv;
+		for (i = 0; i < c->nv; i++)
 		{
 			double e = 0;
 			for (k = 0; k < 3; k++)
-				e += ((double)c.buf[3 * (size_t)i + k] - s[k]) * ((double)c.buf[3 * (size_t)i + k] - s[k]);
+				e += ((double)c->buf[3 * (size_t)i + k] - s[k]) * ((double)c->buf[3 * (size_t)i + k] - s[k]);
 			s[3] = fmax(s[3], sqrt(e));
 		}
 	}
 	{
 		qaws_mesh_bvh_desc bd;
 		memset(&bd, 0, sizeof bd);
-		bd.positions = c.x;
-		bd.vertex_count = c.nv;
+		bd.positions = c->x;
+		bd.vertex_count = c->nv;
 		bd.dimension = 3;
-		bd.simplices = c.t;
+		bd.simplices = c->t;
 		bd.simplex_size = 3;
-		bd.simplex_count = c.nt;
-		if ((st = qaws_mesh_bvh_create(&c.b, &bd)) != QAWS_STATUS_OK)
-			goto done;
+		bd.simplex_count = c->nt;
+		if ((st = qaws_mesh_bvh_create(&c->b, &bd)) != QAWS_STATUS_OK)
+			return st;
 	}
-	c.band = 4 * cell;
-	c.cell = cell;
-	c.tie = 1e-9 * ext;
+	c->band = 4 * cell;
+	c->cell = cell;
+	c->tie = 1e-9 * ext;
+	return QAWS_STATUS_OK;
+}
+
+static void swi_close(swi_ctx* c)
+{
+	qaws_mesh_bvh_destroy(c->b);
+	qaws_internal_free(c->t); qaws_internal_free(c->x); qaws_internal_free(c->buf); qaws_internal_free(c->q);
+	qaws_internal_free(c->h); qaws_internal_free(c->best); qaws_internal_free(c->bj); qaws_internal_free(c->ts); qaws_internal_free(c->cen);
+	qaws_internal_free(c->pose);
+}
+
+qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion,
+	qaws_sweep_desc const* desc)
+{
+	qaws_sweep_report local;
+	swi_ctx c;
+	wt_contour_info info;
+	double lo[3], hi[3], vmax = 0, ext = 0, cell;
+	unsigned int k, res = desc && desc->resolution ? desc->resolution : 64, maxs = desc && desc->max_slabs ? desc->max_slabs : 4096;
+	qaws_status st;
+	if (!report)
+		report = &local;
+	memset(report, 0, sizeof *report);
+	if (!out_mesh || !mesh || !motion)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_mesh = NULL;
+	memset(&info, 0, sizeof info);
+	if ((st = swi_open(&c, mesh, motion, desc, lo, hi, &vmax)) != QAWS_STATUS_OK)
+		goto done;
+	for (k = 0; k < 3; k++)
+		ext = fmax(ext, hi[k] - lo[k]);
+	cell = ext / res;
+	if ((st = swi_times(&c, cell, vmax, maxs, ext)) != QAWS_STATUS_OK)
+		goto done;
+	report->slabs = c.ns;
+	report->deviation = (qaws_scalar)(c.ns > 1 ? 0.5 * vmax / (c.ns - 1) : 0);
 	st = wt_contour_field(out_mesh, &info, swi_eval, &c, lo, hi, cell, res, 1.0);
 	report->closed = info.closed;
 	if (st == QAWS_STATUS_OK && *out_mesh && (qaws_mesh_3d_get_attribute_count(mesh) || (desc && desc->generate)))
@@ -939,9 +976,33 @@ qaws_status qaws_mesh_3d_sweep_implicit(qaws_mesh_3d** out_mesh, qaws_sweep_repo
 		*out_mesh = NULL;
 	}
 done:
-	qaws_mesh_bvh_destroy(c.b);
-	qaws_internal_free(c.t); qaws_internal_free(c.x); qaws_internal_free(c.buf); qaws_internal_free(vel); qaws_internal_free(c.q);
-	qaws_internal_free(c.h); qaws_internal_free(c.best); qaws_internal_free(c.bj); qaws_internal_free(c.ts); qaws_internal_free(c.cen);
-	qaws_internal_free(c.pose);
+	swi_close(&c);
+	return st;
+}
+
+qaws_status swp_slab_passes(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_sweep_desc const* desc, double reach)
+{
+	swi_ctx c;
+	double lo[3], hi[3], vmax = 0, ext = 0;
+	unsigned int k, na = qaws_mesh_3d_get_attribute_count(mesh), a;
+	qaws_status st;
+	if ((st = swi_open(&c, mesh, motion, desc, lo, hi, &vmax)) != QAWS_STATUS_OK)
+		goto done;
+	for (k = 0; k < 3; k++)
+		ext = fmax(ext, hi[k] - lo[k]);
+	if ((st = swi_times(&c, reach / 1.5, vmax, desc && desc->max_slabs ? desc->max_slabs : 4096, ext)) != QAWS_STATUS_OK)
+		goto done;
+	/* (the body's values carried by the slabs taken off: carried again pass by pass; edge values stay the slabs') */
+	for (a = 0; a < na; a++)
+	{
+		qaws_attribute_desc d;
+		unsigned int id;
+		qaws_mesh_3d_get_attribute_desc(&d, mesh, a);
+		if (d.name && strcmp(d.name, "source") && d.element != QAWS_MESH_EDGE && qaws_mesh_3d_find_attribute(&id, out, d.name) == QAWS_STATUS_OK)
+			qaws_mesh_3d_remove_attribute(out, id);
+	}
+	st = swi_attributes(&c, out, mesh, desc);
+done:
+	swi_close(&c);
 	return st;
 }
