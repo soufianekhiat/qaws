@@ -980,6 +980,143 @@ done:
 	return st;
 }
 
+qaws_status qaws_mesh_3d_sweep_texture(unsigned char* out_coverage, qaws_texture* texture, qaws_mesh_3d const* swept, qaws_mesh_3d const* body,
+	qaws_motion const* motion, char const* name, qaws_sweep_desc const* sweep, qaws_texture_desc const* desc)
+{
+	static char const* const gen[11] = { "time", "index", "angle", "orientation", "pose_position", "velocity", "distance", "source_face", "source_uv",
+		"passes", "dwell" };
+	static unsigned int const flag[11] = { QAWS_SWEEP_GENERATE_TIME, QAWS_SWEEP_GENERATE_INDEX, QAWS_SWEEP_GENERATE_ANGLE, QAWS_SWEEP_GENERATE_ORIENTATION,
+		QAWS_SWEEP_GENERATE_POSITION, QAWS_SWEEP_GENERATE_VELOCITY, QAWS_SWEEP_GENERATE_DISTANCE, QAWS_SWEEP_GENERATE_SOURCE, QAWS_SWEEP_GENERATE_SOURCE,
+		QAWS_SWEEP_GENERATE_PASSES, QAWS_SWEEP_GENERATE_DWELL };
+	swi_ctx c;
+	qaws_sweep_desc sd;
+	double *P = NULL, *vals = NULL, lo[3], hi[3], blo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, bhi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, vmax = 0, ext = 0,
+		diag = 0, tol, eps = 0;
+	size_t *tx = NULL, n = 0, i;
+	unsigned int k, g, id, have = 0;
+	qaws_scalar *x = NULL, *av = NULL;
+	unsigned int* f = NULL;
+	qaws_mesh_3d* pm = NULL;
+	qaws_attribute_desc ad;
+	qaws_status st;
+	memset(&c, 0, sizeof c);
+	if (!texture || !swept || !body || !motion || !name)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	/* (a generated name wanted, or the body's) */
+	if (sweep)
+		sd = *sweep;
+	else
+		memset(&sd, 0, sizeof sd);
+	for (g = 0; g < 11; g++)
+		if (!strcmp(name, gen[g]))
+		{
+			sd.generate |= flag[g];
+			have = 1;
+		}
+	if (!have && qaws_mesh_3d_find_attribute(&id, body, name) != QAWS_STATUS_OK)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if ((st = tx_texel_points(&P, &tx, &n, texture, swept, desc)) != QAWS_STATUS_OK)
+		return st;
+	if (!n)
+	{
+		st = tx_write(out_coverage, texture, tx, NULL, NULL, 0, 0);
+		goto done;
+	}
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (3 * n > 0xFFFFFFF0u)
+		goto done;
+	/* each texel a tiny triangle at its point, in its swept triangle's plane (its normal the surface's, for the side a seam
+	   takes): the implicit sweep's attributes on them */
+	for (i = 0; i < n; i++)
+		for (k = 0; k < 3; k++)
+		{
+			blo[k] = fmin(blo[k], P[9 * i + k]);
+			bhi[k] = fmax(bhi[k], P[9 * i + k]);
+		}
+	for (k = 0; k < 3; k++)
+		eps += (bhi[k] - blo[k]) * (bhi[k] - blo[k]);
+	eps = (sizeof(qaws_scalar) < 8 ? 1e-4 : 1e-7) * (sqrt(eps) > 0 ? sqrt(eps) : 1);   /* (a size each precision tells apart) */
+	x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 9, n));
+	f = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(unsigned int), 3, n));
+	if (!x || !f)
+		goto done;
+	for (i = 0; i < n; i++)
+	{
+		double const* q = P + 9 * i;
+		double l1 = sqrt(q[3] * q[3] + q[4] * q[4] + q[5] * q[5]), l2 = sqrt(q[6] * q[6] + q[7] * q[7] + q[8] * q[8]);
+		for (k = 0; k < 3; k++)
+		{
+			x[9 * i + k] = (qaws_scalar)q[k];
+			x[9 * i + 3 + k] = (qaws_scalar)(q[k] + (l1 > 0 ? eps * q[3 + k] / l1 : 0));
+			x[9 * i + 6 + k] = (qaws_scalar)(q[k] + (l2 > 0 ? eps * q[6 + k] / l2 : 0));
+		}
+		f[3 * i] = (unsigned int)(3 * i);
+		f[3 * i + 1] = (unsigned int)(3 * i + 1);
+		f[3 * i + 2] = (unsigned int)(3 * i + 2);
+	}
+	{
+		qaws_mesh_3d_desc md;
+		memset(&md, 0, sizeof md);
+		md.positions = x;
+		md.vertex_count = (unsigned int)(3 * n);
+		md.face_vertices = f;
+		md.face_count = (unsigned int)n;
+		if ((st = qaws_mesh_3d_create(&pm, &md)) != QAWS_STATUS_OK)
+			goto done;
+	}
+	if ((st = swi_open(&c, body, motion, &sd, lo, hi, &vmax)) != QAWS_STATUS_OK)
+		goto done;
+	for (k = 0; k < 3; k++)
+		ext = fmax(ext, hi[k] - lo[k]);
+	/* (the sweep's tolerance: given, or a thousandth of the body's size at rest) */
+	{
+		qaws_scalar const* bx = c.x;
+		double mlo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, mhi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL };
+		for (i = 0; i < c.nv; i++)
+			for (k = 0; k < 3; k++)
+			{
+				mlo[k] = fmin(mlo[k], (double)bx[3 * i + k]);
+				mhi[k] = fmax(mhi[k], (double)bx[3 * i + k]);
+			}
+		for (k = 0; k < 3; k++)
+			diag += (mhi[k] - mlo[k]) * (mhi[k] - mlo[k]);
+		diag = sqrt(diag);
+	}
+	tol = sd.tolerance > 0 ? (double)sd.tolerance : 1e-3 * diag;
+	if ((st = swi_times(&c, 2 * tol / 1.5, vmax, sd.max_slabs ? sd.max_slabs : 4096, ext)) != QAWS_STATUS_OK)
+		goto done;
+	if ((st = swi_attributes(&c, pm, body, &sd)) != QAWS_STATUS_OK)
+		goto done;
+	/* each texel its triangle's value (its first corner's, or its face's) */
+	if (qaws_mesh_3d_find_attribute(&id, pm, name) != QAWS_STATUS_OK)
+	{
+		st = QAWS_STATUS_INVALID_ARGUMENT;
+		goto done;
+	}
+	qaws_mesh_3d_get_attribute_desc(&ad, pm, id);
+	if (ad.components != texture->components || (ad.element != QAWS_MESH_CORNER && ad.element != QAWS_MESH_FACE))
+	{
+		st = QAWS_STATUS_INVALID_ARGUMENT;
+		goto done;
+	}
+	texture->rule = ad.rule;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	av = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), ad.components, 3 * n + 1));
+	vals = (double*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(double), ad.components, n + 1));
+	if (!av || !vals)
+		goto done;
+	qaws_mesh_3d_get_attribute(av, pm, id);
+	for (i = 0; i < n; i++)
+		for (k = 0; k < ad.components; k++)
+			vals[i * ad.components + k] = (double)av[(ad.element == QAWS_MESH_CORNER ? 3 * i : i) * ad.components + k];
+	st = tx_write(out_coverage, texture, tx, vals, NULL, n, desc ? desc->gutter : 0);
+done:
+	swi_close(&c);
+	qaws_mesh_3d_destroy(pm);
+	qaws_internal_free(P); qaws_internal_free(tx); qaws_internal_free(x); qaws_internal_free(f); qaws_internal_free(av); qaws_internal_free(vals);
+	return st;
+}
+
 qaws_status swp_slab_passes(qaws_mesh_3d* out, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_sweep_desc const* desc, double reach)
 {
 	swi_ctx c;

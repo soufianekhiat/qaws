@@ -194,6 +194,10 @@ All notable changes to Qaws are documented here.
 - `qaws_mesh_3d_bake_texture_from`: a texture baked from another mesh (each texel's point taken to the source's closest
   point, its attribute there by the rule; `max_distance`): a detailed mesh's colours on a decimated one's texture. Test 187,
   figure 81 (showcase key `.`).
+- `qaws_mesh_3d_sweep_texture`: a sweep's generated or carried attribute evaluated per texel of the swept solid's texture
+  (each texel's point taken to the moving body as the implicit sweep takes its vertices, passes and combines included),
+  at the texture's resolution rather than the tessellation's: a decelerating cube's time on a 12-triangle box within
+  0.0005 where the vertices' exact times interpolated are 0.54 off. Test 184.
 - Rotation-minimizing frames along curves: `qaws_motion_create_curve_frames` with `QAWS_MOTION_FRAME_ROTATION_MINIMIZING`
   carries the body's rotation along a 3D curve with no turn about its tangent (double reflection, Wang et al. 2008; the
   angular velocity c' x c'' / |c'|^2): a plate swept along a space cubic is a pipe of the section's area times the length.

@@ -19,12 +19,16 @@
  *     z and x - y those of the corner, the translation along (1, 1, 0), within half a cell), each face's corners its side's
  *     number (a corner attribute: no value blended across the cube's edges, nine corners in ten their triangle's own side,
  *     the rest on the walls the cube's vertical edges sweep, either side's), a face attribute the same; a box turned a
- *     quarter with a constant VECTOR (1, 0, 0): unit, flat, turned between 0 and a quarter.
+ *     quarter with a constant VECTOR (1, 0, 0): unit, flat, turned between 0 and a quarter;
+ *   - per texel (qaws_mesh_3d_sweep_texture): a unit cube slowing to a stop along x, its swept solid's 12-triangle box
+ *     flattened and its "time" on 128 x 128 texels: on the top face within 0.01 of 1 - (2 - x)^(1/3), where the
+ *     vertices' exact times interpolated are off by over 0.5.
  */
 
 #include "test_common.h"
 #include "qaws_mesh_sweep.h"
 #include "qaws_mesh_bvh.h"
+#include "qaws_mesh_param.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -544,6 +548,98 @@ static void test_passes(int slabs)
 	qaws_mesh_3d_destroy(c); qaws_mesh_3d_destroy(o);
 }
 
+/* the first touch of a point at x on the top face: the cube's front reaches x at 1 - (2 - x)^(1/3) (0 inside it at rest) */
+static double si_first_touch(double x)
+{
+	return x <= 1 ? 0 : 1 - cbrt(2 - x);
+}
+
+/* a sweep's time per texel: a unit cube moved by 1 along x, slowing to a stop (x = 1 - (1 - t)^3); its swept solid's
+   shape, a 2 x 1 x 1 box of 12 triangles, flattened into charts and its "time" evaluated on 128 x 128 texels
+   (qaws_mesh_3d_sweep_texture): on the top face a point at x is first touched at 1 - (2 - x)^(1/3), which two
+   triangles cannot hold by their vertices; read from the texture at a lattice of points inside the top triangles
+   (past x 1.05 and short of 1.95) it is within 0.01 of it, the vertices' exact times interpolated far from it */
+static void test_sweep_texture(void)
+{
+	enum { R = 128 };
+	qaws_mesh_3d *b = si_box(0, 1, 0, 1, 0, 1), *o = si_box(0, 2, 0, 1, 0, 1);
+	qaws_motion* m = NULL;
+	qaws_motion_pose s, e;
+	qaws_sweep_desc d;
+	qaws_texture t;
+	qaws_scalar* tex = (qaws_scalar*)calloc(R * R, sizeof(qaws_scalar));
+	unsigned char* cov = (unsigned char*)malloc(R * R);
+	unsigned int nt = qaws_mesh_3d_get_triangle_count(o), id, written = 0, pts = 0, i, k, q;
+	qaws_scalar* uv = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 6 * (nt + 1));
+	unsigned int* tri = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nt + 1));
+	double e_tex = 0, e_vert = 0;
+	qaws_param_desc pd;
+	qaws_attribute_desc ad;
+	qaws_status st;
+	char msg[400];
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = e.rotation[0] = 1;
+	e.position.x = 1;
+	s.velocity.x = 3;
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)0.002;
+	memset(&pd, 0, sizeof pd);
+	pd.auto_seams = 1;
+	pd.pack = 1;
+	st = qaws_mesh_3d_parameterize(uv, NULL, o, NULL, 0, &pd);
+	memset(&ad, 0, sizeof ad);
+	ad.name = "uv"; ad.element = QAWS_MESH_CORNER; ad.components = 2; ad.rule = QAWS_ATTRIBUTE_LINEAR;
+	if (st == QAWS_STATUS_OK)
+		st = qaws_mesh_3d_add_attribute(&id, o, uv, &ad);
+	memset(&t, 0, sizeof t);
+	t.texels = tex; t.width = R; t.height = R; t.components = 1;
+	if (st == QAWS_STATUS_OK)
+		st = qaws_mesh_3d_sweep_texture(cov, &t, o, b, m, "time", &d, NULL);
+	for (i = 0; st == QAWS_STATUS_OK && i < R * R; i++)
+		written += cov[i] == 1;
+	qaws_mesh_3d_get_triangles(tri, o);
+	for (i = 0; st == QAWS_STATUS_OK && i < nt; i++)
+	{
+		qaws_vec3 pv[3];
+		for (k = 0; k < 3; k++)
+			pv[k] = qaws_mesh_3d_get_vertex(o, tri[3 * i + k]);
+		if (fabs((double)pv[0].z - 1) > 1e-12 || fabs((double)pv[1].z - 1) > 1e-12 || fabs((double)pv[2].z - 1) > 1e-12)
+			continue;
+		for (q = 0; q < 64; q++)
+		{
+			/* (a lattice of points inside the triangle: weights a / 10, b / 10 and the rest, none under 0.1) */
+			double bw[3] = { (q % 8 + 1) / 10.0, (q / 8 + 1) / 10.0, 0 }, x = 0, want, vert = 0;
+			qaws_scalar suv[2] = { 0, 0 }, y[1];
+			bw[2] = 1 - bw[0] - bw[1];
+			if (bw[2] < 0.1 - 1e-12)
+				continue;
+			for (k = 0; k < 3; k++)
+			{
+				x += bw[k] * (double)pv[k].x;
+				suv[0] += (qaws_scalar)(bw[k] * (double)uv[6 * i + 2 * k]);
+				suv[1] += (qaws_scalar)(bw[k] * (double)uv[6 * i + 2 * k + 1]);
+				vert += bw[k] * si_first_touch((double)pv[k].x);
+			}
+			if (x < 1.05 || x > 1.95)
+				continue;
+			want = si_first_touch(x);
+			qaws_texture_sample(y, &t, suv, 1);
+			e_tex = fmax(e_tex, fabs((double)y[0] - want));
+			e_vert = fmax(e_vert, fabs(vert - want));
+			pts++;
+		}
+	}
+	sprintf(msg, "a sweep's time on a 12-triangle box's 128 x 128 texels: %u written; at %u top points off 1 - (2 - x)^(1/3) by %.4f (its vertices' "
+		"exact times interpolated by %.4f)", written, pts, e_tex, e_vert);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && written > 0 && pts > 0 && e_tex < 0.01 && e_vert > 5 * e_tex, msg);
+	free(tex); free(cov); free(uv); free(tri);
+	qaws_motion_destroy(m);
+	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o);
+}
+
 int test_184_sweep_implicit_main(void)
 {
 	g_pass = 0;
@@ -556,6 +652,7 @@ int test_184_sweep_implicit_main(void)
 	test_track();
 	test_passes(0);
 	test_passes(1);
+	test_sweep_texture();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

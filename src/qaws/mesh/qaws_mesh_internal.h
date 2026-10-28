@@ -15,6 +15,7 @@
 #include "../qaws_mesh_boolean.h"
 #include "../qaws_motion.h"
 #include "../qaws_mesh_sweep.h"
+#include "../qaws_mesh_texture.h"
 
 /* qaws_mesh_boolean; one: edges inside flat regions turned only between pieces of one source face; out_turned (may be
    NULL, freed by the caller): per result face, 1 where it was turned over (qaws_internal_free; NULL on failure) */
@@ -393,6 +394,13 @@ double swp_table_time(double const* tab, double angle);
    passes' values (n each) combined into out */
 unsigned int swp_combine_of(qaws_sweep_desc const* desc, char const* name);
 int swp_passes_wanted(qaws_sweep_desc const* desc);
+/* a texture's texels in mesh's triangles (qaws_mesh_texture.c, as baking finds them): per texel its point on the mesh and
+   its triangle's two edges from the first corner (9 each, malloc'ed) and its index (*out_tx, malloc'ed), *out_count of
+   them; and values written to texels tx (n of them, keep may be NULL: all), the coverage marked, the gutter grown */
+qaws_status tx_texel_points(double** out_points, size_t** out_tx, size_t* out_count, qaws_texture const* texture, qaws_mesh_3d const* mesh,
+	qaws_texture_desc const* desc);
+qaws_status tx_write(unsigned char* out_coverage, qaws_texture* x, size_t const* tx, double const* vals, unsigned char const* keep, size_t n,
+	unsigned int gutter);
 /* a sweep by slabs' attributes pass by pass (qaws_mesh_sweep_implicit.c): each out vertex's runs of time within reach of the
    moving body (sampled as the implicit sweep's, reach its cells' 1.5), the body's values carried and generated per pass
    and combined; the body's edge values left as they are */

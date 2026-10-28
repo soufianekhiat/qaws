@@ -17,6 +17,7 @@
 #include "qaws_mesh.h"
 #include "qaws_mesh_boolean.h"
 #include "qaws_motion.h"
+#include "qaws_mesh_texture.h"
 
 /*
  * Swept solids: the region a closed mesh covers while it moves (a
@@ -327,5 +328,18 @@ qaws_status qaws_mesh_3d_first_contact(qaws_contact_report* report, qaws_mesh_3d
    mesh apart from itself (no contact past 0). Neighbours (a shared vertex) are not tested: a fold within one vertex's
    ring is missed. INVALID_ARGUMENT as qaws_mesh_3d_first_contact */
 qaws_status qaws_mesh_3d_first_self_contact(qaws_contact_report* report, qaws_mesh_3d const* mesh, qaws_motion const* motion, qaws_sweep_desc const* desc);
+
+/*
+ * A sweep's attributes per texel (qaws_mesh_texture.h): the attribute name of a swept solid (swept, given its "uv" or
+ * desc's: qaws_mesh_3d_parameterize of the sweep's result) evaluated at each texel's point instead of at its vertices,
+ * so at the texture's resolution rather than the slabs' tessellation. name is a generated one ("time", "index", "angle",
+ * "orientation", "pose_position", "velocity", "distance", "source_face", "source_uv", "passes", "dwell") or one of
+ * body's (vertex, corner or face), carried with sweep's tracks and combines; each texel's point is taken to the moving
+ * body as the implicit sweep takes its vertices (its first touch and, with passes wanted, every pass: within twice
+ * sweep's tolerance, or a thousandth of the body's size). The texture's components must be the attribute's, its rule is
+ * set. INVALID_ARGUMENT as baking, or a name neither generated nor the body's.
+ */
+qaws_status qaws_mesh_3d_sweep_texture(unsigned char* out_coverage, qaws_texture* texture, qaws_mesh_3d const* swept, qaws_mesh_3d const* body,
+	qaws_motion const* motion, char const* name, qaws_sweep_desc const* sweep, qaws_texture_desc const* desc);
 
 #endif /* QAWS_MESH_SWEEP_H */

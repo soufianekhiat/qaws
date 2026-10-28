@@ -308,28 +308,103 @@ static double* tx_values(qaws_mesh_3d const* m, unsigned int id, qaws_attribute_
 	return dv;
 }
 
-/* the bake's end: hits' values written (vals, components each), coverage marked, the gutter grown */
-static qaws_status tx_finish(unsigned char* out_coverage, qaws_texture* x, tx_hit const* h, size_t nh, unsigned char const* keep, double const* vals,
+qaws_status tx_write(unsigned char* out_coverage, qaws_texture* x, size_t const* tx, double const* vals, unsigned char const* keep, size_t n,
 	unsigned int gutter)
 {
 	size_t nt = (size_t)x->width * x->height, i;
-	unsigned int k, n = x->components;
+	unsigned int k, nc = x->components;
 	unsigned char* ring = (unsigned char*)qaws_internal_scratch_zalloc(nt + 1, 1);
 	qaws_status st;
 	if (!ring)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
-	for (i = 0; i < nh; i++)
+	for (i = 0; i < n; i++)
 	{
 		if (keep && !keep[i])
 			continue;
-		for (k = 0; k < n; k++)
-			x->texels[h[i].tx * n + k] = (qaws_scalar)vals[i * n + k];
-		ring[h[i].tx] = 1;
+		for (k = 0; k < nc; k++)
+			x->texels[tx[i] * nc + k] = (qaws_scalar)vals[i * nc + k];
+		ring[tx[i]] = 1;
 	}
 	st = tx_gutter(x, ring, gutter);
 	if (st == QAWS_STATUS_OK && out_coverage)
 		memcpy(out_coverage, ring, nt);
 	qaws_internal_free(ring);
+	return st;
+}
+
+/* the hits' values written (tx_write over their texels) */
+static qaws_status tx_hits_write(unsigned char* out_coverage, qaws_texture* x, tx_hit const* h, size_t nh, unsigned char const* keep, double const* vals,
+	unsigned int gutter)
+{
+	size_t* tx = (size_t*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(size_t), nh + 1)), i;
+	qaws_status st;
+	if (!tx)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (i = 0; i < nh; i++)
+		tx[i] = h[i].tx;
+	st = tx_write(out_coverage, x, tx, vals, keep, nh, gutter);
+	qaws_internal_free(tx);
+	return st;
+}
+
+qaws_status tx_texel_points(double** out_points, size_t** out_tx, size_t* out_count, qaws_texture const* texture, qaws_mesh_3d const* mesh,
+	qaws_texture_desc const* desc)
+{
+	tx_faces t;
+	tx_hit* h = NULL;
+	size_t nh = 0, i;
+	unsigned int k, q;
+	double* P = NULL;
+	size_t* tx = NULL;
+	qaws_scalar* x = NULL;
+	qaws_status st;
+	*out_points = NULL;
+	*out_tx = NULL;
+	*out_count = 0;
+	if (!tx_check(texture) || !mesh)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if ((st = tx_faces_read(&t, mesh, desc)) != QAWS_STATUS_OK)
+		return st;
+	x = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)qaws_mesh_3d_get_vertex_count(mesh) + 1));
+	if (!x)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	if ((st = tx_raster(&h, &nh, &t, texture)) != QAWS_STATUS_OK)
+		goto done;
+	qaws_mesh_3d_get_positions(x, mesh);
+	P = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 9, nh + 1));
+	tx = (size_t*)qaws_internal_malloc(qaws_internal_mul2(sizeof(size_t), nh + 1));
+	if (!P || !tx)
+	{
+		qaws_internal_free(P);
+		qaws_internal_free(tx);
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (i = 0; i < nh; i++)
+	{
+		double V[3][3];
+		for (q = 0; q < 3; q++)
+			for (k = 0; k < 3; k++)
+				V[q][k] = (double)x[3 * (size_t)t.fv[h[i].c[q]] + k];
+		for (k = 0; k < 3; k++)
+		{
+			P[9 * i + k] = h[i].w[0] * V[0][k] + h[i].w[1] * V[1][k] + h[i].w[2] * V[2][k];
+			P[9 * i + 3 + k] = V[1][k] - V[0][k];
+			P[9 * i + 6 + k] = V[2][k] - V[0][k];
+		}
+		tx[i] = h[i].tx;
+	}
+	*out_points = P;
+	*out_tx = tx;
+	*out_count = nh;
+	st = QAWS_STATUS_OK;
+done:
+	tx_faces_free(&t);
+	qaws_internal_free(h);
+	qaws_internal_free(x);
 	return st;
 }
 
@@ -365,7 +440,7 @@ qaws_status qaws_mesh_3d_bake_texture(unsigned char* out_coverage, qaws_texture*
 			pos[q] = ad.element == QAWS_MESH_VERTEX ? t.fv[h[i].c[q]] : ad.element == QAWS_MESH_CORNER ? h[i].c[q] : h[i].f;
 		hm_blend(vals + i * n, dv, n, pos, h[i].w, 3, n, (unsigned int)ad.rule);
 	}
-	st = tx_finish(out_coverage, texture, h, nh, NULL, vals, desc ? desc->gutter : 0);
+	st = tx_hits_write(out_coverage, texture, h, nh, NULL, vals, desc ? desc->gutter : 0);
 done:
 	tx_faces_free(&t);
 	qaws_internal_free(dv); qaws_internal_free(vals); qaws_internal_free(h);
@@ -471,7 +546,7 @@ qaws_status qaws_mesh_3d_bake_texture_from(unsigned char* out_coverage, qaws_tex
 		hm_blend(vals + i * n, dv, n, pos, w, 3, n, (unsigned int)ad.rule);
 		keep[i] = 1;
 	}
-	st = tx_finish(out_coverage, texture, h, nh, keep, vals, desc ? desc->gutter : 0);
+	st = tx_hits_write(out_coverage, texture, h, nh, keep, vals, desc ? desc->gutter : 0);
 done:
 	tx_faces_free(&t);
 	qaws_mesh_bvh_destroy(bvh);
