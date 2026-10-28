@@ -2490,7 +2490,7 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	qaws_sweep_report local;
 	swp_ctx c;
 	unsigned int nv, nt, i, k, *t = NULL, ntimes = 0, captimes = 0, maxs, ns;
-	double *Xa = NULL, *Xb = NULL, *Xm = NULL, *times = NULL, tol, lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, diag = 0;
+	double *Xa = NULL, *Xb = NULL, *Xm = NULL, *times = NULL, tol, lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, diag = 0, rmax = 0;
 	qaws_scalar *px = NULL, *sx = NULL;
 	unsigned int *sf = NULL, *sof = NULL, *soc = NULL, snv = 0, snf = 0, capv = 0, capf = 0;
 	unsigned char* fr = NULL;
@@ -2524,6 +2524,13 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 	qaws_mesh_3d_get_triangles(t, mesh);
 	c.body = px;
 	maxs = desc && desc->max_slabs ? desc->max_slabs : 256;
+	report->certified = desc && desc->strict;
+	{
+		/* (the body's farthest point from its frame's origin: R'' moves it the most) */
+		for (i = 0; i < nv; i++)
+			rmax = fmax(rmax, sqrt((double)px[3 * (size_t)i] * px[3 * (size_t)i] + (double)px[3 * (size_t)i + 1] * px[3 * (size_t)i + 1] +
+				(double)px[3 * (size_t)i + 2] * px[3 * (size_t)i + 2]));
+	}
 	/* the tolerance from the solid's box at 0 */
 	if ((st = swp_at(&c, 0, Xa)) != QAWS_STATUS_OK)
 		goto done;
@@ -2587,6 +2594,15 @@ qaws_status qaws_mesh_3d_sweep(qaws_mesh_3d** out, qaws_sweep_report* report, qa
 			}
 			if (st != QAWS_STATUS_OK)
 				break;
+			if (desc && desc->strict)
+			{
+				/* the chords' deviation bounded, not sampled: (b - a)^2 / 8 times the largest |x''| over the slab */
+				double bt, br;
+				if (mo_second_bound(motion, a, b, &bt, &br))
+					dev = fmax(dev, (b - a) * (b - a) / 8 * (bt + br * rmax));
+				else
+					report->certified = 0;
+			}
 			if (desc && desc->strict)
 				for (i = 0; i < 3 * nt; i++)
 				{

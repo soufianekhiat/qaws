@@ -96,6 +96,7 @@
 #define mi_build QAWS_SFX(mi_build)
 #define mi_curvature QAWS_SFX(mi_curvature)
 #define mi_eval QAWS_SFX(mi_eval)
+#define mo_second_bound QAWS_SFX(mo_second_bound)
 #define mr_closest_on_patch QAWS_SFX(mr_closest_on_patch)
 #define mr_eval QAWS_SFX(mr_eval)
 #define mr_project QAWS_SFX(mr_project)

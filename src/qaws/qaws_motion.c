@@ -768,3 +768,99 @@ qaws_status qaws_motion_transform_points(qaws_scalar* out, qaws_scalar* out_v, q
 	}
 	return QAWS_STATUS_OK;
 }
+
+/* ---- bounds of the second derivative over an interval ------------------ */
+
+/* the Hermite basis' power coefficients (mo_basis' slots; t^0 to t^5 each) */
+static double const mo_cubic_pow[6][6] = { { 1, 0, -3, 2, 0, 0 }, { 0, 1, -2, 1, 0, 0 }, { 0 }, { 0, 0, 3, -2, 0, 0 }, { 0, 0, -1, 1, 0, 0 }, { 0 } };
+static double const mo_quintic_pow[6][6] = { { 1, 0, 0, -10, 15, -6 }, { 0, 1, 0, -6, 8, -3 }, { 0, 0, 0.5, -1.5, 1.5, -0.5 }, { 0, 0, 0, 10, -15, 6 },
+	{ 0, 0, 0, -4, 7, -3 }, { 0, 0, 0, 0.5, -1, 0.5 } };
+
+/* the largest |p| over [a, b] of the degree-5 polynomial p (power coefficients), bounded by its Bernstein coefficients there
+   (the convex hull property): p over s in [0, 1] at t = a + (b - a) s, then to the Bernstein basis */
+static double mo_poly_bound(double const* p, double a, double b)
+{
+	static double const binom[6][6] = { { 1 }, { 1, 1 }, { 1, 2, 1 }, { 1, 3, 3, 1 }, { 1, 4, 6, 4, 1 }, { 1, 5, 10, 10, 5, 1 } };
+	double q[6] = { 0, 0, 0, 0, 0, 0 }, h = b - a, best = 0;
+	int i, j;
+	/* (Horner in the polynomial a + h s) */
+	for (i = 5; i >= 0; i--)
+	{
+		for (j = 5; j >= 1; j--)
+			q[j] = q[j] * a + q[j - 1] * h;
+		q[0] = q[0] * a + p[i];
+	}
+	for (i = 0; i <= 5; i++)
+	{
+		double bi = 0;
+		for (j = 0; j <= i; j++)
+			bi += binom[i][j] / binom[5][j] * q[j];
+		best = fmax(best, fabs(bi));
+	}
+	return best;
+}
+
+/* bounds over [a, b] of |x|, |x'| and |x''| (out[0..2]) for the Hermite polynomial of data D (6 x 3) */
+static void mo_hermite_bounds(double const (*D)[3], int quintic, double a, double b, double* out)
+{
+	double const (*B)[6] = quintic ? mo_quintic_pow : mo_cubic_pow;
+	double s2[3][3];
+	unsigned int k, j, i, d;
+	for (k = 0; k < 3; k++)
+	{
+		double p[6] = { 0, 0, 0, 0, 0, 0 }, dp[6] = { 0, 0, 0, 0, 0, 0 }, ddp[6] = { 0, 0, 0, 0, 0, 0 };
+		for (j = 0; j < 6; j++)
+			for (i = 0; i < 6; i++)
+				p[i] += B[j][i] * D[j][k];
+		for (i = 1; i < 6; i++)
+			dp[i - 1] = i * p[i];
+		for (i = 1; i < 6; i++)
+			ddp[i - 1] = i * dp[i];
+		s2[0][k] = mo_poly_bound(p, a, b);
+		s2[1][k] = mo_poly_bound(dp, a, b);
+		s2[2][k] = mo_poly_bound(ddp, a, b);
+	}
+	for (d = 0; d < 3; d++)
+		out[d] = sqrt(s2[d][0] * s2[d][0] + s2[d][1] * s2[d][1] + s2[d][2] * s2[d][2]);
+}
+
+int mo_second_bound(qaws_motion const* m, double a, double b, double* bt, double* br);   /* (declared in mesh/qaws_mesh_internal.h) */
+
+int mo_second_bound(qaws_motion const* m, double a, double b, double* bt, double* br)
+{
+	unsigned int i;
+	*bt = 0;
+	*br = 0;
+	if (!m || m->kind == MO_CURVE || !(b >= a))
+		return 0;
+	if (m->kind == MO_VERTICES)
+	{
+		/* (borrowed positions move along their chords: no second derivative) */
+		for (i = 0; m->V && i < m->n; i++)
+		{
+			double o[3];
+			mo_hermite_bounds((double const(*)[3])(m->V + 18 * (size_t)i), m->quintic, a, b, o);
+			*bt = fmax(*bt, o[2]);
+		}
+		return 1;
+	}
+	for (i = 0; i < m->nseg; i++)
+	{
+		/* each piece over its share of t: its own t = t nseg - i, derivatives in t scaled by nseg */
+		double sc = m->nseg, la = fmax(0, a * sc - i), lb = fmin(1, b * sc - i), ot[3], oc[3], C0, C1, C2, W, W1;
+		if (lb < la)
+			continue;
+		mo_hermite_bounds((double const(*)[3])m->seg[i].T, m->quintic, la, lb, ot);
+		mo_hermite_bounds((double const(*)[3])m->seg[i].C, m->quintic, la, lb, oc);
+		C0 = oc[0];
+		C1 = oc[1] * sc;
+		C2 = oc[2] * sc * sc;
+		/* omega = R0 2 (c' + c x c') / (1 + c . c), 1 + c . c >= 1; its derivative 2 (c'' + c x c'') / (1 + c . c) - 4 (c' + c x c')
+		   (c . c') / (1 + c . c)^2; R'' p = (omega' x + omega x omega x) R p */
+		W = 2 * (C1 + C0 * C1);
+		W1 = 2 * (C2 + C0 * C2) + 2 * W * C0 * C1;
+		*bt = fmax(*bt, ot[2] * sc * sc);
+		*br = fmax(*br, W1 + W * W);
+	}
+	return 1;
+}

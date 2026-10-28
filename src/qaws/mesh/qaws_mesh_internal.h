@@ -394,6 +394,10 @@ double swp_table_time(double const* tab, double angle);
    passes' values (n each) combined into out */
 unsigned int swp_combine_of(qaws_sweep_desc const* desc, char const* name);
 int swp_passes_wanted(qaws_sweep_desc const* desc);
+/* bounds over t in [a, b] (qaws_motion.c): a rigid motion's |T''| into *bt and |omega'| + |omega|^2 into *br (so a point p of
+   the body moves with |x''| <= *bt + *br |p|), a vertex motion's largest |x''| into *bt (*br 0); 1, or 0 for a motion
+   along a curve (no bound known) */
+int mo_second_bound(qaws_motion const* m, double a, double b, double* bt, double* br);
 /* a texture's texels in mesh's triangles (qaws_mesh_texture.c, as baking finds them): per texel its point on the mesh and
    its triangle's two edges from the first corner (9 each, malloc'ed) and its index (*out_tx, malloc'ed), *out_count of
    them; and values written to texels tx (n of them, keep may be NULL: all), the coverage marked, the gutter grown */

@@ -192,13 +192,18 @@ typedef struct qaws_sweep_desc
 	int strict;                         /* nonzero: slabs also halved until no edge twists by more than 4 tolerances over one (an
 	                                       edge sliding along itself while turning: its hull's notch, a quarter of the twist,
 	                                       within the tolerance), so the result passes the true sweep by about the tolerance
-	                                       at most; many more slabs where long edges turn (max_slabs still caps them) */
+	                                       at most; and the chords' deviation bounded rather than sampled ((b - a)^2 / 8 times
+	                                       the largest |x''| over the slab, from Bernstein bounds of the motion's polynomials:
+	                                       |T''| + (|omega'| + |omega|^2) |p|; report.certified), so no point of the body
+	                                       strays from its chords by more than the tolerance at any time; a motion along a
+	                                       curve is sampled as without it. Many more slabs (max_slabs still caps them) */
 } qaws_sweep_desc;
 
 typedef struct qaws_sweep_report
 {
 	unsigned int slabs;
-	qaws_scalar deviation;              /* the largest chord deviation measured (at the slabs' middles and quarters) */
+	qaws_scalar deviation;              /* the largest chord deviation measured (at the slabs' middles and quarters); with strict and
+	                                       certified, a bound on it over every time */
 	unsigned int front_faces;           /* summed over the slabs */
 	qaws_boolean_report boolean;
 	int closed;
@@ -206,6 +211,8 @@ typedef struct qaws_sweep_report
 	qaws_scalar spin_drift;             /* a spin's largest drift along one turn */
 	int implicit;                       /* swept on a grid (qaws_mesh_3d_sweep_implicit): an asymmetric spin drifting past the
 	                                       tolerance a turn without revolve_spins */
+	int certified;                      /* strict: every slab's chords bounded from the motion's second derivative ((b - a)^2 / 8
+	                                       max |x''|: Bernstein bounds of its polynomials); 0 for a motion along a curve (sampled) */
 } qaws_sweep_report;
 
 /* desc and report may be NULL. INVALID_ARGUMENT for a vertex motion of another vertex count. An empty result: OK and NULL. */

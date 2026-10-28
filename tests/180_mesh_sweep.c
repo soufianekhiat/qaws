@@ -12,6 +12,9 @@
  *   - a small ball along a Hermite curve: a tube, its volume the ball's
  *     cross-section along the length plus the ball (within the polyhedra's
  *     own error);
+ *   - certified (strict): a cube along a curved path turning a quarter at tolerance 0.01: every slab's chords bounded from
+ *     the motion's second derivative within the tolerance, the cube's corners at 801 times inside the result or within the
+ *     tolerance; a vertex motion certified, a curve motion not;
  *   - a sweep decimated: no internal "source" left, the moved cube's box decimates to 24 faces, volume 2;
  *   - a pipe: a thin square plate along a space cubic with rotation-minimizing
  *     frames, its volume the section's area times the length (Pappus) within
@@ -58,6 +61,7 @@
 #include "qaws_bezier.h"
 #include "qaws_eval.h"
 #include "qaws_mesh_decimate.h"
+#include "qaws_mesh_bvh.h"
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -698,6 +702,93 @@ static void test_strict(void)
 	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(os);
 }
 
+/* how far, at most, the body's points (n of them, at rest) lie outside o along the motion, at 801 times: 0 inside o (its
+   winding number past one half), else the distance to its surface */
+static double sw_missing(qaws_mesh_3d const* o, qaws_motion const* m, qaws_scalar const* pts, unsigned int n)
+{
+	qaws_mesh_bvh* bvh = NULL;
+	qaws_scalar* q = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * n);
+	qaws_scalar* w = (qaws_scalar*)malloc(sizeof(qaws_scalar) * n);
+	qaws_mesh_hit* hit = (qaws_mesh_hit*)malloc(sizeof(qaws_mesh_hit) * n);
+	double worst = 0;
+	unsigned int k, i;
+	if (!o || qaws_mesh_bvh_create_mesh_3d(&bvh, o, NULL) != QAWS_STATUS_OK)
+	{
+		free(q); free(w); free(hit);
+		return 1e300;
+	}
+	for (k = 0; k <= 800; k++)
+	{
+		qaws_motion_transform_points(q, NULL, m, (qaws_scalar)(k / 800.0), pts, n);
+		qaws_mesh_bvh_winding_number(w, bvh, q, n, NULL);
+		qaws_mesh_bvh_closest(hit, bvh, q, n, 0, NULL);
+		for (i = 0; i < n; i++)
+			if (!((double)w[i] > 0.5))
+				worst = fmax(worst, (double)hit[i].distance);
+	}
+	qaws_mesh_bvh_destroy(bvh);
+	free(q); free(w); free(hit);
+	return worst;
+}
+
+/* certified chords (strict): a cube along a curved Hermite path turning a quarter, at tolerance 0.01: the slabs' chords
+   bounded from the motion's second derivative (certified, the bound within the tolerance), and the cube's corners at 801
+   times inside the result or within the tolerance of it; a motion along a curve not certified, a vertex motion certified */
+static void test_certified(void)
+{
+	double tol = 0.01, miss;
+	qaws_mesh_3d *b = sw_box(-0.3, 0.3, -0.3, 0.3, -0.3, 0.3), *o = NULL, *ov = NULL, *oc = NULL;
+	qaws_motion_pose s, e;
+	qaws_motion *m = NULL, *mv = NULL, *mc = NULL;
+	qaws_sweep_desc d;
+	qaws_sweep_report r, rv, rc;
+	qaws_scalar corners[24];
+	qaws_curve* cv = NULL;
+	char msg[400];
+	memset(&r, 0, sizeof r); memset(&rv, 0, sizeof rv); memset(&rc, 0, sizeof rc);
+	memset(&s, 0, sizeof s);
+	memset(&e, 0, sizeof e);
+	s.rotation[0] = 1;
+	e.rotation[0] = (qaws_scalar)cos(SW_PI / 4);
+	e.rotation[3] = (qaws_scalar)sin(SW_PI / 4);
+	s.position.x = -0.5; s.position.y = 1;
+	e.position.x = 4.5; e.position.y = 1;
+	s.velocity.x = e.velocity.x = 5; s.velocity.y = (qaws_scalar)2.4; e.velocity.y = (qaws_scalar)-2.4;
+	s.angular_velocity.z = e.angular_velocity.z = (qaws_scalar)(SW_PI / 2);
+	qaws_motion_create_poses(&m, &s, &e, 0);
+	memset(&d, 0, sizeof d);
+	d.tolerance = (qaws_scalar)tol;
+	d.strict = 1;
+	qaws_mesh_3d_sweep(&o, &r, b, m, &d);
+	qaws_mesh_3d_get_positions(corners, b);
+	miss = sw_missing(o, m, corners, 8);
+	{
+		/* a vertex motion (the cube's top rising) and a motion along a curve */
+		qaws_scalar p1[24], v0[24], v1[24], cp[12] = { 0, 0, 0, 1, 2, 0, 2, -1, 1, 3, 0, 2 };
+		qaws_bezier_desc bd;
+		unsigned int i;
+		for (i = 0; i < 24; i++)
+		{
+			p1[i] = corners[i] + (qaws_scalar)(i % 3 == 2 && corners[i] > 0 ? 0.5 : 0);
+			v0[i] = v1[i] = (qaws_scalar)(i % 3 == 2 && corners[i] > 0 ? 0.5 : 0);
+		}
+		qaws_motion_create_vertices(&mv, corners, p1, v0, v1, NULL, NULL, 8, 0);
+		qaws_mesh_3d_sweep(&ov, &rv, b, mv, &d);
+		memset(&bd, 0, sizeof bd);
+		bd.dimension = QAWS_DIMENSION_3D; bd.degree = 3; bd.control_points = cp; bd.control_point_count = 4;
+		qaws_curve_create_bezier(&cv, &bd);
+		qaws_motion_create_curve(&mc, cv, NULL);
+		qaws_mesh_3d_sweep(&oc, &rc, b, mc, &d);
+	}
+	sprintf(msg, "certified: %u slabs, certified %d, chords within %.4f (tolerance %.2f), the corners at 801 times outside by %.4f, closed %d; "
+		"a vertex motion certified %d, a curve motion %d", r.slabs, r.certified, (double)r.deviation, tol, miss, r.closed, rv.certified, rc.certified);
+	printf("  %s\n", msg);
+	TEST_ASSERT(o && r.certified == 1 && (double)r.deviation <= tol && miss <= tol && r.closed && ov && rv.certified == 1 && oc && rc.certified == 0, msg);
+	qaws_motion_destroy(m); qaws_motion_destroy(mv); qaws_motion_destroy(mc);
+	qaws_curve_destroy(cv);
+	qaws_mesh_3d_destroy(b); qaws_mesh_3d_destroy(o); qaws_mesh_3d_destroy(ov); qaws_mesh_3d_destroy(oc);
+}
+
 /* a result corner's source point on the body (rest coordinates): face source_face's triangle, weights source_uv */
 static void sw_source_point(qaws_mesh_3d const* body, unsigned int face, double const* uv, double* p)
 {
@@ -968,6 +1059,7 @@ int test_180_mesh_sweep_main(void)
 	test_spin_more();
 	test_spin_edges();
 	test_strict();
+	test_certified();
 	test_spin_generate();
 	test_slab_generate();
 	test_tracks();

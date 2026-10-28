@@ -280,7 +280,8 @@ boundary traced in space-time; the lifted surfacing of generalized sweep volumes
    a ball's tube within 1.7%. Since 2026-10-26 (f6356fb) each slab adds the convex hull of every outgoing face's two
    positions, so rotating walls never twist; checked 2026-10-28: a thin box turned a quarter and a half and a cube
    turning along a planar curve all close as one piece at every tolerance from 0.02 to 0.001 (the planar motion's
-   coplanar walls once left open no longer are). Not done: the certified bound (the trajectories' derivatives).
+   coplanar walls once left open no longer are). The certified bound: done 2026-10-28 (with strict, each slab's chords bounded by (b - a)^2 / 8 max |x''| from Bernstein
+   bounds of the pose or vertex motion's polynomials; a motion along a curve stays sampled; test 180).
 3. **Exact where the motion allows.** Translations along polylines and polynomial paths with the exact kernel:
    the sweep of a polyhedron along a segment is exact (its faces' prisms and the union), so G-code's linear moves give
    exact carving; polynomial and rational motions exact up to the slabs' certified bound, the Booleans exact on them.

@@ -187,6 +187,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Certified sweep chords: with `qaws_sweep_desc.strict`, each slab's deviation from its chords is bounded rather than
+  sampled ((b - a)^2 / 8 times the largest |x''| over the slab, from Bernstein bounds of the pose or vertex motion's
+  polynomials), `qaws_sweep_report.certified` telling when every slab was (a motion along a curve stays sampled).
+  Test 180.
 - Texture attributes (`qaws_mesh_texture.h`): an attribute on a grid of texels over a mesh's (u, v), the caller's array:
   `qaws_mesh_3d_bake_texture` rasterizes a vertex, corner or face attribute at the texels' centres by its rule (with a
   gutter of grown rings, repeated axes unwrapped, faces filtered by a texture id), `qaws_texture_sample` and
