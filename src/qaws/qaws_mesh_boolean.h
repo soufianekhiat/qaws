@@ -31,7 +31,10 @@
  * B there (qaws_mesh_bvh.h, the operands' own triangles) say whether each
  * side is in the result. A piece between in and out is kept, turned so its
  * front faces out; the others are dropped. Where B lies on A (coplanar
- * overlaps), A's pieces stand for both. Because winding numbers decide
+ * overlaps), A's pieces stand for both: B's there are dropped, and A's faces
+ * there carry the face attribute "overlap" (NEAREST, 1 on them, 0 on the
+ * others; only when there are any), so a caller wanting B's values there can
+ * find them. Because winding numbers decide
  * inside, operands that are not quite closed (small holes, soups,
  * overlapping parts) still give a sensible result.
  *
@@ -55,6 +58,7 @@ typedef struct qaws_boolean_report
 	unsigned int flipped;              /* of them, turned (B's pieces facing into A - B) */
 	unsigned int dropped;              /* pieces inside or outside the result */
 	unsigned int flat_flips;           /* edges inside flat regions turned toward Delaunay */
+	unsigned int overlapped;           /* faces of A standing for both operands where B lies on A (the "overlap" attribute) */
 	int closed;                        /* every directed edge of the result cancels */
 } qaws_boolean_report;
 
@@ -66,8 +70,8 @@ qaws_status qaws_mesh_boolean(qaws_mesh_3d** out_mesh, qaws_boolean_report* repo
 /*
  * The same Boolean of two meshes, their attributes carried (normals, UVs,
  * colours, material ids, ...):
- *   - matched by name (unnamed ones never match; an input's "source" is
- *     replaced by the result's); an attribute of both operands must have the
+ *   - matched by name (unnamed ones never match; an input's "source" and
+ *     "overlap" are replaced by the result's); an attribute of both operands must have the
  *     same element, components and rule (INVALID_ARGUMENT otherwise); one
  *     operand's alone reads zeros on the other's faces, a NORMAL one that
  *     face's normal;

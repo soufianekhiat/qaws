@@ -4042,6 +4042,58 @@ qaws_status sx_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 			goto oom;
 		for (i = 0; i < 3 * nk && kopp[i] != SX_NONE; i++) {}
 		st = nk ? sx_mesh(out, kpos, m, keep, i == 3 * nk ? kopp : NULL, keep_src, nk) : QAWS_STATUS_OK;
+		if (st == QAWS_STATUS_OK && nk && *out && two && bb)
+		{
+			/* A's faces lying on B (coplanar overlaps: they stand for both, B's there dropped): those of an input face in a
+			   coplanar pair whose centre is within 4 eps of B, the "overlap" face attribute 1 there (none without any) */
+			unsigned int nq = 0, f2;
+			unsigned int* qi = (unsigned int*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(unsigned int), (size_t)nk + 1));
+			qaws_scalar* qp = (qaws_scalar*)qaws_internal_scratch_malloc(qaws_internal_mul3(sizeof(qaws_scalar), 3, (size_t)nk + 1));
+			qaws_scalar* ov = (qaws_scalar*)qaws_internal_scratch_zalloc((size_t)nk + 1, sizeof(qaws_scalar));
+			qaws_mesh_hit* qh = NULL;
+			if (!qi || !qp || !ov)
+				st = QAWS_STATUS_ALLOCATION_FAILURE;
+			for (f2 = 0; st == QAWS_STATUS_OK && f2 < nk; f2++)
+			{
+				unsigned int s2 = (unsigned int)keep_src[f2];
+				if (s2 >= a->face_count || !o.copl[s2])
+					continue;
+				for (k = 0; k < 3; k++)
+					qp[3 * (size_t)nq + k] = (qaws_scalar)(((double)kpos[3 * (size_t)keep[3 * (size_t)f2] + k] + (double)kpos[3 * (size_t)keep[3 * (size_t)f2 + 1] + k] +
+						(double)kpos[3 * (size_t)keep[3 * (size_t)f2 + 2] + k]) / 3);
+				qi[nq++] = f2;
+			}
+			if (st == QAWS_STATUS_OK && nq)
+			{
+				if (!(qh = (qaws_mesh_hit*)qaws_internal_scratch_malloc(qaws_internal_mul2(sizeof(qaws_mesh_hit), (size_t)nq))))
+					st = QAWS_STATUS_ALLOCATION_FAILURE;
+				else
+					st = qaws_mesh_bvh_closest(qh, bb, qp, nq, (qaws_scalar)(4 * o.eps), desc ? desc->executor : NULL);
+				for (f2 = 0; st == QAWS_STATUS_OK && f2 < nq; f2++)
+					if (qh[f2].element != QAWS_MESH_NONE)
+					{
+						ov[qi[f2]] = 1;
+						report->overlapped++;
+					}
+			}
+			if (st == QAWS_STATUS_OK && report->overlapped)
+			{
+				qaws_attribute_desc ad;
+				unsigned int attr;
+				memset(&ad, 0, sizeof ad);
+				ad.name = "overlap";
+				ad.element = QAWS_MESH_FACE;
+				ad.components = 1;
+				ad.rule = QAWS_ATTRIBUTE_NEAREST;
+				st = qaws_mesh_3d_add_attribute(&attr, *out, ov, &ad);
+			}
+			qaws_internal_free(qi); qaws_internal_free(qp); qaws_internal_free(ov); qaws_internal_free(qh);
+			if (st != QAWS_STATUS_OK)
+			{
+				qaws_mesh_3d_destroy(*out);
+				*out = NULL;
+			}
+		}
 		if (st == QAWS_STATUS_OK && nk && *out)
 		{
 			/* (closed as the mesh made: an edge of four faces passes the edge count, then splits open) */

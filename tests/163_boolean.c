@@ -17,6 +17,9 @@
  *     their self-union closed and one piece (patches sampled on the wrong
  *     side of a surface nearer than the sample mended from their
  *     neighbours round the edges where they meet);
+ *   - coplanar overlaps flagged: B turned about z sharing A's floor and ceiling,
+ *     the union's and intersection's "overlap" faces (all A's) cover 2 V(A n B);
+ *     none for the difference or two cubes crossing;
  *   - refusals: no faces, an unknown operation.
  */
 
@@ -242,6 +245,94 @@ static void test_turned(void)
 	bo_identities("cubes sharing two planes", &A, &B);
 }
 
+/* the area of m's faces whose "overlap" is 1, their count, all from A (source below na); -1 without the attribute */
+static double bo_overlap_area(qaws_mesh_3d const* m, unsigned int na, unsigned int* count, int* from_a)
+{
+	unsigned int id, sid, nf = m ? qaws_mesh_3d_get_triangle_count(m) : 0, nv = m ? qaws_mesh_3d_get_vertex_count(m) : 0, f, k;
+	qaws_scalar *ov, *src, *p;
+	unsigned int* t;
+	double area = 0;
+	*count = 0;
+	*from_a = 1;
+	if (!m || qaws_mesh_3d_find_attribute(&id, m, "overlap") != QAWS_STATUS_OK || qaws_mesh_3d_find_attribute(&sid, m, "source") != QAWS_STATUS_OK)
+		return -1;
+	ov = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (nf + 1));
+	src = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (nf + 1));
+	p = (qaws_scalar*)malloc(sizeof(qaws_scalar) * 3 * (nv + 1));
+	t = (unsigned int*)malloc(sizeof(unsigned int) * 3 * (nf + 1));
+	qaws_mesh_3d_get_attribute(ov, m, id);
+	qaws_mesh_3d_get_attribute(src, m, sid);
+	qaws_mesh_3d_get_positions(p, m);
+	qaws_mesh_3d_get_triangles(t, m);
+	for (f = 0; f < nf; f++)
+	{
+		double u[3], w[3];
+		if (ov[f] != 1)
+			continue;
+		for (k = 0; k < 3; k++)
+		{
+			u[k] = (double)p[3 * t[3 * f + 1] + k] - (double)p[3 * t[3 * f] + k];
+			w[k] = (double)p[3 * t[3 * f + 2] + k] - (double)p[3 * t[3 * f] + k];
+		}
+		area += 0.5 * sqrt(pow(u[1] * w[2] - u[2] * w[1], 2) + pow(u[2] * w[0] - u[0] * w[2], 2) + pow(u[0] * w[1] - u[1] * w[0], 2));
+		(*count)++;
+		*from_a &= (unsigned int)src[f] < na;
+	}
+	free(ov); free(src); free(p); free(t);
+	return area;
+}
+
+/* coplanar overlaps flagged: B turned about z sharing A's floor and ceiling; the union's and the intersection's faces
+   standing for both ("overlap" 1, all A's) cover 2 V(A n B) (each plane's overlap, the solids being prisms of height 1);
+   the difference has none (the attribute absent), nor two cubes crossing without a shared plane */
+static void test_overlap(void)
+{
+	static double const lo0[3] = { 0, 0, 0 }, hi0[3] = { 1, 1, 1 }, lo2[3] = { 0.5, 0.25, 0 }, hi2[3] = { 1.5, 1.25, 1 };
+	static double const lo1[3] = { 0.4, 0.3, 0.2 }, hi1[3] = { 1.4, 1.3, 1.2 };
+	static qaws_boolean_op const ops[3] = { QAWS_BOOLEAN_UNION, QAWS_BOOLEAN_INTERSECTION, QAWS_BOOLEAN_DIFFERENCE };
+	qaws_scalar x[48];
+	unsigned int t[72], nv = 0, nt = 0, i, cnt[3] = { 0, 0, 0 }, rep[3] = { 0, 0, 0 }, crossing_rep = 1;
+	qaws_mesh_3d_desc A, B;
+	double ar[3], vi = 0, crossing = 0;
+	int fa[3] = { 1, 1, 1 }, fx = 1;
+	char msg[400];
+	bo_box(lo0, hi0, bo_z, 0, x, &nv, t, &nt);
+	bo_box(lo2, hi2, bo_z, 0.4, x, &nv, t, &nt);
+	A = bo_desc(x, 8, t, 12);
+	B = bo_desc(x + 24, 8, t, 12);
+	for (i = 0; i < 3; i++)
+	{
+		qaws_boolean_report r;
+		qaws_mesh_3d* m = NULL;
+		qaws_mesh_boolean(&m, &r, &A, &B, ops[i], NULL);
+		if (i == 1)
+			vi = bo_volume(m);
+		ar[i] = bo_overlap_area(m, 12, &cnt[i], &fa[i]);
+		rep[i] = r.overlapped;
+		qaws_mesh_3d_destroy(m);
+	}
+	{
+		/* (crossing cubes: no shared plane) */
+		qaws_boolean_report r;
+		qaws_mesh_3d* m = NULL;
+		unsigned int c2;
+		nv = nt = 0;
+		bo_box(lo0, hi0, bo_z, 0, x, &nv, t, &nt);
+		bo_box(lo1, hi1, bo_z, 0, x, &nv, t, &nt);
+		A = bo_desc(x, 8, t, 12);
+		B = bo_desc(x + 24, 8, t, 12);
+		qaws_mesh_boolean(&m, &r, &A, &B, QAWS_BOOLEAN_UNION, NULL);
+		crossing = bo_overlap_area(m, 12, &c2, &fx);
+		crossing_rep = r.overlapped;
+		qaws_mesh_3d_destroy(m);
+	}
+	sprintf(msg, "overlap flagged: union %u faces (%u reported) of area %.15f, intersection %u (%u) of %.15f, 2 V(A n B) %.15f, all A's %d %d; "
+		"difference %.0f (%u), crossing cubes %.0f (%u)", cnt[0], rep[0], ar[0], cnt[1], rep[1], ar[1], 2 * vi, fa[0], fa[1], ar[2], rep[2], crossing, crossing_rep);
+	printf("  %s\n", msg);
+	TEST_ASSERT(vi > 0 && cnt[0] && cnt[0] == rep[0] && cnt[1] == rep[1] && fabs(ar[0] - 2 * vi) < 1e-12 && fabs(ar[1] - 2 * vi) < 1e-12 && fa[0] && fa[1]
+		&& ar[2] == -1 && rep[2] == 0 && crossing == -1 && crossing_rep == 0, msg);
+}
+
 static void test_spheres(void)
 {
 	static double const c0[3] = { 0, 0, 0 }, c1[3] = { 0.7, 0.25, 0.15 };
@@ -410,6 +501,7 @@ int test_163_boolean_main(void)
 	test_spheres();
 	test_nested();
 	test_touching();
+	test_overlap();
 	test_refusals();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;

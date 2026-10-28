@@ -187,6 +187,8 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Booleans flag coplanar overlaps: where B lies on A, A's faces standing for both carry the face attribute `overlap` (1;
+  present only when there are any) and `qaws_boolean_report.overlapped` counts them. Test 163.
 - Weighted promotion: `qaws_attribute_promote_desc.weighted` and `qaws_mesh_3d_reduce_attribute_weighted` weigh each source
   by its area (a face; a corner its share; a vertex the sum of its corners') or length (an edge) in AVERAGE, SUM,
   SUM_OF_SQUARES and RMS: a weighted SUM over the mesh is the attribute's integral over the surface. Test 186.

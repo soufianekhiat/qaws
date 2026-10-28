@@ -349,7 +349,7 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 				goto oom;
 		}
 	}
-	/* the attributes, matched by name (unnamed ones never match; an input's "source" gives way to the result's) */
+	/* the attributes, matched by name (unnamed ones never match; an input's "source" and "overlap" give way to the result's) */
 	for (i = 0; i < np; i++)
 	{
 		unsigned int count = qaws_mesh_3d_get_attribute_count(P[i].m);
@@ -359,7 +359,7 @@ qaws_status cy_boolean(qaws_mesh_3d** out, qaws_boolean_report* report, qaws_mes
 			cy_attr* t = NULL;
 			int vx;
 			qaws_mesh_3d_get_attribute_desc(&ad, P[i].m, j);
-			if (ad.name && !strcmp(ad.name, "source"))
+			if (ad.name && (!strcmp(ad.name, "source") || !strcmp(ad.name, "overlap")))
 				continue;
 			/* (a vertex attribute taken per corner: it matches a corner one, both come out per corner) */
 			vx = ad.element == QAWS_MESH_VERTEX;
