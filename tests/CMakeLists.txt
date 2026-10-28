@@ -188,6 +188,7 @@ add_executable(
 184_sweep_implicit.c
 185_mesh_view.c
 186_mesh_promote.c
+187_mesh_texture.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

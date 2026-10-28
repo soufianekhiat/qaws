@@ -187,6 +187,10 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Texture attributes (`qaws_mesh_texture.h`): an attribute on a grid of texels over a mesh's (u, v), the caller's array:
+  `qaws_mesh_3d_bake_texture` rasterizes a vertex, corner or face attribute at the texels' centres by its rule (with a
+  gutter of grown rings, repeated axes unwrapped, faces filtered by a texture id), `qaws_texture_sample` and
+  `qaws_mesh_3d_sample_texture` read it back bilinearly by the rule. Test 187.
 - Rotation-minimizing frames along curves: `qaws_motion_create_curve_frames` with `QAWS_MOTION_FRAME_ROTATION_MINIMIZING`
   carries the body's rotation along a 3D curve with no turn about its tangent (double reflection, Wang et al. 2008; the
   angular velocity c' x c'' / |c'|^2): a plate swept along a space cubic is a pipe of the section's area times the length.

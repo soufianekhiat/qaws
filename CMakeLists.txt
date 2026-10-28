@@ -140,6 +140,7 @@ src/qaws/mesh/qaws_mesh_sweep_implicit.c
 src/qaws/mesh/qaws_mesh_view.c
 src/qaws/mesh/qaws_mesh_sweep_generate.c
 src/qaws/mesh/qaws_mesh_promote.c
+src/qaws/mesh/qaws_mesh_texture.c
 src/qaws/mesh/qaws_mesh_carry.c
 src/qaws/mesh/qaws_mesh_subdivide.c
 src/qaws/mesh/qaws_volume_improve.c
