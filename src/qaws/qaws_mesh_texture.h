@@ -60,6 +60,7 @@ typedef struct qaws_texture_desc
 	unsigned int gutter;                /* baking: rings of texels grown past the charts; 0: none */
 	char const* texture_id;             /* NULL, or a 1-component face attribute: only the faces whose value is id */
 	unsigned int id;
+	qaws_scalar max_distance;            /* baking from a source: texels whose point is farther from it left untouched; 0: no limit */
 } qaws_texture_desc;
 
 /* The vertex, corner or face attribute name baked into texture (its size and components given, its texels written, its
@@ -68,6 +69,13 @@ typedef struct qaws_texture_desc
    "uv", no gutter, every face. */
 qaws_status qaws_mesh_3d_bake_texture(unsigned char* out_coverage, qaws_texture* texture, qaws_mesh_3d const* mesh, char const* name,
 	qaws_texture_desc const* desc);
+
+/* The same from another mesh: each texel's point on mesh (its triangle at the centre's weights) taken to the closest
+   point of source, the source's vertex, corner or face attribute name there by its rule (a detailed mesh's colours or
+   normals onto a simplified one's texture, at the texture's resolution rather than the simplified mesh's). The uv and
+   texture id are mesh's. INVALID_ARGUMENT as baking (the attribute the source's). */
+qaws_status qaws_mesh_3d_bake_texture_from(unsigned char* out_coverage, qaws_texture* texture, qaws_mesh_3d const* mesh, qaws_mesh_3d const* source,
+	char const* name, qaws_texture_desc const* desc);
 
 /* count points' values (components each) read from texture at uv (2 each) */
 qaws_status qaws_texture_sample(qaws_scalar* out_values, qaws_texture const* texture, qaws_scalar const* uv, unsigned int count);

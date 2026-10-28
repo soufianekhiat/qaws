@@ -10,7 +10,10 @@
  *     values within the chart's range, the rest untouched;
  *   - repeated along u: a triangle across u = 1 (its corners at u 0.9 and 0.1 + 1) written on both sides of the edge;
  *   - only the faces of one texture id baked;
- *   - refusals: an attribute of other components, no uv, an edge attribute.
+ *   - refusals: an attribute of other components, no uv, an edge attribute;
+ *   - from a detailed mesh (qaws_mesh_3d_bake_texture_from): a wave on a 32 x 32 grid onto two triangles' 32 x 32 texture,
+ *     each texel the fine mesh's interpolation at its point exactly (the two triangles' vertices could not hold it);
+ *     lifted 0.01 off, max_distance 0.005 writes none, 0.02 all.
  */
 
 #include "test_common.h"
@@ -282,6 +285,88 @@ static void test_gutter_repeat_ids(void)
 	qaws_mesh_3d_destroy(m);
 }
 
+/* the fine grid's (n x n, tx_grid's triangles) linear interpolation of per-vertex values f at (x, y) */
+static double tx_interp(qaws_scalar const* f, unsigned int n, double x, double y)
+{
+	unsigned int i = (unsigned int)fmin(n - 1, floor(x * n)), j = (unsigned int)fmin(n - 1, floor(y * n)), a = j * (n + 1) + i;
+	double fx = x * n - i, fy = y * n - j;
+	/* (below the cell's diagonal: a, a + 1, a + n + 2; above: a, a + n + 2, a + n + 1) */
+	if (fx >= fy)
+		return (double)f[a] + fx * ((double)f[a + 1] - f[a]) + fy * ((double)f[a + n + 2] - f[a + 1]);
+	return (double)f[a] + fy * ((double)f[a + n + 1] - f[a]) + fx * ((double)f[a + n + 2] - f[a + n + 1]);
+}
+
+static double tx_wave(double x, double y)
+{
+	return sin(10 * x) * cos(8 * y);
+}
+
+/* a detailed mesh's values onto a coarse one's texture: a 32 x 32 grid with a wave per vertex, the unit square of two
+   triangles (its uv x and y) baked from it into 32 x 32 texels: each texel the fine mesh's own interpolation at its
+   centre; the coarse mesh's four vertex values off the wave by far more; lifted 0.01 off the source, a max_distance of
+   0.005 leaves every texel untouched, 0.02 writes them all */
+static void test_transfer(void)
+{
+	enum { N = 32, R = 32 };
+	qaws_mesh_3d *fine = tx_grid(N, 1), *coarse = tx_grid(1, 1);
+	qaws_scalar* f = (qaws_scalar*)malloc(sizeof(qaws_scalar) * (N + 1) * (N + 1));
+	qaws_scalar tex[R * R];
+	unsigned char cov[R * R];
+	qaws_texture t;
+	qaws_texture_desc d;
+	unsigned int i, j, written = 0, near0 = 0, near1 = 0;
+	double e_tex = 0, e_vert = 0;
+	qaws_status st;
+	char msg[400];
+	for (i = 0; i < (N + 1) * (N + 1); i++)
+	{
+		qaws_vec3 p = qaws_mesh_3d_get_vertex(fine, i);
+		f[i] = (qaws_scalar)tx_wave(p.x, p.y);
+	}
+	tx_add(fine, "f", QAWS_MESH_VERTEX, 1, QAWS_ATTRIBUTE_LINEAR, f);
+	memset(&t, 0, sizeof t);
+	t.texels = tex; t.width = R; t.height = R; t.components = 1;
+	st = qaws_mesh_3d_bake_texture_from(cov, &t, coarse, fine, "f", NULL);
+	for (j = 0; j < R; j++)
+		for (i = 0; i < R; i++)
+		{
+			double x = (i + 0.5) / R, y = (j + 0.5) / R;
+			written += cov[j * R + i] == 1;
+			e_tex = fmax(e_tex, fabs((double)tex[j * R + i] - tx_interp(f, N, x, y)));
+			/* (what the coarse mesh's vertices can hold: the wave at its four corners, interpolated) */
+			{
+				double a = tx_wave(0, 0), b = tx_wave(1, 0), c = tx_wave(1, 1), e = tx_wave(0, 1);
+				double lin = x >= y ? a + x * (b - a) + y * (c - b) : a + y * (e - a) + x * (c - e);
+				e_vert = fmax(e_vert, fabs(lin - tx_interp(f, N, x, y)));
+			}
+		}
+	{
+		/* lifted 0.01 above the source */
+		unsigned int nv = qaws_mesh_3d_get_vertex_count(coarse);
+		qaws_scalar x[12];
+		qaws_mesh_3d_get_positions(x, coarse);
+		for (i = 0; i < nv; i++)
+			x[3 * i + 2] = (qaws_scalar)0.01;
+		qaws_mesh_3d_set_positions(coarse, x);
+		memset(&d, 0, sizeof d);
+		d.max_distance = (qaws_scalar)0.005;
+		qaws_mesh_3d_bake_texture_from(cov, &t, coarse, fine, "f", &d);
+		for (i = 0; i < R * R; i++)
+			near0 += cov[i] != 0;
+		d.max_distance = (qaws_scalar)0.02;
+		qaws_mesh_3d_bake_texture_from(cov, &t, coarse, fine, "f", &d);
+		for (i = 0; i < R * R; i++)
+			near1 += cov[i] == 1;
+	}
+	sprintf(msg, "from a 32 x 32 grid onto two triangles' 32 x 32 texture: %u texels, off the fine mesh by %.1e (its four vertices could only hold it "
+		"within %.2f); lifted 0.01: %u texels within 0.005, %u within 0.02", written, e_tex, e_vert, near0, near1);
+	printf("  %s\n", msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && written == R * R && e_tex < 1e-12 && e_vert > 0.5 && near0 == 0 && near1 == R * R, msg);
+	free(f);
+	qaws_mesh_3d_destroy(fine);
+	qaws_mesh_3d_destroy(coarse);
+}
+
 int test_187_mesh_texture_main(void)
 {
 	g_pass = 0;
@@ -290,6 +375,7 @@ int test_187_mesh_texture_main(void)
 	test_linear();
 	test_rules();
 	test_gutter_repeat_ids();
+	test_transfer();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

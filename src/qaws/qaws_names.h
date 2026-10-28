@@ -920,6 +920,7 @@
 #define qaws_mesh_3d QAWS_SFX(qaws_mesh_3d)
 #define qaws_mesh_3d_add_attribute QAWS_SFX(qaws_mesh_3d_add_attribute)
 #define qaws_mesh_3d_bake_texture QAWS_SFX(qaws_mesh_3d_bake_texture)
+#define qaws_mesh_3d_bake_texture_from QAWS_SFX(qaws_mesh_3d_bake_texture_from)
 #define qaws_mesh_3d_boolean QAWS_SFX(qaws_mesh_3d_boolean)
 #define qaws_mesh_3d_can_collapse_edge QAWS_SFX(qaws_mesh_3d_can_collapse_edge)
 #define qaws_mesh_3d_can_flip_edge QAWS_SFX(qaws_mesh_3d_can_flip_edge)
