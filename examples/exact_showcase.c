@@ -43,13 +43,6 @@
 #include "exact_showcase/04_nurbs_extraction.c"
 #include "exact_showcase/05_families.c"
 #include "exact_showcase/06_surface.c"
-#include "exact_showcase/07_hits.c"
-#include "exact_showcase/08_curve_hits.c"
-#include "exact_showcase/09_self_hits.c"
-#include "exact_showcase/10_ray_cast.c"
-#include "exact_showcase/11_boolean.c"
-#include "exact_showcase/12_curve_surface.c"
-#include "exact_showcase/13_ssi.c"
 
 int main(void)
 {
@@ -61,12 +54,5 @@ int main(void)
 	demo_nurbs_extraction();
 	demo_families();
 	demo_surface();
-	demo_hits();
-	demo_curve_hits();
-	demo_self_hits();
-	demo_ray_cast();
-	demo_ssi();
-	demo_curve_surface();
-	demo_boolean();
 	return 0;
 }

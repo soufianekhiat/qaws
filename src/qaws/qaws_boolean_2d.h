@@ -26,21 +26,4 @@ typedef enum qaws_boolean_op {
 } qaws_boolean_op;
 #endif
 
-/* Perform a boolean operation on two planar regions (through qaws_clip,
-   see qaws_clip.h for many paths, fill rules and the other clip types).
-   Each region is defined by a closed 2D curve (boundary).
-   The result is one or more closed 2D curves representing the boundary
-   of the resulting region.
-   Each result path (outer or hole) is one curve: a copy of the exact piece,
-   or a composite of pieces; holes run clockwise. BUFFER_TOO_SMALL when
-   there are more paths than boundary_capacity (the first ones are written).
-   Curves must be 2D and closed (or treated as closed by connecting endpoints). */
-qaws_status qaws_boolean_2d(
-	qaws_curve** out_boundaries,
-	unsigned int* out_count,
-	qaws_curve const* region_a,
-	qaws_curve const* region_b,
-	unsigned int boundary_capacity,
-	qaws_boolean_op operation);
-
 #endif /* QAWS_BOOLEAN_2D_H */

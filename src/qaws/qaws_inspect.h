@@ -205,34 +205,6 @@ typedef struct qaws_intersection_3d {
 	qaws_vec3 position;
 } qaws_intersection_3d;
 
-/* Self-intersection detection */
-qaws_status qaws_curve_find_self_intersections_2d(
-	qaws_intersection_2d* out_intersections,
-	unsigned int* out_count,
-	qaws_curve const* curve,
-	unsigned int intersection_capacity);
-
-qaws_status qaws_curve_find_self_intersections_3d(
-	qaws_intersection_3d* out_intersections,
-	unsigned int* out_count,
-	qaws_curve const* curve,
-	unsigned int intersection_capacity);
-
-/* Curve-curve intersection */
-qaws_status qaws_curve_find_intersections_2d(
-	qaws_intersection_2d* out_intersections,
-	unsigned int* out_count,
-	qaws_curve const* curve_a,
-	qaws_curve const* curve_b,
-	unsigned int intersection_capacity);
-
-qaws_status qaws_curve_find_intersections_3d(
-	qaws_intersection_3d* out_intersections,
-	unsigned int* out_count,
-	qaws_curve const* curve_a,
-	qaws_curve const* curve_b,
-	unsigned int intersection_capacity);
-
 /* Family-specific inspection */
 qaws_status qaws_bezier_get_control_points(
 	void* out_control_points,
@@ -344,16 +316,6 @@ typedef struct qaws_plane {
 	qaws_vec3 normal;
 } qaws_plane;
 
-/* Find parameter values where a 3D curve crosses a plane.
-   Uses bisection root-finding on the signed distance function dot(C(t) - plane.point, plane.normal). */
-qaws_status qaws_curve_find_plane_intersections(
-	qaws_scalar* out_parameters,
-	qaws_vec3* out_positions,
-	unsigned int* out_count,
-	qaws_curve const* curve,
-	qaws_plane const* plane,
-	unsigned int capacity);
-
 /* Surface-curve intersection */
 
 /* Find points where a 3D curve pierces a surface.
@@ -365,13 +327,6 @@ typedef struct qaws_surface_curve_intersection {
 	qaws_scalar t;
 	qaws_vec3 position;
 } qaws_surface_curve_intersection;
-
-qaws_status qaws_surface_find_curve_intersections(
-	qaws_surface_curve_intersection* out_intersections,
-	unsigned int* out_count,
-	qaws_surface const* surface,
-	qaws_curve const* curve,
-	unsigned int capacity);
 
 /* Adaptive tessellation */
 
@@ -440,60 +395,5 @@ qaws_status qaws_surface_project_curve(
 	qaws_surface const* surface,
 	qaws_curve const* curve,
 	unsigned int sample_count);
-
-/* Geodesic curve on surface */
-
-/* Compute a geodesic curve (shortest path) between two points on a surface.
-   Uses a shooting method with RK4 integration of the geodesic ODE.
-   max_iterations controls the shooting refinement (0 = default 20).
-   step_count controls the integration resolution (0 = default 200).
-   The output is a 3D B-spline curve lying on the surface. */
-qaws_status qaws_surface_compute_geodesic(
-	qaws_curve** out_curve,
-	qaws_surface const* surface,
-	unsigned int step_count,
-	qaws_scalar start_u,
-	qaws_scalar start_v,
-	qaws_scalar end_u,
-	qaws_scalar end_v,
-	unsigned int max_iterations);
-
-/* Geodesic path via edge flipping (Sharp & Crane, SGP 2020).
-   Tessellates the surface, finds the shortest discrete geodesic on the mesh
-   via Dijkstra + iterative edge-flip shortening, returns a 3D B-spline.
-   tessellation_desc: mesh resolution (NULL = defaults).
-   max_iterations: flip iteration limit (0 = default 1000). */
-qaws_status qaws_surface_compute_geodesic_flip(
-	qaws_curve** out_curve,
-	qaws_surface const* surface, qaws_tessellation_desc const* tessellation_desc,
-	qaws_scalar start_u, qaws_scalar start_v,
-	qaws_scalar end_u,
-	qaws_scalar end_v,
-	unsigned int max_iterations);
-
-/* Geodesic path via heat method (Crane, Weischedel, Wardetzky 2017).
-   Computes geodesic distance from start, traces shortest path to end
-   by gradient descent on the distance field. Returns a 3D B-spline. */
-qaws_status qaws_surface_compute_geodesic_heat(
-	qaws_curve** out_curve,
-	qaws_surface const* surface, qaws_tessellation_desc const* tessellation_desc,
-	qaws_scalar start_u, qaws_scalar start_v,
-	qaws_scalar end_u,
-	qaws_scalar end_v);
-
-/* Geodesic distance field via heat method (Crane, Weischedel, Wardetzky 2017).
-   Tessellates the surface, solves heat diffusion + Poisson on the mesh.
-   Returns per-vertex distances + (u,v) coordinates of mesh vertices.
-   out_distances[i] is the geodesic distance at vertex (out_u[i], out_v[i]).
-   capacity is the size of the output buffers. out_count receives the actual count. */
-qaws_status qaws_surface_compute_geodesic_distance(
-	qaws_scalar* out_u,
-	qaws_scalar* out_v, qaws_scalar* out_distances,
-	unsigned int* out_count,
-	qaws_surface const* surface,
-	unsigned int capacity,
-	qaws_tessellation_desc const* tessellation_desc,
-	qaws_scalar source_u,
-	qaws_scalar source_v);
 
 #endif /* QAWS_INSPECT_H */

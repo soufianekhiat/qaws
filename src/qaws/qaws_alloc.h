@@ -47,7 +47,7 @@
 #include "qaws_surface_trim.h"
 #include "qaws_surface_tspline.h"
 #include "qaws_surface_subdiv.h"
-#include "qaws_surface_fillet.h"
+#include "qaws_surface_types.h"
 
 /*
  * Allocator-aware creation functions (_ex variants).
@@ -216,19 +216,6 @@ qaws_status qaws_surface_create_tspline_ex(
 qaws_status qaws_surface_create_subdiv_ex(
 	qaws_surface** out_surface,
 	qaws_surface_subdiv_desc const* desc,
-	qaws_allocator const* allocator);
-
-qaws_status qaws_surface_create_fillet_ex(
-	qaws_surface** out_surface,
-	qaws_surface_fillet_desc const* desc,
-	qaws_allocator const* allocator);
-
-/* the fillet with its trim curves on both surfaces; all three from the allocator */
-qaws_status qaws_surface_create_fillet_with_trims_ex(
-	qaws_surface** out_fillet,
-	qaws_curve** out_trim_a,
-	qaws_curve** out_trim_b,
-	qaws_surface_fillet_desc const* desc,
 	qaws_allocator const* allocator);
 
 #endif /* QAWS_ALLOC_H */

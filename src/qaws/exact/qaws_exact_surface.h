@@ -35,20 +35,4 @@ qaws_status qaws_exact_surface_normal_rational(qaws_exact_surface const* s, int6
    ulps outward) when every weight is positive, otherwise unbounded. */
 void qaws_exact_patch_box(qaws_exact_surface const* s, unsigned int iu, unsigned int iv, double lo[3], double hi[3]);
 
-/* Certified intersections of span ks of a 3D curve with patch (iu, iv),
-   appended to out without deduplication (a root on a span or patch edge is
-   found by both neighbours). */
-qaws_status qaws_exact_span_patch_hits(qaws_exact_curve const* curve, unsigned int ks, qaws_exact_surface const* surface, unsigned int iu,
-	unsigned int iv, qaws_exact_curve_surface_hit* out, unsigned int capacity, unsigned int* count);
-
-/* do two hits' enclosures overlap in t, u and v (the same root)? */
-int qaws_exact_curve_surface_hits_overlap(qaws_exact_curve_surface_hit const* a, qaws_exact_curve_surface_hit const* b);
-
-/* qaws_exact_surface_surface_hits over the listed patch pairs only
-   (pairs[4 k .. 4 k + 3] = iu1, iv1, iu2, iv2); the others must be proven
-   apart by the caller. */
-qaws_status qaws_exact_ssi_solve(qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int min_depth, unsigned int const* pairs,
-	unsigned int pair_count, qaws_exact_ssi_point* out_points, unsigned int point_capacity, unsigned int* out_point_count,
-	qaws_exact_ssi_branch* out_branches, unsigned int branch_capacity, unsigned int* out_branch_count);
-
 #endif /* QAWS_EXACT_SURFACE_H */

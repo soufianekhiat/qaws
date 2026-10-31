@@ -58,9 +58,6 @@
 #include "diff_showcase/07_coons.c"
 #include "diff_showcase/08_networks.c"
 #include "diff_showcase/09_projection.c"
-#include "diff_showcase/10_soap_film.c"
-#include "diff_showcase/11_parameter_correction.c"
-#include "diff_showcase/12_arch.c"
 #include "diff_showcase/13_knot_placement.c"
 #include "diff_showcase/14_arc_length.c"
 #include "diff_showcase/15_cdf_measures.c"
@@ -81,9 +78,6 @@ int main(void)
 	demo_coons();
 	demo_networks();
 	demo_projection();
-	demo_soap_film();
-	demo_parameter_correction();
-	demo_arch();
 	demo_knot_placement();
 	demo_arc_length();
 	demo_cdf_measures();

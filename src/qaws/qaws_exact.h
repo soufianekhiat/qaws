@@ -192,21 +192,6 @@ typedef struct qaws_exact_hit
 } qaws_exact_hit;
 
 /*
- * Intersections of a 2D exact curve with the infinite line through the
- * double points p0 != p1, crossing intervals shrunk to width <= width
- * (0: the narrowest the parameter lattice gives, about 2^-60 of a span).
- * QAWS_STATUS_CERTIFICATION_FAILED at a tangency (a multiple root cannot be
- * told from two close crossings by signs), QAWS_STATUS_BUFFER_TOO_SMALL
- * past capacity (out_count holds the number found so far).
- */
-qaws_status qaws_exact_curve_line_hits(qaws_exact_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve, double const p0[2],
-	double const p1[2], double width, unsigned int capacity);
-
-/* The same for a 3D exact curve and the plane through `point` with normal `normal` (doubles, taken exactly). */
-qaws_status qaws_exact_curve_plane_hits(qaws_exact_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve, double const point[3],
-	double const normal[3], double width, unsigned int capacity);
-
-/*
  * An intersection of two curves: curve a's parameter in [a_lo, a_hi], curve
  * b's in [b_lo, b_hi]. POINT: both parameters exact (lo == hi); CROSSING:
  * enclosures of one intersection; OVERLAP: the curves coincide over a's
@@ -221,46 +206,6 @@ typedef struct qaws_exact_pair
 	unsigned int multiplicity;  /* of the contact: 1 transversal, even a touch (the curves stay on one side), 0 not determined */
 	int opposite;               /* OVERLAP only */
 } qaws_exact_pair;
-
-/*
- * Certified intersections of two exact curves (both 2D or both 3D)
- * sharing one exact space. Span against span, the lower-degree span
- * (degree <= 6, product of the degrees <= 64) is implicitized exactly (its
- * Bezout matrix, in a coordinate plane for 3D), the other is substituted:
- * the roots of the resulting integer polynomial are isolated and each is
- * kept only if the implicitized span's own parameter, recovered exactly
- * from the matrix cofactors, is proven inside [0, 1]. In 3D the remaining
- * coordinate must agree: an exact zero test (a modular gcd proved by
- * division). Every intersection is reported once (a knot point by the
- * span ending there), each crossing enclosure holding exactly one.
- *
- * Tangencies: when the roots do not isolate, the resultant is split into
- * its square-free factors (Yun, with exact modular gcds) and every root
- * reports its multiplicity: even, the curves touch; odd, they cross.
- * Overlaps: two spans on one algebraic curve (a common component) give an
- * OVERLAP pair whose ends are exact rationals (span ends inverted on the
- * other span), merged across knots.
- * QAWS_STATUS_CERTIFICATION_FAILED for a contact through a singular point
- * of the implicitized span (both implicitizations tried); a hit on a span
- * end at an irrational root is decided by an exact gcd test.
- */
-qaws_status qaws_exact_curve_curve_hits(qaws_exact_pair* out_pairs, unsigned int* out_count, qaws_exact_curve const* a, qaws_exact_curve const* b,
-	unsigned int capacity);
-
-/*
- * Certified self-intersections of a 2D or 3D exact curve: pairs a < b with
- * C(a) = C(b) (a_lo..a_hi, b_lo..b_hi enclosures). Inside a span, the
- * divided differences (X(s) W(t) - X(t) W(s)) / (s - t) are eliminated the
- * same way (spans proven monotone along a direction are skipped); spans
- * against spans as for two curves, with tangencies (multiplicity) and
- * overlaps (a stretch traced twice: an OVERLAP pair with exact ends). Span
- * pairs come from a sweep over their sound boxes. Shared knots and the
- * closing point of a closed curve are not self-intersections; spans on one
- * algebraic curve (a NURBS circle) touching at their ends are told apart
- * exactly. QAWS_STATUS_CERTIFICATION_FAILED for a contact through a
- * singular point, an irrational cusp or a span folding back on itself.
- */
-qaws_status qaws_exact_curve_self_hits(qaws_exact_pair* out_pairs, unsigned int* out_count, qaws_exact_curve const* curve, unsigned int capacity);
 
 /*
  * Certified intersections of N exact curves at once (all 2D or all 3D, one
@@ -305,9 +250,6 @@ typedef struct qaws_exact_batch_stats
 	unsigned int hit_count;
 	unsigned int patch_count;       /* surface patches (curve / surface batch) */
 } qaws_exact_batch_stats;
-
-qaws_status qaws_exact_curve_batch_hits(qaws_exact_batch_hit* out_hits, unsigned int* out_count, qaws_exact_batch_stats* out_stats,
-	unsigned int capacity, qaws_exact_batch_desc const* desc);
 
 /*
  * Certified closest points: for every query point (exact doubles, world
@@ -357,22 +299,6 @@ typedef struct qaws_exact_loop
 	unsigned int first, count;
 } qaws_exact_loop;
 
-/*
- * Certified Boolean of two regions bounded by closed, simple 2D exact
- * curves (operation: QAWS_BOOLEAN_UNION, _INTERSECTION or _DIFFERENCE,
- * a minus b). The result boundary is made of pieces of the inputs
- * themselves (nothing is refitted): the boundaries are cut at their
- * certified crossings, each piece is classified by the certified winding
- * number of the other boundary around an exact rational point inside it
- * (non-zero: inside), and the kept pieces are linked into loops (two kept
- * pieces meet at a crossing; at a touching point the same curve goes on).
- * Loops are traced in the direction of their first piece.
- * QAWS_STATUS_CERTIFICATION_FAILED when a crossing cannot be certified
- * (a tangency, an overlap) or a boundary is not simple.
- */
-qaws_status qaws_exact_boolean_2d(qaws_exact_piece* out_pieces, unsigned int* out_piece_count, qaws_exact_loop* out_loops, unsigned int* out_loop_count,
-	qaws_exact_curve const* a, qaws_exact_curve const* b, unsigned int piece_capacity, unsigned int loop_capacity, unsigned int operation);
-
 /* ===================================================================
  * Exact tensor-product surfaces
  *
@@ -408,21 +334,6 @@ typedef struct qaws_exact_surface_hit
 	double t_lo, t_hi;          /* x = p0 + t (p1 - p0) */
 } qaws_exact_surface_hit;
 
-/*
- * Certified intersections of the line through the double points p0 != p1
- * with an exact surface (exact ray casting: keep t >= 0 for a ray). Per
- * patch, the line is the meet of two planes; their equations in (u, v)
- * are eliminated exactly (a Bezout matrix in u with polynomial entries in
- * v, product of the degrees bounded by the root budget), the roots in v
- * isolated, u recovered from the cofactors and proven in [0, 1]; t is
- * enclosed over the exact sub-patch. Every intersection is reported once,
- * sorted by t. QAWS_STATUS_CERTIFICATION_FAILED for a tangent line, a line
- * lying on the surface, or a hit on a patch edge at an irrational
- * parameter.
- */
-qaws_status qaws_exact_surface_line_hits(qaws_exact_surface_hit* out_hits, unsigned int* out_count, qaws_exact_surface const* surface, double const p0[3],
-	double const p1[3], unsigned int capacity);
-
 /* A curve / surface intersection: the curve's parameter and the surface's, enclosed. */
 typedef struct qaws_exact_curve_surface_hit
 {
@@ -430,25 +341,6 @@ typedef struct qaws_exact_curve_surface_hit
 	double u_lo, u_hi;
 	double v_lo, v_hi;
 } qaws_exact_curve_surface_hit;
-
-/*
- * Certified intersections of a 3D exact curve with an exact surface (one
- * exact space). Per span and patch, the three equations
- * X_c(u, v) W_C(t) - C_c(t) W(u, v) = 0 have exact integer Bernstein
- * coefficients on the (u, v, t) box; boxes are subdivided exactly and
- *   - excluded when one equation's coefficients all have one strict sign;
- *   - certified to hold exactly one intersection when, after an
- *     approximate-inverse preconditioning G = Y F (any Y is valid: the
- *     test is exact), G passes the Poincare-Miranda sign test on the box
- *     faces (existence) and its interval Jacobian, bounded by Bernstein
- *     coefficients, is strictly diagonally dominant (G injective: unique).
- * Certified boxes are then shrunk by bisection (about 2^-40). Every
- * intersection is reported once. QAWS_STATUS_CERTIFICATION_FAILED when the
- * subdivision budget runs out (a tangency, the curve lying on the
- * surface, or crossings closer than the budget separates).
- */
-qaws_status qaws_exact_curve_surface_hits(qaws_exact_curve_surface_hit* out_hits, unsigned int* out_count, qaws_exact_curve const* curve,
-	qaws_exact_surface const* surface, unsigned int capacity);
 
 /*
  * Certified intersections of N 3D exact curves with M exact surfaces at
@@ -478,9 +370,6 @@ typedef struct qaws_exact_curve_surface_batch_hit
 	qaws_exact_curve_surface_hit hit;
 } qaws_exact_curve_surface_batch_hit;
 
-qaws_status qaws_exact_curve_surface_batch_hits(qaws_exact_curve_surface_batch_hit* out_hits, unsigned int* out_count,
-	qaws_exact_batch_stats* out_stats, unsigned int capacity, qaws_exact_surface_batch_desc const* desc);
-
 /* A point of a surface / surface intersection curve: (u1, v1) on a, (u2, v2) on b, enclosed. */
 typedef struct qaws_exact_ssi_point
 {
@@ -494,27 +383,6 @@ typedef struct qaws_exact_ssi_branch
 	unsigned int first, count;
 	int closed;
 } qaws_exact_ssi_branch;
-
-/*
- * Certified surface / surface intersection curves (one exact space). Per
- * patch pair, the three equations X^a_c W^b - X^b_c W^a = 0 in
- * (u1, v1, u2, v2) have exact integer Bernstein coefficients; the 4D box
- * is subdivided exactly until each box is excluded or regular: a 3 x 3
- * minor of its interval Jacobian keeps one strict sign, so every solution
- * arc in it is a monotone graph over the remaining variable and ends on
- * the box boundary. The arcs' end points on the box faces are certified
- * points (three equations in three unknowns); a regular box with none
- * holds no curve, one with two holds exactly one arc joining them.
- * min_depth (0..10) subdivides regular boxes at least that many times per
- * direction: more points along the curves, still certified.
- * Branches chain those points: between consecutive points lies exactly
- * one smooth intersection arc, and every intersection curve is covered.
- * QAWS_STATUS_CERTIFICATION_FAILED for tangential contact, overlapping
- * surfaces or a singular intersection point (the budget runs out).
- */
-qaws_status qaws_exact_surface_surface_hits(qaws_exact_ssi_point* out_points, unsigned int* out_point_count, qaws_exact_ssi_branch* out_branches, unsigned int* out_branch_count,
-	qaws_exact_surface const* a, qaws_exact_surface const* b, unsigned int point_capacity, unsigned int branch_capacity,
-	unsigned int min_depth);
 
 /*
  * Certified intersection curves of N exact surfaces at once (one exact
@@ -544,10 +412,6 @@ typedef struct qaws_exact_ssi_batch_branch
 	unsigned int surface_b;
 	qaws_exact_ssi_branch branch;   /* first indexes the shared point buffer */
 } qaws_exact_ssi_batch_branch;
-
-qaws_status qaws_exact_surface_batch_hits(qaws_exact_ssi_point* out_points, unsigned int* out_point_count, qaws_exact_ssi_batch_branch* out_branches,
-	unsigned int* out_branch_count, qaws_exact_batch_stats* out_stats, unsigned int point_capacity, unsigned int branch_capacity,
-	qaws_exact_ssi_batch_desc const* desc);
 
 /*
  * Certified closest points on surfaces: for every query point (exact
@@ -592,11 +456,6 @@ typedef struct qaws_exact_ray_hit
 	qaws_exact_surface_hit hit;     /* u, v and t enclosures (t along p0 -> p1) */
 	int certified;                  /* the first hit (or the miss) is proven */
 } qaws_exact_ray_hit;
-
-/* p0, p1: ray_count points of 3 doubles. stats: patch_count, candidate_count
-   (patches solved), hit_count, uncertified_count. */
-qaws_status qaws_exact_surface_batch_raycast(qaws_exact_ray_hit* out_hits, qaws_exact_batch_stats* out_stats, double const* p0, double const* p1,
-	unsigned int ray_count, qaws_exact_ssi_batch_desc const* desc, double max_t);
 
 /* Patches along u and v (one exact rational Bezier patch each). */
 void qaws_exact_surface_patch_count(unsigned int* out_u_count, unsigned int* out_v_count, qaws_exact_surface const* surface);

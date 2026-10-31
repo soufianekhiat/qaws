@@ -80,27 +80,6 @@ qaws_status qaws_exact_homogeneous_derivative(qaws_exact_span const* sp, unsigne
    hi = -inf) on every axis. z is 0 for 2D. */
 void qaws_exact_span_box(qaws_exact_span const* sp, unsigned int dim, double lo[3], double hi[3]);
 
-/* Certified intersections of span ia of a with span ib of b, appended to out
-   (curve a's parameter first); a point exactly at a knot is reported only by
-   the span it ends. *common is set when the spans failed on a common
-   component. Returns BUFFER_TOO_SMALL past capacity. */
-qaws_status qaws_exact_span_pair_hits(qaws_exact_curve const* a, unsigned int ia, qaws_exact_curve const* b, unsigned int ib,
-	qaws_exact_pair* out, unsigned int capacity, unsigned int* count, int* common);
-
-/* The pairs of one curve pair: overlaps of neighbouring spans joined, points
-   inside an overlap dropped; returns the new count (order kept otherwise). */
-unsigned int qaws_exact_merge_overlaps(qaws_exact_pair* pairs, unsigned int count);
-
-/* Is the homogeneous point E (dim + 1 integers, lattice units) on span I's
-   curve (*on), and at which local parameter num / den (den 0: I's parameter
-   at infinity)? QAWS_STATUS_CERTIFICATION_FAILED at a singular point. */
-qaws_status qaws_exact_span_invert(qaws_exact_span const* I, unsigned int dim, qaws_exact_int const* E, qaws_exact_int* num, qaws_exact_int* den, int* on);
-
 struct qaws_exact_poly;
-
-/* R(s): the implicit equation of 2D span I (degree 1 to 6) on 2D span S, a
-   polynomial in S's local parameter whose roots are where S meets I's
-   algebraic curve (zero when S lies on it). */
-qaws_status qaws_exact_span_implicit_on(qaws_exact_span const* I, qaws_exact_span const* S, struct qaws_exact_poly* R);
 
 #endif /* QAWS_EXACT_CURVE_H */

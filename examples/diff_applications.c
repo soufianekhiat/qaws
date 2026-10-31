@@ -59,19 +59,13 @@
 static char const* g_photos = "photos";
 
 #include "diff_applications/00_images.c"
-#include "diff_applications/01_hair_strands.c"
 #include "diff_applications/02_vectorization.c"
-#include "diff_applications/03_mesh_patches.c"
 #include "diff_applications/04_registration.c"
-#include "diff_applications/05_hair_groom.c"
 #include "diff_applications/06_hair_photo.c"
 #include "diff_applications/07_rational_patches.c"
 #include "diff_applications/08_haircuts.c"
 #include "diff_applications/09_hair3d.c"
-#include "diff_applications/10_hair_volume.c"
 #include "diff_applications/11_font_outlines.c"
-#include "diff_applications/12_vesicles.c"
-#include "diff_applications/13_cad_g1.c"
 
 int main(int argc, char** argv)
 {
@@ -83,19 +77,13 @@ int main(int argc, char** argv)
 		/* QAWS_APP=n runs only application n */
 		char const* only = getenv("QAWS_APP");
 		int pick = only ? atoi(only) : 0;
-		if (!pick || pick == 1) app_hair();
 		if (!pick || pick == 2) app_vectorize();
-		if (!pick || pick == 3) app_mesh_patches(argc > 2 ? argv[2] : NULL);
 		if (!pick || pick == 4) app_registration();
-		if (!pick || pick == 5) app_hair_groom();
 		if (!pick || pick == 6) app_hair_photo();
 		if (!pick || pick == 7) app_rational_patches();
 		if (!pick || pick == 8) app_haircuts();
 		if (!pick || pick == 9) app_hair3d();
-		if (!pick || pick == 10) app_hair_volume();
 		if (!pick || pick == 11) app_font_outlines();
-		if (!pick || pick == 12) app_vesicles();
-		if (!pick || pick == 13) app_cad_g1();
 	}
 	return 0;
 }

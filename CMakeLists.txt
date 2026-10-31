@@ -74,79 +74,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_extract.c
   src/qaws/qaws_path.c
   src/qaws/qaws_clip.c
-  src/qaws/qaws_clip64.c
-  src/qaws/qaws_clip_exact.c
-  src/qaws/qaws_offset.c
-src/qaws/qaws_offset64.c
-src/qaws/qaws_jobs.c
-  src/qaws/qaws_rectclip.c
-  src/qaws/qaws_stack.c
-src/qaws/qaws_stack_mesh.c
-src/qaws/qaws_triangulate.c
-src/qaws/qaws_region_sample.c
-src/qaws/qaws_mean_value.c
-src/qaws/qaws_surface_geodesic.c
-src/qaws/qaws_surface_region.c
-src/qaws/qaws_surface_enclose.c
-src/qaws/qaws_repulsive.c
-src/qaws/qaws_repulsive_solve.c
-src/qaws/qaws_repulsive_adapt.c
-src/qaws/qaws_repulsive_mesh_solve.c
-src/qaws/qaws_repulsive_bh.c
-src/qaws/qaws_repulsive_hsolve.c
-src/qaws/qaws_repulsive_surface.c
-src/qaws/qaws_repulsive_controls.c
-src/qaws/qaws_repulsive_mesh_curves.c
-src/qaws/qaws_repulsive_sens.c
-src/qaws/qaws_surface_query.c
-src/qaws/qaws_shell_region.c
-src/qaws/qaws_skeleton.c
 src/qaws/qaws_motion.c
-src/qaws/mesh/qaws_mesh_core.c
-src/qaws/mesh/qaws_mesh_3d.c
-src/qaws/mesh/qaws_mesh_interpolant.c
-src/qaws/mesh/qaws_mesh_reference.c
-src/qaws/mesh/qaws_size_field.c
-src/qaws/mesh/qaws_remesh.c
-src/qaws/mesh/qaws_direction_field.c
-src/qaws/mesh/qaws_quadrangulate.c
-src/qaws/mesh/qaws_mesh_generate.c
-src/qaws/mesh/qaws_volume_mesh.c
-src/qaws/mesh/qaws_tetrahedralize.c
-src/qaws/mesh/qaws_hexahedralize.c
-src/qaws/mesh/qaws_boundary_layers.c
-src/qaws/mesh/qaws_frame_field.c
-src/qaws/mesh/qaws_mesh_measure.c
-src/qaws/mesh/qaws_remesh_cvt.c
-src/qaws/mesh/qaws_cross_field.c
-src/qaws/mesh/qaws_quad_flow.c
-src/qaws/mesh/qaws_quad_improve.c
-src/qaws/mesh/qaws_quad_global.c
-src/qaws/mesh/qaws_mesh_repair.c
-src/qaws/mesh/qaws_mesh_bvh.c
-src/qaws/mesh/qaws_quality_report.c
-src/qaws/mesh/qaws_mesh_watertight.c
-src/qaws/mesh/qaws_mesh_geodesic.c
-src/qaws/mesh/qaws_mesh_geodesic_exact.c
-src/qaws/mesh/qaws_mesh_smooth.c
-src/qaws/mesh/qaws_mesh_deform.c
-src/qaws/mesh/qaws_mesh_param.c
-src/qaws/mesh/qaws_mesh_decimate.c
-src/qaws/mesh/qaws_mesh_connect.c
-src/qaws/mesh/qaws_mesh_offset.c
-src/qaws/mesh/qaws_mesh_sweep.c
-src/qaws/mesh/qaws_mesh_contact.c
-src/qaws/mesh/qaws_mesh_sweep_implicit.c
-src/qaws/mesh/qaws_mesh_view.c
-src/qaws/mesh/qaws_mesh_sweep_generate.c
-src/qaws/mesh/qaws_mesh_promote.c
-src/qaws/mesh/qaws_mesh_texture.c
-src/qaws/mesh/qaws_mesh_carry.c
-src/qaws/mesh/qaws_mesh_subdivide.c
-src/qaws/mesh/qaws_volume_improve.c
-src/qaws/mesh/qaws_volume_curve.c
-src/qaws/mesh/qaws_hex_seamless.c
-src/qaws/mesh/qaws_mesh_intersect.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c
@@ -172,12 +100,9 @@ src/qaws/mesh/qaws_mesh_intersect.c
   src/qaws/qaws_surface_gordon.c
   src/qaws/qaws_surface_offset.c
   src/qaws/qaws_surface_trim.c
-  src/qaws/qaws_surface_intersect.c
   src/qaws/qaws_surface_tspline.c
   src/qaws/qaws_surface_subdiv.c
-  src/qaws/qaws_surface_fillet.c
   src/qaws/qaws_brep.c
-  src/qaws/qaws_boolean_2d.c
   src/qaws/qaws_inline.c
   src/qaws/qaws_prepare.c
   src/qaws/qaws_diff.c
@@ -185,7 +110,6 @@ src/qaws/mesh/qaws_mesh_intersect.c
   src/qaws/qaws_diff_geometry.c
   src/qaws/qaws_diff_ops.c
   src/qaws/qaws_diff_map.c
-  src/qaws/qaws_diff_functionals.c
   src/qaws/qaws_diff_sampling.c
   src/qaws/internal/qaws_internal_curve.c
   src/qaws/internal/qaws_internal_memory.c
@@ -196,8 +120,6 @@ src/qaws/mesh/qaws_mesh_intersect.c
   src/qaws/internal/qaws_internal_validation.c
   src/qaws/internal/qaws_internal_surface.c
   src/qaws/internal/qaws_internal_fit.c
-  src/qaws/internal/qaws_internal_mesh.c
-  src/qaws/internal/qaws_internal_sparse.c
   src/qaws/internal/qaws_internal_diff.c
   src/qaws/internal/qaws_internal_broadphase.c
 src/qaws/internal/qaws_internal_ldlt.c
@@ -328,11 +250,7 @@ if(QAWS_ENABLE_EXACT)
     src/qaws/exact/qaws_exact_curve_curve.c
     src/qaws/exact/qaws_exact_poly.c
     src/qaws/exact/qaws_exact_solve.c
-    src/qaws/exact/qaws_exact_surface_hits.c
-    src/qaws/exact/qaws_exact_boolean.c
     src/qaws/exact/qaws_exact_curve_surface.c
-    src/qaws/exact/qaws_exact_ssi.c
-    src/qaws/exact/qaws_exact_batch.c
     src/qaws/exact/qaws_exact_closest.c
   )
 endif()
@@ -536,13 +454,6 @@ if(QAWS_BUILD_EXAMPLES)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
-  add_executable(qaws_memory_bench examples/memory_bench.c)
-  target_link_libraries(qaws_memory_bench PRIVATE Qaws::qaws)
-  target_include_directories(qaws_memory_bench PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
-  set_target_properties(qaws_memory_bench PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
   add_executable(qaws_better2d_showcase examples/better2d_showcase.c)
   target_link_libraries(qaws_better2d_showcase PRIVATE Qaws::qaws)
   target_include_directories(qaws_better2d_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
@@ -550,30 +461,6 @@ if(QAWS_BUILD_EXAMPLES)
     target_compile_definitions(qaws_better2d_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
   endif()
   set_target_properties(qaws_better2d_showcase PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
-  add_executable(qaws_meshing_showcase examples/meshing_showcase.c)
-  target_link_libraries(qaws_meshing_showcase PRIVATE Qaws::qaws)
-  target_include_directories(qaws_meshing_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
-  if(MSVC)
-    target_compile_definitions(qaws_meshing_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
-  endif()
-  set_target_properties(qaws_meshing_showcase PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
-  add_executable(qaws_repulsive_paper examples/repulsive_paper.c)
-  target_link_libraries(qaws_repulsive_paper PRIVATE Qaws::qaws)
-  target_include_directories(qaws_repulsive_paper PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
-  if(NOT WIN32)
-    find_package(Threads REQUIRED)
-    target_link_libraries(qaws_repulsive_paper PRIVATE Threads::Threads)
-  endif()
-  if(MSVC)
-    target_compile_definitions(qaws_repulsive_paper PRIVATE _CRT_SECURE_NO_WARNINGS)
-  endif()
-  set_target_properties(qaws_repulsive_paper PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
@@ -592,27 +479,6 @@ if(QAWS_BUILD_EXAMPLES)
 endif()
 
 
-# Clipper2 comparison (optional; Clipper2 is compiled into the benchmark only).
-option(QAWS_BUILD_CLIPPER2_BENCH "Build the Clipper2 comparison benchmark" OFF)
-set(QAWS_CLIPPER2_DIR "" CACHE PATH "A Clipper2 checkout (the directory holding CPP/Clipper2Lib)")
-if(QAWS_BUILD_CLIPPER2_BENCH)
-  if(NOT EXISTS "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/src/clipper.engine.cpp")
-    message(FATAL_ERROR "QAWS_CLIPPER2_DIR must point at a Clipper2 checkout")
-  endif()
-  enable_language(CXX)
-  add_executable(qaws_clipper2_compare
-    bench/clipper2_compare.cpp
-    "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/src/clipper.engine.cpp"
-    "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/src/clipper.offset.cpp"
-    "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/src/clipper.rectclip.cpp")
-  target_include_directories(qaws_clipper2_compare PRIVATE
-    "${QAWS_CLIPPER2_DIR}/CPP/Clipper2Lib/include" "${PROJECT_SOURCE_DIR}/src/qaws")
-  target_link_libraries(qaws_clipper2_compare PRIVATE Qaws::qaws)
-  set_target_properties(qaws_clipper2_compare PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
-endif()
 if(BUILD_TESTING)
   add_subdirectory(tests)
   add_custom_target(
@@ -681,26 +547,12 @@ if(QAWS_INSTALL)
       src/qaws/qaws_surface_gordon.h
       src/qaws/qaws_surface_offset.h
       src/qaws/qaws_surface_trim.h
-      src/qaws/qaws_surface_intersect.h
       src/qaws/qaws_surface_tspline.h
       src/qaws/qaws_surface_subdiv.h
-      src/qaws/qaws_surface_fillet.h
       src/qaws/qaws_brep.h
       src/qaws/qaws_boolean_2d.h
       src/qaws/qaws_path.h
       src/qaws/qaws_clip.h
-      src/qaws/qaws_clip64.h
-      src/qaws/qaws_clip_exact.h
-      src/qaws/qaws_offset.h
-      src/qaws/qaws_rectclip.h
-      src/qaws/qaws_stack.h
-src/qaws/qaws_triangulate.h
-src/qaws/qaws_region_sample.h
-src/qaws/qaws_mean_value.h
-src/qaws/qaws_surface_region.h
-src/qaws/qaws_repulsive.h
-src/qaws/qaws_shell_region.h
-src/qaws/qaws_skeleton.h
       src/qaws/qaws_alloc.h
       src/qaws/qaws_allocator.h
       src/qaws/qaws_precision.h
@@ -712,7 +564,6 @@ src/qaws/qaws_skeleton.h
       src/qaws/qaws_diff_geometry.h
       src/qaws/qaws_diff_ops.h
       src/qaws/qaws_diff_map.h
-      src/qaws/qaws_diff_functionals.h
       src/qaws/qaws_diff_sampling.h
       src/qaws/qaws_platform.h
       src/qaws/qaws_core_types.h

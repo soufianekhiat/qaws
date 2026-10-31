@@ -17,6 +17,7 @@
 #include "qaws_types.h"
 #include "qaws_status.h"
 #include "qaws_curve.h"
+#include "qaws_view.h"
 
 /*
  * Motions over t in [0, 1]: the input of sweeps (a body moving, swept).
@@ -128,5 +129,12 @@ qaws_status qaws_motion_evaluate(qaws_motion_state* out_state, qaws_motion const
    vertex count). out_velocities (may be NULL): their velocities */
 qaws_status qaws_motion_transform_points(qaws_scalar* out_points, qaws_scalar* out_velocities, qaws_motion const* motion, qaws_scalar t,
 	qaws_scalar const* points, unsigned int count);
+
+
+
+/* A vertex motion moving each vertex on its chord at a constant rate from positions0 (t = 0) to positions1 (t = 1), both views
+   of the same count, 3 components, borrowed for the motion's life (read at each evaluation). INVALID_ARGUMENT for invalid views,
+   counts that differ, a value not finite. */
+qaws_status qaws_motion_create_vertices_borrowed(qaws_motion** out_motion, qaws_array_view const* positions0, qaws_array_view const* positions1);
 
 #endif /* QAWS_MOTION_H */

@@ -38,26 +38,14 @@
 
 #include "example_svg.h"
 
-#include "batch_showcase/01_heightfield.c"
-#include "batch_showcase/02_exact_heightfield.c"
-#include "batch_showcase/03_terrain.c"
-#include "batch_showcase/04_exact_terrain.c"
 #include "batch_showcase/05_closest.c"
 #include "batch_showcase/06_surface_closest.c"
-#include "batch_showcase/07_raytrace.c"
-#include "batch_showcase/08_threads.c"
 
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
-	demo_heightfield();
-	demo_exact_heightfield();
-	demo_terrain();
-	demo_exact_terrain();
 	demo_closest();
 	demo_surface_closest();
-	demo_raytrace();
-	demo_threads();
 	return 0;
 }

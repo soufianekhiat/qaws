@@ -17,7 +17,6 @@
 #include "qaws_types.h"
 #include "qaws_status.h"
 #include "qaws_surface_types.h"
-#include "qaws_surface_intersect.h"
 #include "qaws_curve_batch.h"
 
 /*
@@ -63,14 +62,6 @@ typedef struct qaws_surface_batch_stats
 	unsigned int hit_count;
 } qaws_surface_batch_stats;
 
-/* Writes min(count, capacity) hits; *out_count is the total. out_stats may be NULL. */
-qaws_status qaws_curve_surface_batch_find_intersections(
-	qaws_curve_surface_batch_hit* out_hits,
-	unsigned int* out_count,
-	qaws_surface_batch_stats* out_stats,
-	unsigned int hit_capacity,
-	qaws_curve_surface_batch_desc const* desc);
-
 /*
  * Intersection curves of N surfaces at once.
  *
@@ -104,18 +95,6 @@ typedef struct qaws_surface_batch_curve
 	int closed;
 } qaws_surface_batch_curve;
 
-/* Writes min(n, capacity) curves and points (curves whose points do not fit
-   are not written); *out_curve_count / *out_point_count are the totals. */
-qaws_status qaws_surface_batch_find_intersections(
-	qaws_surface_batch_curve* out_curves,
-	unsigned int* out_curve_count,
-	qaws_ssi_point* out_points,
-	unsigned int* out_point_count,
-	qaws_surface_batch_stats* out_stats,
-	unsigned int curve_capacity,
-	unsigned int point_capacity,
-	qaws_surface_batch_desc const* desc);
-
 
 /*
  * Prepared surface sets: the flattening done once, for surfaces queried
@@ -134,25 +113,6 @@ typedef struct qaws_surface_set qaws_surface_set;
 qaws_status qaws_surface_set_create(qaws_surface_set** out_set, qaws_surface_batch_desc const* desc);
 void qaws_surface_set_destroy(qaws_surface_set* set);
 unsigned int qaws_surface_set_get_patch_count(qaws_surface_set const* set);
-
-qaws_status qaws_surface_set_find_intersections(
-	qaws_surface_batch_curve* out_curves,
-	unsigned int* out_curve_count,
-	qaws_ssi_point* out_points,
-	unsigned int* out_point_count,
-	qaws_surface_batch_stats* out_stats,
-	qaws_surface_set const* set,
-	qaws_surface_set const* other,
-	unsigned int curve_capacity,
-	unsigned int point_capacity);
-
-qaws_status qaws_curve_set_find_surface_intersections(
-	qaws_curve_surface_batch_hit* out_hits,
-	unsigned int* out_count,
-	qaws_surface_batch_stats* out_stats,
-	qaws_curve_set const* curves,
-	qaws_surface_set const* surfaces,
-	unsigned int hit_capacity);
 
 /*
  * Closest points on surfaces: for every query point, the nearest point over
@@ -217,22 +177,6 @@ typedef struct qaws_surface_ray_hit
 	qaws_scalar t, u, v;
 	qaws_vec3 position;
 } qaws_surface_ray_hit;
-
-/* out_hits receives ray_count results; out_stats may be NULL
-   (candidate_count: patches met, newton_count: refined, hit_count: rays that hit). */
-qaws_status qaws_surface_batch_raycast(
-	qaws_surface_ray_hit* out_hits,
-	qaws_surface_batch_stats* out_stats,
-	qaws_surface_ray_desc const* desc);
-
-qaws_status qaws_surface_set_raycast(
-	qaws_surface_ray_hit* out_hits,
-	qaws_surface_batch_stats* out_stats,
-	qaws_surface_set const* set,
-	qaws_scalar const* origins,
-	qaws_scalar const* directions,
-	unsigned int ray_count,
-	qaws_scalar max_t);
 
 qaws_status qaws_surface_set_find_closest(
 	qaws_surface_batch_closest* out_points,
