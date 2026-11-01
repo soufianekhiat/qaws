@@ -824,7 +824,7 @@ static void mo_hermite_bounds(double const (*D)[3], int quintic, double a, doubl
 		out[d] = sqrt(s2[d][0] * s2[d][0] + s2[d][1] * s2[d][1] + s2[d][2] * s2[d][2]);
 }
 
-int mo_second_bound(qaws_motion const* m, double a, double b, double* bt, double* br);   /* (declared in mesh/qaws_mesh_internal.h) */
+#include "internal/qaws_internal_motion.h"
 
 int mo_second_bound(qaws_motion const* m, double a, double b, double* bt, double* br)
 {

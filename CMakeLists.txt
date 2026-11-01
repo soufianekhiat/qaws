@@ -430,20 +430,6 @@ if(QAWS_BUILD_EXAMPLES)
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
     RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
-  add_executable(qaws_batch_showcase examples/batch_showcase.c)
-  target_link_libraries(qaws_batch_showcase PRIVATE Qaws::qaws)
-  target_include_directories(qaws_batch_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")
-  if(NOT WIN32)
-    find_package(Threads REQUIRED)
-    target_link_libraries(qaws_batch_showcase PRIVATE Threads::Threads)
-  endif()
-  if(MSVC)
-    target_compile_definitions(qaws_batch_showcase PRIVATE _CRT_SECURE_NO_WARNINGS)
-  endif()
-  set_target_properties(qaws_batch_showcase PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/working_dir"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/working_dir")
   add_executable(qaws_host_showcase examples/host_showcase.c)
   target_link_libraries(qaws_host_showcase PRIVATE Qaws::qaws)
   target_include_directories(qaws_host_showcase PRIVATE "${PROJECT_SOURCE_DIR}/src/qaws")

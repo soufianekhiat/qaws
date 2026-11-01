@@ -60,7 +60,6 @@
 #include "example_svg.h"
 
 #include "better2d_showcase/01_extract.c"
-#include "better2d_showcase/38_weighted_skeleton.c"
 
 /* figure n wanted: every one with no arguments, else those listed */
 static int b2d_want(int argc, char** argv, int n)
@@ -77,6 +76,5 @@ int main(int argc, char** argv)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("showcase");
 	if (b2d_want(argc, argv, 1)) demo_extract();
-	if (b2d_want(argc, argv, 38)) demo_weighted_skeleton();
 	return 0;
 }

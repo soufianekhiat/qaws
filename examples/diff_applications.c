@@ -59,13 +59,7 @@
 static char const* g_photos = "photos";
 
 #include "diff_applications/00_images.c"
-#include "diff_applications/02_vectorization.c"
 #include "diff_applications/04_registration.c"
-#include "diff_applications/06_hair_photo.c"
-#include "diff_applications/07_rational_patches.c"
-#include "diff_applications/08_haircuts.c"
-#include "diff_applications/09_hair3d.c"
-#include "diff_applications/11_font_outlines.c"
 
 int main(int argc, char** argv)
 {
@@ -77,13 +71,7 @@ int main(int argc, char** argv)
 		/* QAWS_APP=n runs only application n */
 		char const* only = getenv("QAWS_APP");
 		int pick = only ? atoi(only) : 0;
-		if (!pick || pick == 2) app_vectorize();
 		if (!pick || pick == 4) app_registration();
-		if (!pick || pick == 6) app_hair_photo();
-		if (!pick || pick == 7) app_rational_patches();
-		if (!pick || pick == 8) app_haircuts();
-		if (!pick || pick == 9) app_hair3d();
-		if (!pick || pick == 11) app_font_outlines();
 	}
 	return 0;
 }

@@ -571,6 +571,7 @@
 #define qaws_internal_ldlt_factor QAWS_SFX(qaws_internal_ldlt_factor)
 #define qaws_internal_ldlt_free QAWS_SFX(qaws_internal_ldlt_free)
 #define qaws_internal_ldlt_solve QAWS_SFX(qaws_internal_ldlt_solve)
+#define qaws_internal_motion_second_bound QAWS_SFX(qaws_internal_motion_second_bound)
 #define qaws_internal_parallel QAWS_SFX(qaws_internal_parallel)
 #define qaws_internal_parameter_at_arc_length QAWS_SFX(qaws_internal_parameter_at_arc_length)
 #define qaws_internal_parameter_to_distance QAWS_SFX(qaws_internal_parameter_to_distance)
