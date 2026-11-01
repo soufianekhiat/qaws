@@ -79,7 +79,7 @@ static void demo_families(void)
 	qaws_curve_create_polynomial(&poly, &pd);
 	qaws_exact_curve_prepare(&epoly, &rpoly, poly, &desc);
 
-	svg_open(&sv, "showcase/exact5_families.svg", 1260, 520, "Exact Hermite, Catmull-Rom and polynomial curves",
+	svg_open(&sv, "shots/exact5_families.svg", 1260, 520, "Exact Hermite, Catmull-Rom and polynomial curves",
 		"Left: a closed uniform Catmull-Rom curve converted exactly into one integer cubic Bezier per span (common factor 6). Middle, right: T6(t - 100) as monomials in t on [99, 101].");
 
 	svg_panel(&sv, &vc, "closed uniform Catmull-Rom: exact Bezier spans");

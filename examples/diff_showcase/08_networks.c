@@ -93,7 +93,7 @@ static void demo_networks(void)
 	gd.u_params = params;
 	qaws_surface_create_gordon(&gordon, &gd);
 
-	svg_open(&s, "showcase/8_networks.svg", 1200, 600, "Curve networks: Gordon affects / loft affected by",
+	svg_open(&s, "shots/8_networks.svg", 1200, 600, "Curve networks: Gordon affects / loft affected by",
 		"Left: tangent of one control point of the middle v-curve -> |dS| over a Gordon surface. Right: adjoint of one loft point -> influence per section.");
 
 	/* Gordon: affects map through child views (child 4 = middle v-curve). */

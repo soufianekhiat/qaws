@@ -64,7 +64,7 @@ static void demo_projection(void)
 			adam_step(&opt, cps, grad, PRJ_CP * 2, 0.02);
 	}
 
-	svg_open(&s, "showcase/9_projection.svg", 1200, 600, "Closest point through the implicit function theorem",
+	svg_open(&s, "shots/9_projection.svg", 1200, 600, "Closest point through the implicit function theorem",
 		"Left: fit without correspondences, minimizing squared point-to-curve distance (closest-point adjoint). Right: validity reported for a grid of queries.");
 
 	svg_panel(&s, &a, "fit by distance to the curve");

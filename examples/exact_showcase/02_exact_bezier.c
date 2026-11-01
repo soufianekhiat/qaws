@@ -111,7 +111,7 @@ static void demo_exact_bezier(void)
 		worst[3] = e2[i] > worst[3] ? e2[i] : worst[3];
 		worst[4] = e3[i] > worst[4] ? e3[i] : worst[4];
 	}
-	svg_open(&s, "showcase/exact2_bezier.svg", 1260, 520, "Exact rational Bezier evaluation: the reference that f32 and f64 are measured against",
+	svg_open(&s, "shots/exact2_bezier.svg", 1260, 520, "Exact rational Bezier evaluation: the reference that f32 and f64 are measured against",
 		"Degree 16, weights from 1 to 10^4 (circle size), control points on the 2^-20 lattice. The exact kernel evaluates in multi-limb integers and rounds once; errors are relative to it.");
 	svg_panel(&s, &vc, "the curve and its control polygon");
 	{

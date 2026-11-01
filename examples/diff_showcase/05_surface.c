@@ -91,7 +91,7 @@ static void demo_surface(void)
 			vs[i * SG + j] = (qaws_scalar)(j / (SG - 1.0));
 		}
 
-	svg_open(&s, "showcase/5_surface.svg", 1200, 600, "Surfaces: masked height-field fit and curvature sensitivity",
+	svg_open(&s, "shots/5_surface.svg", 1200, 600, "Surfaces: masked height-field fit and curvature sensitivity",
 		"Bicubic B-spline (6x6 net). Fit: only z is active (component mask), x/y stay on the grid. Right: d(Gaussian curvature at the red point)/d(control point z).");
 	svg_panel(&s, &a, "initial (flat) + target samples");
 	{

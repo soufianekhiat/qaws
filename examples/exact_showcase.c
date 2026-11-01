@@ -1,7 +1,7 @@
 /*
  * exact_showcase.c - The exact / certified geometry kernel at work
  *
- * Writes SVG figures into ./showcase/:
+ * Writes SVG figures into ./shots/:
  *   exact1_orient2d.svg   orientation of points a few ulps apart near a line:
  *                         naive f64 sign map, certified sign map, the cells
  *                         where f64 is wrong, and where the filter needed
@@ -47,7 +47,7 @@
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
-	MAKE_DIR("showcase");
+	MAKE_DIR("shots");
 	demo_orient2d();
 	demo_exact_bezier();
 	demo_winding();

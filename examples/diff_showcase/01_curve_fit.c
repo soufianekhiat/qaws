@@ -70,7 +70,7 @@ static void demo_curve_fit(void)
 			adam_step(&opt, cps, grad, FIT_CP * 2, 0.02);
 	}
 
-	svg_open(&s, "showcase/1_curve_fit.svg", 1200, 600, "Curve fitting with adjoints",
+	svg_open(&s, "shots/1_curve_fit.svg", 1200, 600, "Curve fitting with adjoints",
 		"Cubic B-spline (9 control points) fitted to 80 samples: loss gradient = one batch adjoint per iteration, Adam updates");
 	svg_panel(&s, &v, "data, intermediate fits and final curve");
 	for (i = 0; i < FIT_SAMPLES; i++)

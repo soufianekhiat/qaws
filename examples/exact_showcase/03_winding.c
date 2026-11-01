@@ -86,7 +86,7 @@ static void demo_winding(void)
 			wrong[kk] = (signed char)(certified[kk] >= 0 && sampled[kk] != certified[kk]);
 			n_wrong += wrong[kk];
 		}
-	svg_open(&s, "showcase/exact3_winding.svg", 1280, 470, "Certified point-in-region on a loop of rational conics",
+	svg_open(&s, "shots/exact3_winding.svg", 1280, 470, "Certified point-in-region on a loop of rational conics",
 		"Four rational quadratics (radius 2^20 lattice units). Zoom: 400 x 400 lattice units across the boundary, 160 x 160 points. Blue: inside, light: outside.");
 	svg_panel(&s, &vf, "the loop and the zoom window");
 	{

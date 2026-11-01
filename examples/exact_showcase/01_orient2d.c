@@ -54,7 +54,7 @@ static void demo_orient2d(void)
 			n_exact += path[k];
 			n_zero += exact[k] == 0;
 		}
-	svg_open(&s, "showcase/exact1_orient2d.svg", 1270, 470, "Certified orientation: points one ulp apart near a line",
+	svg_open(&s, "shots/exact1_orient2d.svg", 1270, 470, "Certified orientation: points one ulp apart near a line",
 		"a = (0.5 + i u, 0.5 + j u), u = 2^-53, 0 &lt;= i, j &lt; 256; sign of orient2d(a, (12, 12), (24, 24)). Blue: left, orange: right, black: on the line.");
 	or_map(&s, 20, 100, 1.15, OR_N, naive, sign_colors, "naive f64 determinant");
 	or_map(&s, 330, 100, 1.15, OR_N, exact, sign_colors, "qaws_exact_orient2d (certified)");

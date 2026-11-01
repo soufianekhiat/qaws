@@ -97,7 +97,7 @@ static void demo_vase(void)
 			adam_step(&opt, cps, grad, VASE_CP * 2, 0.01);
 	}
 
-	svg_open(&s, "showcase/6_vase.svg", 1200, 600, "Vase from scanned points: fitting a surface of revolution",
+	svg_open(&s, "shots/6_vase.svg", 1200, 600, "Vase from scanned points: fitting a surface of revolution",
 		"308 noisy points; the gradient flows surface -> revolution rule -> child[0] (profile B-spline, 7 control points). Color = height parameter.");
 	{
 		viewport a = { 30, 80, 370, 500, 0, 0, 0, 0 };

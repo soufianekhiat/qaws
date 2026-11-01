@@ -40,7 +40,7 @@ static void demo_sensitivity(void)
 		if (infl[i] > wmax) wmax = infl[i];
 	}
 
-	svg_open(&s, "showcase/2_sensitivity.svg", 1200, 600, "Sensitivity: affected by / affects",
+	svg_open(&s, "shots/2_sensitivity.svg", 1200, 600, "Sensitivity: affected by / affects",
 		"Left: adjoint of one curve point -> influence of each control point.  Right: tangent of one control point -> displacement along the curve.");
 
 	svg_panel(&s, &a, "Affected by: which control points move the marked point?");

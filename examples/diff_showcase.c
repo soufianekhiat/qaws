@@ -1,7 +1,7 @@
 /*
  * diff_showcase.c - Applications of qaws differentiability
  *
- * Writes SVG figures into ./showcase/:
+ * Writes SVG figures into ./shots/:
  *   1_curve_fit.svg        B-spline fitted to data by adjoint gradient descent
  *   2_sensitivity.svg      "Affected by" (adjoint) and "Affects" (tangent) maps
  *   3_fairing.svg          curvature fairing through the geometry kernel
@@ -68,7 +68,7 @@
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
-	MAKE_DIR("showcase");
+	MAKE_DIR("shots");
 	demo_curve_fit();
 	demo_sensitivity();
 	demo_fairing();

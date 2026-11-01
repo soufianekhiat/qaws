@@ -31,7 +31,7 @@ static void demo_nurbs_extraction(void)
 	qaws_curve_create_nurbs(&c, &d);
 	qaws_exact_desc_default(&desc);
 	qaws_exact_curve_prepare(&e, &rep, c, &desc);
-	svg_open(&sv, "showcase/exact4_nurbs.svg", 1280, 540, "Exact NURBS: local Bezier extraction and the integer budget",
+	svg_open(&sv, "shots/exact4_nurbs.svg", 1280, 540, "Exact NURBS: local Bezier extraction and the integer budget",
 		"Left: a cubic NURBS (weights 1..6, a triple knot making a corner) split exactly into one integer rational Bezier per span (colored control polygons). Right: storage width at full precision.");
 	svg_panel(&sv, &vc, "NURBS control polygon (grey) and the exact Bezier spans");
 	{

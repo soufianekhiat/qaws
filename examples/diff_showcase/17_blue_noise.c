@@ -106,7 +106,7 @@ static void demo_blue_noise(void)
 	}
 	bn_spacing(s0, &m0, &n0);
 	bn_spacing(s, &m1, &n1);
-	svg_open(&sv, "showcase/17_blue_noise.svg", 1200, 560, "Blue noise on a patch through the warp adjoints",
+	svg_open(&sv, "shots/17_blue_noise.svg", 1200, 560, "Blue noise on a patch through the warp adjoints",
 		"220 random points of the unit square warped by area; their Gaussian repulsion on the surface pulled back to the points (xi adjoints) and descended.");
 	for (i = 0; i < 2; i++)
 	{

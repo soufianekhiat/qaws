@@ -71,7 +71,7 @@ static void demo_surface(void)
 			n_f64_zero += f64_map[k] == 0;
 		}
 
-	svg_open(&sv, "showcase/exact6_surface.svg", 1280, 560, "Exact NURBS surface normals: up, down or exactly vertical",
+	svg_open(&sv, "shots/exact6_surface.svg", 1280, 560, "Exact NURBS surface normals: up, down or exactly vertical",
 		"A rational biquadratic NURBS surface (36 patches) with vertical bands and an overhang. Blue: n_z &gt; 0, orange: n_z &lt; 0, black: n_z = 0 (vertical).");
 
 	/* 3D view: cells back to front, colored by the exact class */

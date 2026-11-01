@@ -67,7 +67,7 @@ static void demo_nurbs_weight(void)
 	}
 
 	sprintf(buf, "Rational quadratic, end weights fixed by an activity mask; gradient of mean(|C|^2 - 1)^2 w.r.t. the middle weight. Learned w = %.6f (exact: sqrt(2)/2 = 0.707107)", (double)w[1]);
-	svg_open(&s, "showcase/4_nurbs_weight.svg", 1200, 600, "Learning a NURBS weight: a parabola becomes a circle", buf);
+	svg_open(&s, "shots/4_nurbs_weight.svg", 1200, 600, "Learning a NURBS weight: a parabola becomes a circle", buf);
 	svg_panel(&s, &a, "quarter arc");
 	{
 		double xy[2 * 200];

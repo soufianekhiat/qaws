@@ -471,7 +471,7 @@ static void app_registration(void)
 		success_cm += trials_cm[t] < 0.03;
 	}
 
-	svg_open(&s, "showcase/app4_registration.svg", 1240, 760, "Non-rigid registration: CMA-ES basin hopping + adjoints",
+	svg_open(&s, "shots/app4_registration.svg", 1240, 760, "Non-rigid registration: CMA-ES basin hopping + adjoints",
 		"A template (closed centripetal Catmull-Rom) is registered to a partial, noisy, bent and rotated scan. Energy: "
 		"squared distances at tracked foot points (exact batch adjoints) + offset smoothness.");
 	{

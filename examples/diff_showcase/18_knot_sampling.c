@@ -123,7 +123,7 @@ static void demo_knot_sampling(void)
 		tg[i].fraction = (qaws_scalar)((double)i / (KS_N - 1));
 	}
 	memcpy(knots, knots0, sizeof(knots));
-	svg_open(&s, "showcase/18_knot_sampling.svg", 1500, 560, "Knots as parameters of inverse-CDF sampling",
+	svg_open(&s, "shots/18_knot_sampling.svg", 1500, 560, "Knots as parameters of inverse-CDF sampling",
 		"Red: 31 arc-length samples; blue: uniform parameters t = 7 i/30; green: interior knots. The knot adjoint of the samples drives the knots toward an arc-length parameterization.");
 
 	/* a: tangents of the arc-length samples for knot 7 moving right */

@@ -159,7 +159,7 @@ static void demo_coons(void)
 			adam_step(&opt, &p[0][0], &grad[0][0], 4 * CB_CP * 3, 0.01);
 	}
 
-	svg_open(&s, "showcase/7_coons.svg", 1200, 600, "Coons patch fairing by editing two boundaries",
+	svg_open(&s, "shots/7_coons.svg", 1200, 600, "Coons patch fairing by editing two boundaries",
 		"Minimize mean(H^2) over the patch; adjoint: mean curvature -> geometry -> Coons rule -> child curves. Editable: red boundaries, interior heights only (masks).");
 	{
 		viewport a = { 30, 80, 560, 400, 0, 0, 0, 0 };

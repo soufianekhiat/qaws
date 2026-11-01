@@ -1,7 +1,7 @@
 /*
  * better2d_showcase.c - 2D clipping, offsetting and 2.5D stacks on curves
  *
- * Writes SVG figures into ./showcase/:
+ * Writes SVG figures into ./shots/:
  *   b2d1_extract.svg   the exact piece of a curve of every kind between two
  *                      parameters, as a new curve, over its source
  *   b2d2_boolean.svg   Boolean operations on polygons, NURBS and B-spline
@@ -74,7 +74,7 @@ static int b2d_want(int argc, char** argv, int n)
 int main(int argc, char** argv)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
-	MAKE_DIR("showcase");
+	MAKE_DIR("shots");
 	if (b2d_want(argc, argv, 1)) demo_extract();
 	return 0;
 }

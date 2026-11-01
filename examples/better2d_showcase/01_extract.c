@@ -222,7 +222,7 @@ static void demo_extract(void)
 	svg s;
 	int k;
 
-	if (!svg_open(&s, "showcase/b2d1_extract.svg", W, H, "Exact pieces of curves, as new curves",
+	if (!svg_open(&s, "shots/b2d1_extract.svg", W, H, "Exact pieces of curves, as new curves",
 		"qaws_curve_extract between 20% and 75% of the domain: source in grey, the new curve in colour with its control polygon; the piece lies on the source to rounding"))
 		return;
 	for (k = 0; k < 14; k++)

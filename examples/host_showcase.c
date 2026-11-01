@@ -1,7 +1,7 @@
 /*
  * host_showcase.c - features for host applications
  *
- * Writes SVG figures into ./showcase/:
+ * Writes SVG figures into ./shots/:
  *   host1_frames.svg   a ribbon swept along an S-shaped space curve with a
  *                      straight middle: by the Frenet frame (undefined on the
  *                      straight piece, flipping at the inflection) and by
@@ -112,7 +112,7 @@ static void figure_frames(void)
 		printf("host1: curve not created\n");
 		return;
 	}
-	if (!svg_open(&s, "showcase/host1_frames.svg", 1224, 730, "Frames along a curve",
+	if (!svg_open(&s, "shots/host1_frames.svg", 1224, 730, "Frames along a curve",
 		"a ribbon swept by the normal: Frenet (left) is undefined on the straight piece and flips at the inflection; "
 		"rotation-minimizing frames (right) follow without twisting"))
 		return;
@@ -124,7 +124,7 @@ static void figure_frames(void)
 	svg_text(&s, 640, 690, 13, "#57606a", "start", "qaws_curve_compute_rotation_minimizing_frames_3d, 160 samples, fourth-order accurate");
 	svg_close(&s);
 	qaws_curve_destroy(c);
-	printf("wrote showcase/host1_frames.svg\n");
+	printf("wrote shots/host1_frames.svg\n");
 }
 
 #define HS_DOTS 25
@@ -193,7 +193,7 @@ static void figure_arc_length(void)
 		printf("host2: curve not created\n");
 		return;
 	}
-	if (!svg_open(&s, "showcase/host2_arc_length.svg", 1224, 670, "Points at equal arc length",
+	if (!svg_open(&s, "shots/host2_arc_length.svg", 1224, 670, "Points at equal arc length",
 		"25 points on a B-spline with uneven parameter speed: at uniform parameters (left) they bunch and spread; "
 		"at equal lengths (right) they are evenly spaced"))
 		return;
@@ -204,7 +204,7 @@ static void figure_arc_length(void)
 	svg_text(&s, 640, 662, 13, "#57606a", "start", "qaws_curve_compute_parameter_at_arc_length over adaptive Gauss-Kronrod per span");
 	svg_close(&s);
 	qaws_curve_destroy(c);
-	printf("wrote showcase/host2_arc_length.svg\n");
+	printf("wrote shots/host2_arc_length.svg\n");
 }
 
 #define HS_RING 200
@@ -256,7 +256,7 @@ static void figure_closest(void)
 		printf("host3: curve not created\n");
 		return;
 	}
-	if (!svg_open(&s, "showcase/host3_closest.svg", 1224, 700, "Certified closest point",
+	if (!svg_open(&s, "shots/host3_closest.svg", 1224, 700, "Certified closest point",
 		"the point of the curve closest to the circle's center (red): a spike lies between the 32 samples a sampled search starts from")) 
 		return;
 	svg_panel(&s, &vl, "nearest of 32 samples (Newton stays on the circle: equal distances)");
@@ -289,7 +289,7 @@ static void figure_closest(void)
 	svg_text(&s, 640, 692, 13, "#57606a", "start", "qaws_curve_find_closest_point_certified_2d: convex-hull and fat-line bounds, de Casteljau halving");
 	svg_close(&s);
 	qaws_curve_destroy(c);
-	printf("wrote showcase/host3_closest.svg\n");
+	printf("wrote shots/host3_closest.svg\n");
 }
 
 #define HS_TESS 512
@@ -360,7 +360,7 @@ static void figure_tessellation(void)
 		qaws_curve_destroy(c);
 		return;
 	}
-	if (!svg_open(&s, "showcase/host4_tessellation.svg", 1224, 640, "Adaptive curve tessellation",
+	if (!svg_open(&s, "shots/host4_tessellation.svg", 1224, 640, "Adaptive curve tessellation",
 		"the same chord tolerance 0.02 on a cubic Bezier S (grey): a midpoint test accepts a segment whose middle lies on its chord"))
 		return;
 	svg_panel(&s, &vl, "adaptive sampling (midpoint test, from one segment)");
@@ -369,7 +369,7 @@ static void figure_tessellation(void)
 	hs_polyline(&s, &vr, c, pts, n, "#2a9d8f", "tests at 1/4, 1/2, 3/4; counts first, caller buffers");
 	svg_close(&s);
 	qaws_curve_destroy(c);
-	printf("wrote showcase/host4_tessellation.svg\n");
+	printf("wrote shots/host4_tessellation.svg\n");
 }
 
 #define HS_CAP 40
@@ -425,7 +425,7 @@ static void figure_surface_closest(void)
 		printf("host5: surface not created\n");
 		return;
 	}
-	if (!svg_open(&s, "showcase/host5_surface_closest.svg", 1224, 760, "Certified closest point on a surface",
+	if (!svg_open(&s, "shots/host5_surface_closest.svg", 1224, 760, "Certified closest point on a surface",
 		"a bicubic B-spline cap of radius 5 around the red point, coloured by distance to it, with a dent between the samples of an 8 x 8 grid"))
 		return;
 	svg_panel(&s, &vl, "nearest of the 8 x 8 grid (Newton stays on the sphere)");
@@ -456,7 +456,7 @@ static void figure_surface_closest(void)
 	svg_text(&s, 960, 727, 13, "#57606a", "start", "distance to the red point");
 	svg_close(&s);
 	qaws_surface_destroy(c);
-	printf("wrote showcase/host5_surface_closest.svg\n");
+	printf("wrote shots/host5_surface_closest.svg\n");
 }
 
 #define HS_TV 120000
@@ -543,7 +543,7 @@ static void figure_tessellation_surface(void)
 		printf("host6: surface not created\n");
 		return;
 	}
-	if (!svg_open(&s, "showcase/host6_surface_tessellation.svg", 1224, 640, "Adaptive surface tessellation",
+	if (!svg_open(&s, "shots/host6_surface_tessellation.svg", 1224, 640, "Adaptive surface tessellation",
 		"a bicubic B-spline flat on half its net: a quadtree with an absolute flatness threshold against chord and angle tolerances"))
 		return;
 	svg_panel(&s, &vl, "qaws_surface_tessellate (flatness 0.02, depth 6)");
@@ -567,7 +567,7 @@ static void figure_tessellation_surface(void)
 	}
 	svg_close(&s);
 	qaws_surface_destroy(c);
-	printf("wrote showcase/host6_surface_tessellation.svg\n");
+	printf("wrote shots/host6_surface_tessellation.svg\n");
 }
 
 #define HS_PU 260
@@ -648,13 +648,13 @@ static void figure_pipe(void)
 		qaws_curve_destroy(c);
 		return;
 	}
-	if (svg_open(&s, "showcase/host7_pipe.svg", 1224, 730, "Pipe with analytic derivatives",
+	if (svg_open(&s, "shots/host7_pipe.svg", 1224, 730, "Pipe with analytic derivatives",
 		"a pipe around a twisted cubic path: rotation-minimizing frames by double reflection, lit by the normal of the analytic du and dv"))
 	{
 		svg_panel(&s, &v, "qaws_surface_create_pipe: stripes along v stay straight (no twist); smooth shading from the analytic normal");
 		hs_pipe(&s, &pr, pipe);
 		svg_close(&s);
-		printf("wrote showcase/host7_pipe.svg\n");
+		printf("wrote shots/host7_pipe.svg\n");
 	}
 	qaws_surface_destroy(pipe);
 	qaws_curve_destroy(c);
@@ -671,7 +671,7 @@ static void figure_parameterization(void)
 	double line[400 * 2];
 	svg s;
 	unsigned int k, i;
-	if (!svg_open(&s, "showcase/host8_parameterization.svg", 1224, 720, "Parameterizations of fitting",
+	if (!svg_open(&s, "shots/host8_parameterization.svg", 1224, 720, "Parameterizations of fitting",
 		"cubic B-splines through the same eight unevenly spaced points (as many control points as points), by qaws_bspline_fit_desc.parameterization"))
 		return;
 	svg_panel(&s, &v, NULL);
@@ -704,7 +704,7 @@ static void figure_parameterization(void)
 		svg_circle(&s, vx(&v, p[i].x), vy(&v, p[i].y), 5, "#ffffff", "#1b1f24");
 	svg_text(&s, 40, 705, 13, "#57606a", "start", "uniform steps kink inside the cluster, chord lengths swing wide after it; their square roots (centripetal) follow the points");
 	svg_close(&s);
-	printf("wrote showcase/host8_parameterization.svg\n");
+	printf("wrote shots/host8_parameterization.svg\n");
 }
 
 int main(void)

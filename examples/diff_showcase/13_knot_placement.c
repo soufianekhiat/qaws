@@ -209,7 +209,7 @@ static void demo_knot_placement(void)
 	kp_fit(cps0, uk0, vk0, 0, l0);
 	kp_fit(cps1, uk1, vk1, 1, l1);
 
-	svg_open(&s, "showcase/13_knot_placement.svg", 1200, 600, "Knot placement: fitting a crease by moving knots",
+	svg_open(&s, "shots/13_knot_placement.svg", 1200, 600, "Knot placement: fitting a crease by moving knots",
 		"Bicubic B-spline (8 x 6) fit to a height field with a crease at u = 0.68 (dark line). Interior U and V knots "
 		"(white lines) move with the control points through knot adjoints.");
 	{

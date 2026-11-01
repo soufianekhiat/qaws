@@ -40,7 +40,7 @@ static void demo_cdf_measures(void)
 		tg[i].distance = 0;
 		tg[i].fraction = (qaws_scalar)((double)i / (CDF_N - 1));
 	}
-	svg_open(&s, "showcase/15_cdf_measures.svg", 1200, 560, "Inverse-CDF sampling of a curve under three measures",
+	svg_open(&s, "shots/15_cdf_measures.svg", 1200, 560, "Inverse-CDF sampling of a curve under three measures",
 		"40 samples at equal measure, t solving M(t) = i/39 M_total; arrows: first order sample tangents for the red control point moving up.");
 	for (m = 0; m < 3; m++)
 	{

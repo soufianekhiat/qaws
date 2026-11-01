@@ -40,7 +40,7 @@
  *
  * Photos are read as binary PPM; examples/photo_to_ppm.ps1 converts any
  * image (and writes a PNG used as figure background): ribbons.ppm and
- * folds.ppm in the photos directory. Figures are written to showcase/ in
+ * folds.ppm in the photos directory. Figures are written to shots/ in
  * the working directory.
  *
  *   qaws_diff_applications [photos directory] [mesh.obj]
@@ -66,7 +66,7 @@ int main(int argc, char** argv)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	if (argc > 1)
 		g_photos = argv[1];
-	MAKE_DIR("showcase");
+	MAKE_DIR("shots");
 	{
 		/* QAWS_APP=n runs only application n */
 		char const* only = getenv("QAWS_APP");

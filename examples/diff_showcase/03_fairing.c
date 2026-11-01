@@ -107,7 +107,7 @@ static void demo_fairing(void)
 			adam_step(&opt, cps, grad, FAIR_CP * 2, 0.01);
 	}
 
-	svg_open(&s, "showcase/3_fairing.svg", 1200, 600, "Curvature fairing through the geometry kernel",
+	svg_open(&s, "shots/3_fairing.svg", 1200, 600, "Curvature fairing through the geometry kernel",
 		"Minimize mean(kappa^2 |C'|) + 0.6 mean|C - C0|^2: curvature adjoint -> jet adjoint (D1, D2) -> control points. Orange = curvature comb.");
 	svg_panel(&s, &a, "before");
 	draw_comb(&s, &a, ref, ts, "#57606a");

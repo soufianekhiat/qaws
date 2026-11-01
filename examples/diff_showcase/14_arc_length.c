@@ -133,7 +133,7 @@ static void demo_arc_length(void)
 		g_al_targets[i].distance = 0;
 		g_al_targets[i].fraction = (qaws_scalar)((double)i / (AL_N - 1));
 	}
-	svg_open(&s, "showcase/14_arc_length.svg", 1200, 620, "Constant-speed sampling: first and second order, forward and backward",
+	svg_open(&s, "shots/14_arc_length.svg", 1200, 620, "Constant-speed sampling: first and second order, forward and backward",
 		"Samples at equal arc length, t solving L(t) = s: tangents and second tangents (forward), adjoints and Hessian-vector products (backward).");
 
 	/* --- left: parameter-uniform vs constant-speed samples, and their tangents */

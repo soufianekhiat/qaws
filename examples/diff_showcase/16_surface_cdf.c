@@ -82,7 +82,7 @@ static void demo_surface_cdf(void)
 			rng = rng * 1664525u + 1013904223u;
 			xi[2 * (i * SW_GRID + j) + 1] = (qaws_scalar)((j + (rng >> 8) / 16777216.0) / SW_GRID);
 		}
-	svg_open(&s, "showcase/16_surface_cdf.svg", 1590, 520, "Surfaces: stratified points warped by inverse CDFs",
+	svg_open(&s, "shots/16_surface_cdf.svg", 1590, 520, "Surfaces: stratified points warped by inverse CDFs",
 		"324 jittered points of the unit square: used as (u, v) directly, then warped by the area, a density field and the curvature sqrt(0.3^2 + k1^2 + k2^2) (marginal and conditional CDFs).");
 	for (panel = 0; panel < 4; panel++)
 	{
