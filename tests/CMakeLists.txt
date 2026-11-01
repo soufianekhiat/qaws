@@ -49,6 +49,7 @@ add_executable(
   55_diff_maps.c
   57_diff_core.c
   59_diff_surface_sampling.c
+  60_diff_sampling_core.c
   62_diff_surface_sampling_core.c
   63_exact_int.c
   64_exact_predicates.c

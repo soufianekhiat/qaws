@@ -61,6 +61,7 @@ extern int test_53_diff_derived_main(void);
 extern int test_55_diff_maps_main(void);
 extern int test_57_diff_core_main(void);
 extern int test_59_diff_surface_sampling_main(void);
+extern int test_60_diff_sampling_core_main(void);
 extern int test_62_diff_surface_sampling_core_main(void);
 extern int test_63_exact_int_main(void);
 extern int test_64_exact_predicates_main(void);
@@ -142,6 +143,7 @@ static test_suite const g_test_suites[] = {
 	{"55_diff_maps", test_55_diff_maps_main},
 	{"57_diff_core", test_57_diff_core_main},
 	{"59_diff_surface_sampling", test_59_diff_surface_sampling_main},
+	{"60_diff_sampling_core", test_60_diff_sampling_core_main},
 	{"62_diff_surface_sampling_core", test_62_diff_surface_sampling_core_main},
 	{"63_exact_int", test_63_exact_int_main},
 	{"64_exact_predicates", test_64_exact_predicates_main},
