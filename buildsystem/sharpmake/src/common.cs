@@ -74,6 +74,10 @@ namespace Qaws
 
             conf.IntermediatePath = Path.Combine("[project.SharpmakeCsPath]", "..", "..", "..", "tmp", "[project.Name]", conf.Name);
             conf.TargetPath = WorkingDir;
+            // one working_dir for both precisions: f32 binaries get their own names, else an up-to-date f32 build leaves
+            // the f64 executable in place
+            if (target.Scalar == ScalarType.Float)
+                conf.TargetFileSuffix = "_f32";
             conf.TargetLibraryPath = Path.Combine("[project.SharpmakeCsPath]", "..", "..", "..", "tmp", "lib", "win64_" + conf.Name);
 
             // C11 standard (use compiler option directly)
