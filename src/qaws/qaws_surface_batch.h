@@ -102,11 +102,8 @@ typedef struct qaws_surface_batch_curve
  * surfaces). A set keeps pointers to its surfaces: they must outlive it
  * and stay unchanged.
  *
- * qaws_surface_set_find_intersections(set, NULL, ...) intersects a set with
- * itself by its desc (families) as the one-shot call; (set, other, ...)
- * every surface of set with every surface of other: surface_a indexes
- * set, surface_b other. qaws_curve_set_find_surface_intersections takes a
- * prepared set of 3D curves against a prepared surface set.
+ * Pair queries over a set against itself use its desc (families); against
+ * another set, surface_a indexes the first set and surface_b the other.
  */
 typedef struct qaws_surface_set qaws_surface_set;
 

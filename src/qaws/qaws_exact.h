@@ -211,7 +211,7 @@ typedef struct qaws_exact_pair
  * Certified intersections of N exact curves at once (all 2D or all 3D, one
  * exact space). Every span of every curve gets a sound box from its control
  * points; one grid over all of them gives the span pairs that may meet, and
- * only those are certified as by qaws_exact_curve_curve_hits. `families`
+ * only those are certified, span pair by span pair. `families`
  * (optional) skips the pairs of curves with the same id; with
  * QAWS_EXACT_BATCH_SELF each curve's self-intersections are added.
  *
@@ -346,8 +346,8 @@ typedef struct qaws_exact_curve_surface_hit
  * Certified intersections of N 3D exact curves with M exact surfaces at
  * once (one exact space). Every curve span and surface patch gets a sound
  * box from its control points; one grid over all of them gives the
- * span / patch pairs that may meet, and only those are certified as by
- * qaws_exact_curve_surface_hits. Hits are sorted by (curve, surface, t_lo),
+ * span / patch pairs that may meet, and only those are certified, pair by
+ * pair. Hits are sorted by (curve, surface, t_lo),
  * a root on a span or patch edge reported once. A curve / surface pair that
  * cannot be certified contributes no hits and is counted in
  * stats.uncertified_count (the call then returns
@@ -389,7 +389,7 @@ typedef struct qaws_exact_ssi_branch
  * space). Every patch gets a sound box from its control net; one grid over
  * all patches gives the patch pairs of different surfaces (and families,
  * when given) whose boxes overlap, and each surface pair with any is
- * solved as by qaws_exact_surface_surface_hits on those patch pairs only.
+ * solved on those patch pairs only.
  * Branches are grouped by (surface_a, surface_b), surface_a < surface_b;
  * their points index the shared point buffer. A surface pair that cannot be
  * certified contributes nothing and is counted in stats.uncertified_count
@@ -402,7 +402,7 @@ typedef struct qaws_exact_ssi_batch_desc
 	qaws_exact_surface const* const* surfaces;
 	unsigned int surface_count;
 	unsigned int const* families;   /* optional, one id per surface */
-	unsigned int min_depth;         /* as for qaws_exact_surface_surface_hits */
+	unsigned int min_depth;         /* subdivision depth before certifying */
 	qaws_batch_executor const* executor;   /* optional: runs independent work in parallel */
 } qaws_exact_ssi_batch_desc;
 
@@ -443,8 +443,8 @@ qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* o
  * Certified ray casting: the first hit of every ray x = p0 + t (p1 - p0),
  * t >= 0 (t <= max_t when max_t > 0), over the exact surfaces of desc
  * (families and min_depth ignored). The rays walk one grid over the sound
- * patch control boxes cell by cell; every patch met is solved as by
- * qaws_exact_surface_line_hits, and the walk stops once the best hit's t
+ * patch control boxes cell by cell; every patch met is solved
+ * for its line hits, and the walk stops once the best hit's t
  * enclosure ends before the current cell's exit. The hit is certified
  * when its enclosure lies at t >= 0 and below every other hit's and below
  * the entry into any patch whose solve failed (a tangency); a ray with no

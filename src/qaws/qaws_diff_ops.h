@@ -106,10 +106,8 @@ qaws_status qaws_surface_closest_point_adjoint(
  * Roots seeded by the discrete finders
  *
  * The operations below differentiate one solution: the caller passes a
- * seed (typically from qaws_curve_find_intersections_*,
- * qaws_curve_find_plane_intersections, qaws_surface_find_curve_
- * intersections, qaws_curve_find_extrema or qaws_curve_find_inflection_
- * points), the solution is refined by Newton and differentiated by the
+ * seed (typically from an intersection finder, qaws_curve_find_extrema or
+ * qaws_curve_find_inflection_points), the solution is refined by Newton and differentiated by the
  * implicit function theorem. Which solution exists, and how many, is
  * frozen (QAWS_FREEZE_ACTIVE_SET); tangential configurations report
  * QAWS_DIFF_ILL_CONDITIONED and return zero coordinate tangents.
