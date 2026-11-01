@@ -2,7 +2,7 @@
 
 Differentiation of curves, surfaces, geometric quantities, implicit operations, geometry-building operations, integral functionals and inverse-CDF sampling.
 
-Headers: `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_ops.h`, `qaws_diff_map.h`, `qaws_diff_functionals.h`, `qaws_diff_sampling.h`.
+Headers: `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_ops.h`, `qaws_diff_map.h`, `qaws_diff_sampling.h`.
 
 - [Types](#types)
 - [Context and reports](#context-and-reports)
@@ -1338,7 +1338,7 @@ Surface counterpart of `qaws_curve_closest_point_adjoint`. Accumulates (`+=`).
 
 ### Roots seeded by the discrete finders
 
-The operations below differentiate one solution. The caller passes a seed, typically from `qaws_curve_find_intersections_*`, `qaws_curve_find_plane_intersections`, `qaws_surface_find_curve_intersections`, `qaws_curve_find_extrema` or `qaws_curve_find_inflection_points`. Seeds are clamped to the parameter range, refined by Newton and differentiated by the implicit function theorem. Which solution exists, and how many, is frozen (`QAWS_FREEZE_ACTIVE_SET`). Tangential configurations report `QAWS_DIFF_ILL_CONDITIONED` and return zero coordinate tangents.
+The operations below differentiate one solution. The caller passes a seed, typically from an intersection search, `qaws_curve_find_extrema` or `qaws_curve_find_inflection_points`. Seeds are clamped to the parameter range, refined by Newton and differentiated by the implicit function theorem. Which solution exists, and how many, is frozen (`QAWS_FREEZE_ACTIVE_SET`). Tangential configurations report `QAWS_DIFF_ILL_CONDITIONED` and return zero coordinate tangents.
 
 #### qaws_curve_pair_point
 
@@ -1813,136 +1813,6 @@ Runs `qaws_curve_offset_3d` and returns its exact map. The offset samples `C(t_i
 `direction_mode` 0 (constant direction, normalized), 1 (Frenet normal, differentiated through `qaws_curve_geometry_eval_3d`) and 2 (normal of `surface` at the closest point of each sample) are supported. In mode 2 the closest point `(u, v)` is differentiated through its optimality conditions `S_u . (S - q) = S_v . (S - q) = 0` at the points the offset itself finds, so `(u', v') = -H^-1 g'`, and the normal through `normalize(S_u x S_v)` (oriented like the evaluated normal); the curve moves the query `q`, the surface fields move `S`, `S_u`, `S_v`.
 
 **Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `curve` or `out_curve`, or a NULL `surface` in mode 2; `QAWS_STATUS_UNSUPPORTED_OPERATION` for an unknown mode, in mode 1 for curves with straight pieces where the Frenet normal is undefined, and in mode 2 where the closest-point Hessian is singular; errors of `qaws_curve_offset_3d`. On failure `*out_curve` is NULL.
-
----
-
-## Integral functionals
-
-Declared in `qaws_diff_functionals.h`. Integral functionals of curves and surfaces with exact derivatives of their quadrature:
-
-- value, tangent, tangent2 along one parameter direction;
-- gradient, accumulated (`+=`) into parameter views;
-- Hessian-vector product (`+=`), direct for families linear in their fields (`QAWS_CAP_LINEAR`); other families return `QAWS_STATUS_UNSUPPORTED_OPERATION` and the caller composes Hessian-vector products from tangents and adjoints.
-
-Curves integrate span by span with a composite Gauss-Legendre rule: every span is split into 8 pieces of `quadrature` points (0 = 6; clamped to 2..8), so the length (a square root of the speed) is exact to about 1e-12. Surfaces integrate a grid of cells with Gauss points (`quadrature` = cells per direction, 0 = 8; 4 x 4 points per cell).
-
-### qaws_curve_functional
-
-```c
-typedef enum qaws_curve_functional
-{
-	QAWS_FUNCTIONAL_LENGTH = 0,            /* integral of |C'| dt */
-	QAWS_FUNCTIONAL_BENDING,               /* integral of |C''|^2 dt */
-	QAWS_FUNCTIONAL_CURVATURE_SQUARED      /* integral of kappa^2 ds */
-} qaws_curve_functional;
-```
-
-### qaws_surface_functional
-
-```c
-typedef enum qaws_surface_functional
-{
-	QAWS_FUNCTIONAL_AREA = 0,              /* integral of |Su x Sv| du dv */
-	QAWS_FUNCTIONAL_THIN_PLATE,            /* integral of |Suu|^2 + 2|Suv|^2 + |Svv|^2 */
-	QAWS_FUNCTIONAL_WILLMORE               /* integral of H^2 dA */
-} qaws_surface_functional;
-```
-
-### qaws_curve_functional_eval
-
-```c
-qaws_status qaws_curve_functional_eval(
-	qaws_scalar* out_value,
-	qaws_scalar* out_tangent,
-	qaws_scalar* out_tangent2,
-	qaws_curve const* curve,
-	qaws_diff_views const* direction,
-	qaws_curve_functional functional,
-	unsigned int quadrature,
-	qaws_diff_context const* ctx);
-```
-
-Evaluates the functional and its first and second derivatives along the parameter direction `direction` (NULL = zero direction). Each output may be NULL; outputs are overwritten. A `QAWS_FIELD_KNOTS` direction is differentiated when the curve's knot field has `QAWS_CAP_TANGENT`.
-
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `curve` or an unknown functional; errors from the underlying curve evaluation.
-
-### qaws_curve_functional_gradient
-
-```c
-qaws_status qaws_curve_functional_gradient(
-	qaws_scalar* out_value,
-	qaws_diff_views* gradient,
-	qaws_curve const* curve,
-	qaws_curve_functional functional,
-	unsigned int quadrature,
-	qaws_diff_context const* ctx);
-```
-
-Accumulates (`+=`) the gradient of the functional into `gradient` and writes the value to `*out_value` (may be NULL). Knot gradients are produced under the same condition as `qaws_curve_functional_eval`.
-
-### qaws_curve_functional_hvp
-
-```c
-qaws_status qaws_curve_functional_hvp(
-	qaws_diff_views* out_hv,
-	qaws_curve const* curve,
-	qaws_diff_views const* direction,
-	qaws_curve_functional functional,
-	unsigned int quadrature,
-	qaws_diff_context const* ctx);
-```
-
-Accumulates (`+=`) the Hessian-vector product `H * direction` into `out_hv`.
-
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_UNSUPPORTED_OPERATION` if the curve is not `QAWS_CAP_LINEAR`, or if `direction` or `out_hv` contains a knot view (knots enter non-linearly).
-
-### qaws_surface_functional_eval
-
-```c
-qaws_status qaws_surface_functional_eval(
-	qaws_scalar* out_value,
-	qaws_scalar* out_tangent,
-	qaws_scalar* out_tangent2,
-	qaws_surface const* surface,
-	qaws_diff_views const* direction,
-	qaws_surface_functional functional,
-	unsigned int quadrature,
-	qaws_diff_context const* ctx);
-```
-
-Surface counterpart of `qaws_curve_functional_eval`. The quadrature runs on a cell grid over the domain; `U_KNOTS` / `V_KNOTS` directions change the integrand at fixed nodes, and the domain end knots also move every node and scale the weights.
-
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `surface` or an unknown functional.
-
-### qaws_surface_functional_gradient
-
-```c
-qaws_status qaws_surface_functional_gradient(
-	qaws_scalar* out_value,
-	qaws_diff_views* gradient,
-	qaws_surface const* surface,
-	qaws_surface_functional functional,
-	unsigned int quadrature,
-	qaws_diff_context const* ctx);
-```
-
-Accumulates (`+=`) the gradient into `gradient` and writes the value to `*out_value` (may be NULL). Returns `QAWS_STATUS_UNSUPPORTED_OPERATION` if `gradient` contains a knot view.
-
-### qaws_surface_functional_hvp
-
-```c
-qaws_status qaws_surface_functional_hvp(
-	qaws_diff_views* out_hv,
-	qaws_surface const* surface,
-	qaws_diff_views const* direction,
-	qaws_surface_functional functional,
-	unsigned int quadrature,
-	qaws_diff_context const* ctx);
-```
-
-Accumulates (`+=`) the Hessian-vector product into `out_hv`.
-
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_UNSUPPORTED_OPERATION` if the surface is not `QAWS_CAP_LINEAR` or a knot view is present in `direction` or `out_hv`.
 
 ---
 

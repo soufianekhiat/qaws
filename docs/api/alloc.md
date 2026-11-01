@@ -75,19 +75,19 @@ qaws_set_thread_allocator(&previous);
 void qaws_exchange_thread_scratch_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator);   /* NULL: none */
 ```
 
-With a scratch allocator installed on a thread, the temporaries of adaptive sampling, tessellation, meshing, clipping and the repulsive solvers come from it: blocks allocated and freed within one call. Results and objects still follow the order above (`_ex` argument, thread allocator, default). A frame arena can therefore serve as scratch and be reset after every call while the results stay on the heap.
+With a scratch allocator installed on a thread, the temporaries of adaptive sampling and tessellation come from it (and, in libraries built on qaws, those of their own operations): blocks allocated and freed within one call. Results and objects still follow the order above (`_ex` argument, thread allocator, default). A frame arena can therefore serve as scratch and be reset after every call while the results stay on the heap.
 
 ```c
 qaws_allocator previous;
 qaws_exchange_thread_scratch_allocator(&previous, &frame_arena.allocator);
-status = qaws_mesh_generate_surface(&mesh, NULL, surface, &desc);   /* the mesh: heap; its temporaries: the arena */
+status = qaws_curve_sample_2d(points, &count, curve, capacity, &desc);   /* its temporaries: the arena */
 qaws_exchange_thread_scratch_allocator(NULL, &previous);
 qaws_arena_reset(&frame_arena);                                    /* OK: the arena holds nothing after the call */
 ```
 
-- **Which allocations count as scratch.** A local pointer allocated and freed in the same function and never stored elsewhere (386 sites in those modules). Everything else, including every block a result keeps, uses the persistent order, so a result never holds scratch memory.
+- **Which allocations count as scratch.** A local pointer allocated and freed in the same function and never stored elsewhere. Everything else, including every block a result keeps, uses the persistent order, so a result never holds scratch memory.
 - **Coverage.** Other operations take their temporaries from the persistent order as before. Without a scratch allocator, nothing changes.
-- **Tests.** Test 154 runs sampling, offsets, clipping, tessellation, meshing and a repulsive solve with an arena as scratch and a counting heap as the allocator. After each call the arena holds no block and resets, and the kept results (curves, a clip result, a mesh, a solver) are read after the resets and then returned to the heap. With `QAWS_TEST_SCRATCH=1`, the test runner installs a scratch arena for every suite and fails a suite that leaves a block in it.
+- **Tests.** With `QAWS_TEST_SCRATCH=1`, the test runner installs a scratch arena for every suite and fails a suite that leaves a block in it.
 
 ## Sizes and overflow
 
@@ -357,17 +357,12 @@ qaws_status qaws_surface_create_gordon_ex(qaws_surface** out_surface, qaws_surfa
 qaws_status qaws_surface_create_trimmed_ex(qaws_surface** out_surface, qaws_surface_trim_desc const* desc, qaws_allocator const* allocator);
 qaws_status qaws_surface_create_tspline_ex(qaws_surface** out_surface, qaws_surface_tspline_desc const* desc, qaws_allocator const* allocator);
 qaws_status qaws_surface_create_subdiv_ex(qaws_surface** out_surface, qaws_surface_subdiv_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_fillet_ex(qaws_surface** out_surface, qaws_surface_fillet_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_fillet_with_trims_ex(qaws_surface** out_fillet, qaws_curve** out_trim_a,
-    qaws_curve** out_trim_b, qaws_surface_fillet_desc const* desc, qaws_allocator const* allocator);
 ```
 
 As for curves, the plain constructors call these with NULL, and every
 allocation the constructor makes goes through the allocator. That covers
 the surface, its stored data, and construction scratch, such as subdivision
-meshes and the fillet's intersection points. The fillet's trim curves come
-from it too. Two things are not counted: the intersection search the fillet
-runs, which allocates its own scratch, and the curves a surface borrows.
+meshes. The curves a surface borrows are not counted.
 
 **Evaluation.** The loft and Gordon evaluators need scratch per section
 curve. Up to 32 sections it is on the stack; beyond that it comes from the

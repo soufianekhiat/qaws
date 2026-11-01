@@ -1,48 +1,15 @@
 # API Reference: qaws_curve_batch.h
 
-Intersections of N curves at once.
+Closest points over N curves at once, and the types of curve batches.
 
 ---
 
-## Why a batch
-
-Intersecting N curves pair by pair re-samples both curves for every pair and
-costs about N² / 2 pair tests. The batch shares the work:
-
-1. **Flatten once.** Every curve, knot span by knot span, becomes chord
-   segments. A piece is split while its midpoint or a quarter point lies
-   farther than the flatness bound from its chord. Each segment's box is its
-   chord box inflated by twice the measured deviation.
-2. **One grid.** A uniform grid over every segment of every curve, sized to
-   about one segment per cell and filled by counting sort.
-3. **Candidates.** Inside each cell, segment pairs from curves allowed to meet
-   whose boxes overlap. Each pair is handled once, in the cell holding the
-   low corner of the two boxes' overlap.
-4. **Refine.** Chords closer than their two inflations seed Newton on the true
-   curves (Gauss-Newton in 3D), polished to rounding level. A bent piece
-   running along the other within its deviation, such as a line cutting a
-   shallow cap off an arc, can hold two crossings in one pair of segments:
-   Newton is then seeded again from each segment end, keeping the crossings
-   clearer than 1e-3 rad (curves running along each other meet anywhere on
-   their stretch).
-5. **Merge.** Coincident hits of one curve pair are kept once. Output is sorted
-   by `(curve_a, curve_b, parameter_a)`.
-
-The cost grows with the total segment count plus the number of nearby segment
-pairs, not with the number of curve pairs.
-
-## Families
-
-`families` gives each curve an id, and curves with the same id are never
-intersected with each other. For a heightfield, give the contour lines one
-family and the gradient lines another:
-
-- contours of different levels never cross;
-- gradient lines meet only at critical points, where they are tangent.
-
-Only the contour × gradient pairs are then searched.
-
 ## Types
+
+The hit types (`qaws_curve_batch_hit_2d`, `_3d`, `QAWS_CURVE_HIT_*`), the
+level-crossing types and `families` / `QAWS_CURVE_BATCH_SELF` belong to
+batched intersections, which are not part of qaws; the types stay here so
+that libraries built on qaws share them.
 
 ```c
 #define QAWS_CURVE_BATCH_SELF 1u   /* also intersect each curve with itself */
@@ -73,151 +40,20 @@ typedef struct qaws_curve_batch_stats {
 } qaws_curve_batch_stats;
 ```
 
-## Functions
-
-```c
-qaws_status qaws_curve_batch_find_intersections_2d(
-	qaws_curve_batch_hit_2d* out_hits,
-	unsigned int* out_count, qaws_curve_batch_stats* out_stats,
-	unsigned int hit_capacity, qaws_curve_batch_desc const* desc);
-
-qaws_status qaws_curve_batch_find_intersections_3d(
-	qaws_curve_batch_hit_3d* out_hits,
-	unsigned int* out_count, qaws_curve_batch_stats* out_stats,
-	unsigned int hit_capacity, qaws_curve_batch_desc const* desc);
-```
-
-The functions write `min(count, hit_capacity)` hits. `*out_count` is the total
-found, so compare it with the capacity and call again with a larger buffer.
-`out_stats` may be NULL.
-
-Every curve must have the function's dimension, or the call returns
-`QAWS_STATUS_INVALID_DIMENSION`. The functions are thread-safe on immutable
-curves.
-
-## Hit kinds
-
-Every hit says how the two curves meet:
-
-- **CROSSING**: they pass from one side to the other. This covers
-  transversal hits, and tangent hits with an odd contact, such as y = x³
-  against its inflection tangent.
-- **TOUCH**: they meet without crossing. Examples are tangent circles, a
-  line tangent to a circle, and the end of an open curve lying on another
-  curve.
-- **OVERLAP**: they share a stretch. It runs over `[parameter_a,
-  parameter_a_end]` on curve a, always increasing, and over `[parameter_b,
-  parameter_b_end]` on curve b, decreasing when the curves run opposite
-  ways. Two polygons sharing part of an edge give one overlap, and so does an
-  arc lying on a NURBS circle, even though the parameters map non-linearly.
-
-How each kind is found:
-
-- **Overlaps.** Nearly parallel chords trigger the overlap test. Segment
-  ends that lie on the other curve, within 16 times the position tolerance,
-  bound a candidate stretch. Three points between them must lie on the
-  other curve too. Overlaps of one curve pair that meet are joined into one
-  maximal stretch, and point hits on a stretch are dropped. The seam of a
-  closed curve counts as the same point from both sides.
-- **Tangencies.** Newton converges slowly there, and a flat contact (y = x³
-  near 0) stays within tolerance over a short stretch. Hits of one pair
-  joined by such a stretch become one hit, placed at its middle. To
-  classify a tangent hit, the test steps off both ends of the stretch along
-  curve a until it leaves the tolerance. It goes up to 1% of the scene
-  extent, or 10% in float builds, then compares which side of curve b each
-  end lies on.
-
-3D hits are CROSSING or OVERLAP.
-
-## Numbers
-
-These are f64 timings from test 79 and `qaws_batch_showcase` (Release build).
-
-| Scene | Batch | All pairs | Speedup |
-|---|---|---|---|
-| 16 × 16 conic contours × polynomial gradient lines | 0.002 s, 512 hits | 0.025 s, 512 hits | ×12 |
-| 128 × 128 of the same | 0.09 s, 32768 hits | 1.3 s, 27498 hits (misses) | ×14 |
-| Gaussian heightfield, 72 B-spline curves | 0.010 s, 375 hits | 3.2 s, 375 hits | ×317 |
-| Gaussian heightfield, 143 B-spline curves | 0.032 s, 1446 hits | 15.6 s, 1446 hits | ×489 |
-
-## Certified version
-
-`qaws_exact_curve_batch_hits` (see [exact.md](exact.md)) does the same
-for exact curves. It uses the same grid over sound span boxes, then
-certifies every candidate span pair. On the 72-curve heightfield it takes
-0.23 s, where pairwise exact calls take 2.1 s.
-
 ## Prepared sets
 
 ```c
 qaws_status qaws_curve_set_create(qaws_curve_set** out_set, qaws_curve_batch_desc const* desc);
 void qaws_curve_set_destroy(qaws_curve_set* set);
 unsigned int qaws_curve_set_get_segment_count(qaws_curve_set const* set);
-
-qaws_status qaws_curve_set_find_intersections_2d(qaws_curve_batch_hit_2d* out_hits, unsigned int* out_count,
-	qaws_curve_batch_stats* out_stats, qaws_curve_set const* set, qaws_curve_set const* other, unsigned int hit_capacity);
-/* and _3d */
 ```
 
-A set flattens its curves once. A query re-runs only the grid and the
-narrow phase:
-
-- `other == NULL` intersects the set with itself, using its families and
-  flags, exactly as the one-shot call.
-- Otherwise every curve of `set` is intersected with every curve of
-  `other`. `curve_a` indexes `set` and `curve_b` indexes `other`.
+A set flattens its curves once (chord segments, split span by span until
+the midpoint and both quarter points lie within the flatness bound of the
+chord, each with a box inflated by twice its measured deviation), and every
+query on it reuses them. `qaws_curve_set_find_closest` below is one.
 
 The set keeps pointers to its curves, so they must outlive it unchanged.
-
-Example: 64 fixed contours queried against 6 frames of 64 gradient lines
-give the same 49152 hits as the one-shot calls, in 0.085 s instead of
-0.097 s at equal flatness. Newton on the crossings dominates there. The
-saving grows with the size and span count of the fixed set.
-
-## Level crossings
-
-```c
-typedef qaws_scalar (*qaws_scalar_field_fn)(void* user, qaws_scalar const* point, qaws_scalar* gradient);
-
-typedef struct qaws_level_crossing_desc {
-	qaws_curve const* const* curves; unsigned int curve_count;   /* all 2D or all 3D */
-	qaws_scalar_field_fn field; void* user;
-	qaws_scalar const* levels; unsigned int level_count;         /* strictly ascending */
-	qaws_scalar flatness;
-} qaws_level_crossing_desc;
-
-typedef struct qaws_level_crossing {
-	unsigned int curve, level;
-	qaws_scalar parameter;
-	qaws_vec3 position;
-} qaws_level_crossing;            /* sorted by (curve, parameter) */
-
-qaws_status qaws_curve_batch_find_level_crossings(qaws_level_crossing* out_crossings,
-	unsigned int* out_count, unsigned int capacity, qaws_level_crossing_desc const* desc);
-```
-
-This finds where curves cross the level sets h = L of a scalar field, for
-every level at once, without building the level curves. For a heightfield,
-the curves are the gradient lines and the levels are the contour heights,
-so each crossing of a gradient line with a contour is found directly.
-
-1. Each curve is flattened once.
-2. The field values at a segment's ends bracket the levels it crosses (a
-   binary search in the sorted levels). A segment is split while h is not
-   close to linear along it, so a level crossed twice inside it is not
-   missed. A value exactly on a level belongs to the piece where it is the
-   lower end, so each crossing is counted once.
-3. Each bracket is solved for h(C(t)) = L. With the gradient this uses
-   Newton (gradient · C'); without it, Illinois secant. Both are kept inside
-   the bracket.
-
-The field may leave `gradient` untouched when it has none. A curve that
-touches a level without crossing it is not reported.
-
-Example: 128 parabola gradient lines against 128 levels of x² + 2y² give
-the 32768 crossings of the batch with contour curves, in 0.010 s instead of
-0.074 s. On the Gaussian heightfield of `qaws_batch_showcase` they are
-3 to 5 times faster than the batch against the traced contour curves.
 
 ## Closest points
 
@@ -274,10 +110,8 @@ qaws has no threads of its own. Every batch desc ends with an optional
 they are created with.
 
 - The batch splits its independent work into at most 256 chunks it owns:
-  query points or rays (closest points, ray casting, the certified ones
-  too), segments (level crossings), the cells of the broad-phase grid
-  (curve, curve x surface and surface x surface intersections, float and
-  certified), or the surface pairs of the certified surface batch.
+  the query points (closest points on curves and surfaces, float and
+  certified).
 - The executor's `parallel_for` must call `task(ctx, begin, end)` over
   ranges covering `[0, count)` exactly once, on any threads in any order,
   and return when all are done. A chunk left out makes the batch return
@@ -287,22 +121,4 @@ they are created with.
   executor does.
 - Without an executor, the work runs on the calling thread.
 
-The grid build and the final merge and sort stay on the calling thread.
-That bounds the speedup of the intersection batches, whose pair walk is
-short. The query batches and the certified batches scale further.
-
-Test 81 runs every batch, float and certified, serially, on a scrambled
-single-threaded executor and on 4 threads (Win32 threads, or pthreads);
-all give the serial results bit for bit. Figure 8 of the batch showcase
-(`batch8_threads.svg`) times them on 1 to 16 threads of a 20-core machine
-with a small executor whose threads take chunks from a shared counter:
-
-| batch | serial | 16 threads |
-|---|---|---|
-| curve intersections (contours x gradient lines) | 208 ms | x2.3 |
-| closest points on curves (20000 points) | 84 ms | x7.0 |
-| closest points on a surface (20000 points) | 1.88 s | x7.9 |
-| ray casting (36000 rays) | 161 ms | x8.2 |
-| certified surface intersections (terrain x 16 planes) | 641 ms | x4.3 |
-| certified closest points (128 points) | 4.93 s | x8.7 |
-| certified rays (128 rays) | 2.74 s | x7.6 |
+The grid build and the final merge stay on the calling thread.

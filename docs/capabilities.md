@@ -104,10 +104,8 @@ evaluation.
 | Rotation-minimizing frame step (double reflection, `qaws_frame_core.h`) | `qaws_curve_compute_rotation_minimizing_frames_3d` | tested (147: fourth order) | compiled | compiled | written; C `if` on expressions |
 | B-spline derivatives w.r.t. data | none | tested (57) | compiled (`diff_bspline_adjoint.hlsl`) | not checked | written |
 | B-spline sampling (CDF) | none | tested (60) | compiled (`diff_cdf_sampling.hlsl`) | not checked | written; C `if` on expressions |
-| Surface functionals | none | tested (61) | compiled (`diff_surface_functionals.hlsl`) | not checked | written |
 | Surface sampling | none | tested (62) | compiled (`diff_surface_sampling.hlsl`) | not checked | written; C `if` on expressions |
-| Repulsive pair kernels | none | tested (119) | run on a GPU once by hand, parity 1.1e-4 (`examples/repulsive_gpu_parity.c`) | not checked | written; C `if` on expressions |
-| Dual numbers | differentiation | tested (49) | compiled (through the sampling and functional cores) | not checked | written |
+| Dual numbers | differentiation | tested (49) | compiled (through the sampling cores) | not checked | written |
 
 "Compiled" says the shader source is accepted. "Run on a GPU" gives the
 largest difference, relative to 1 + |value|, between the core on a GPU
@@ -116,8 +114,7 @@ on the same inputs, over 256 parameters per family: position, D1 and D2,
 and for surfaces du, dv, the normal and the second partials.
 `examples/eval_gpu_parity.c` with `examples/eval_parity.hlsl` measures it
 by hand on Windows (2026-10-19). With test 144 (C core = runtime) this
-closes the chain GPU = C core = runtime. The repulsive kernels have their
-own tool, `examples/repulsive_gpu_parity.c`.
+closes the chain GPU = C core = runtime.
 
 ## Memory behaviour of the main operations
 
@@ -139,18 +136,11 @@ Every allocation follows `docs/api/alloc.md`: from the `_ex` argument, else the 
 | Curve and surface tessellation (`_tessellate_2d/3d`, `_adaptive`) | no | yes | yes, counts first | - | yes | n/a | n/a |
 | Sampling (`qaws_curve_sample_*`) | arc-length tables, adaptive growth buffers | yes | yes (`qaws_curve_get_sample_count`) | - | yes | no | n/a |
 | B-spline fitting | normal equations (O(n^2)), parameters, knots | data points read in place | object | - | yes | no | yes |
-| Offsets (`qaws_curve_offset_2d`, `qaws_offset`) | yes | yes | objects | - | executor (`qaws_offset`) | no | yes |
-| Clipping (`qaws_clip_*`) | yes | yes | result object | - | executor | no | yes |
+| Offsets (`qaws_curve_offset_2d`) | yes | yes | objects | - | yes | no | yes |
 | Traversal | tables at creation | yes | object | the traversal | yes | no | yes |
-| Meshing (generate, remesh, quadrangulate, repair) | yes | yes | mesh objects | - | yes | no | yes |
 | Curve and surface batches | yes | yes | caller capacity + counts | prepared sets | executor | no | yes |
-| Repulsive curves and surfaces | solver state from the `_ex` allocator (or the usual order), per-step scratch from the scratch allocator when installed (145) | positions in caller buffers | in place | the energy object and solver | executor | progress callback cancels (145) | yes |
 
-**Scratch sizes.** No operation publishes a bound or a scratch-size query yet. `examples/memory_bench.c` measures, per operation:
-
-- the blocks;
-- the most live bytes on the heap;
-- the peak inside an arena, which is what to size an arena by.
+**Scratch sizes.** No operation publishes a bound or a scratch-size query yet.
 
 ## Missing
 

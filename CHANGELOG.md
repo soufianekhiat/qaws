@@ -4,6 +4,29 @@ All notable changes to Qaws are documented here.
 
 ## [Unreleased]
 
+### Removed (2.0.0, breaking)
+
+- **qaws is curve and surface evaluation.** Processing left the library:
+  meshing (surface, tetrahedra, hexahedra, remeshing, quads, repair and
+  the mesh algorithms), 2D clipping and Booleans, offsets of regions,
+  triangulation, stacks, skeletons, mean value coordinates, region
+  sampling, surface and shell regions, geodesics, repulsive curves and
+  surfaces, integral functionals, curve / curve, curve / surface and
+  surface / surface intersections (float and certified), level crossings,
+  ray casts and fillet surfaces. Their headers, tests, examples and docs
+  went with them, together with the repulsive and surface functional GPU
+  cores (`core/qaws_repulsive_core.h`,
+  `core/qaws_bspline_surface_functional_core.h`).
+- **Kept**: every curve and surface family, evaluation (owned, borrowed,
+  prepared, batched), differential geometry, sampling, traversal,
+  tessellation, simple operations (split, join, extract, offset of one
+  curve, fillet and chamfer of 2D curves, conversions), fitting, import
+  and export, B-reps and motions, closest points in every form (sampled,
+  certified, exact, batched), winding numbers, the exact kernel's
+  predicates, integers and exact curves and surfaces, derivatives of all
+  of these, and the types other libraries share: `qaws_clip_result`,
+  `qaws_clip_desc`, the curve and surface batch descs and hits.
+
 ### Changed (3.0.0, breaking)
 
 - **The parameter convention of Alwan, Suwar and Abaad** (CONTRIBUTING.md):

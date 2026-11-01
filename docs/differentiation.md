@@ -1,8 +1,8 @@
 # Differentiation
 
-Qaws computes exact derivatives of curve and surface evaluation, of differential geometry, of geometric solves (closest points, intersections, extrema), of geometry-building operations (split, join, conversions, fitting) and of integral functionals (length, bending, area, thin plate, Willmore). Derivatives are formed analytically from the same basis functions the evaluator uses; the library never differentiates by finite steps.
+Qaws computes exact derivatives of curve and surface evaluation, of differential geometry, of geometric solves (closest points, intersection points, extrema) and of geometry-building operations (split, join, conversions, fitting). Derivatives are formed analytically from the same basis functions the evaluator uses; the library never differentiates by finite steps.
 
-All declarations live in `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_ops.h`, `qaws_diff_map.h` and `qaws_diff_functionals.h`, all included by `qaws.h`. The per-function reference is in [api/diff.md](api/diff.md).
+All declarations live in `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_ops.h`, `qaws_diff_map.h` and `qaws_diff_sampling.h`, all included by `qaws.h`. The per-function reference is in [api/diff.md](api/diff.md).
 
 ## Vocabulary
 
@@ -136,7 +136,7 @@ Operations defined by a solve are differentiated with the implicit function theo
 | extremum along a direction | `e . C'(t) = 0` |
 | inflection (xy) | `x'y'' - y'x'' = 0` |
 
-Closest points search globally (sampled profile, refined by Newton). The other operations differentiate one solution: pass a seed from the discrete finders (`qaws_curve_find_intersections_*`, `qaws_curve_find_plane_intersections`, `qaws_surface_find_curve_intersections`, `qaws_curve_find_extrema`, `qaws_curve_find_inflection_points`); the solution is refined by Newton and differentiated. Which solutions exist is a discrete choice (`QAWS_FREEZE_ACTIVE_SET`). Inputs that are not objects (query point, plane, direction) have their own tangent and adjoint arguments.
+Closest points search globally (sampled profile, refined by Newton). The other operations differentiate one solution: pass a seed from a discrete finder (an intersection search, `qaws_curve_find_extrema`, `qaws_curve_find_inflection_points`); the solution is refined by Newton and differentiated. Which solutions exist is a discrete choice (`QAWS_FREEZE_ACTIVE_SET`). Inputs that are not objects (query point, plane, direction) have their own tangent and adjoint arguments.
 
 Each solve reports:
 
@@ -160,15 +160,6 @@ qaws_diff_map_destroy(map);
 ```
 
 Available: split, join, Hermite to Bezier, Bezier to B-spline, B-spline to NURBS, degree elevation and reduction, the least-squares B-spline fit and the 3D offset (constant direction or Frenet normal; the sample set is frozen). Polynomial constructions are exact linear maps; NURBS maps include the homogeneous projection. `qaws_curve_fit_bspline_diff` differentiates the whole fit: chord-length parameters, averaged knots, basis functions and normal equations, with respect to the data points and (when given) the sample parameters. `qaws_diff_map_get_entries` exposes the sparse Jacobian.
-
-## Integral functionals
-
-`qaws_diff_functionals.h` integrates with Gauss-Legendre quadrature and differentiates the quadrature exactly:
-
-- curves: `QAWS_FUNCTIONAL_LENGTH`, `QAWS_FUNCTIONAL_BENDING` (`int |C''|^2 dt`), `QAWS_FUNCTIONAL_CURVATURE_SQUARED` (`int kappa^2 ds`);
-- surfaces: `QAWS_FUNCTIONAL_AREA`, `QAWS_FUNCTIONAL_THIN_PLATE`, `QAWS_FUNCTIONAL_WILLMORE`.
-
-Each has eval (value, tangent, tangent2), gradient (accumulated into views) and HVP.
 
 ## Inverse-CDF sampling
 
@@ -236,14 +227,6 @@ The test suites `49_diff_model` to `59_diff_surface_sampling` check every rule i
 
 Test `60_diff_sampling_core` drives the kernels the same way on the C backend. It reproduces the runtime samples, tangents, adjoints, functional values and gradients to round-off.
 
-`core/qaws_bspline_surface_functional_core.h` covers the area, thin-plate and Willmore functionals of B-spline surfaces. The runtime integrates on a uniform grid of cells with 4 x 4 Gauss points each, and the cells need not align with the knots, so every node is evaluated on the knot window of its own spans:
-
-- `qaws_surface_cell_node` gives a node's parameters and weight.
-- `qaws_bspline_surface_node` gives the weighted integrand with its first and second rates along the control point tangents. One thread per node, then a sum.
-- `qaws_bspline_surface_node_adjoint_cp` is the per-node term of a gather over control points.
-
-`examples/diff_surface_functionals.hlsl` runs them as compute passes. Test `61_diff_surface_functional_core` reproduces the runtime values, tangents and gradients to round-off.
-
 `core/qaws_bspline_surface_sampling_core.h` warps points of the unit square onto a B-spline surface by its area measure. It is the GPU form of `qaws_surface_cdf_sample_*` with `QAWS_MEASURE_AREA`. The curvature measure needs fourth derivatives, beyond the kernels' `QAWS_CORE_MAX_DERIV`; the density measure needs a callback. The whole control grid is passed, since a v-line crosses several knot spans. The kernels are:
 
 - `qaws_patch_cell_mass`: the u cells, followed by a prefix sum.
@@ -254,20 +237,6 @@ Test `60_diff_sampling_core` drives the kernels the same way on the C backend. I
 
 `examples/diff_surface_sampling.hlsl` runs them as compute passes. Test `62_diff_surface_sampling_core` reproduces the runtime samples, tangents and adjoints to round-off.
 
-`examples/diff_applications.c` (target `qaws_diff_applications`) applies the API to real data:
-
-1. Hair strands from a photo: structure-tensor orientation field, evenly spaced streamlines, B-spline strands aligned through unit-tangent adjoints.
-2. Photo vectorization: isocontours become centripetal Catmull-Rom splines whose interpolation points are optimized onto the contours.
-3. Triangulated mesh to six bicubic patches with ADMM: exact per-patch least squares at foot points (local support weights, thin-plate HVPs), seam control points in consensus.
-4. Non-rigid registration: CMA-ES basin hopping on the pose with gradient refinements inside the fitness.
-5. Hair grooming: 3D strands with fixed roots under length and bending functionals, gravity, head collision and unit-tangent alignment to a combing field.
-6. Hair from a photo (single-view hair modeling): the projected unit tangents of the 3D strands follow the photo orientation field and stay on its hair mask.
-7. Rational patches: NURBS weights freed after the ADMM fit, seams kept closed.
-8. Real haircuts: vector hair strands from six portrait photos (seeded hair mask, orientation field, B-spline strands).
-9. 3D hair from frontal portraits: head placed from the face, visible strands follow the photo, hidden strands follow the 3D priors.
-10. Single-view hair modeling on plain-background portraits (long, curly, ponytail, profile bob), after Chai et al. 2012/2013 and Hu et al. 2015: background flooded from the border; Gabor orientation (32 angles, refinement pass); image strands lifted onto a hair volume (head plus inflated silhouette) and fitted as 3D B-splines through the batch adjoint; their tangents constrain a voxel orientation-tensor field diffused through the volume; 14k strands grown from the scalp with RK2 (gathered toward a tie for the ponytail), fill strands in empty cells, per-photo curl as helical offsets; a small rasterizer renders them with Kajiya-Kay shading and density self-shadowing.
-11. Font outline fitting: glyphs rendered from an installed font (`examples/glyph_to_ppm.ps1`) are traced at the half-ink isoline; each contour becomes a periodic cubic B-spline with triple knots at detected corners and arc-length knots elsewhere, fitted through the batch adjoint with parameter correction.
-12. Shape optimization, 2D vesicles: a closed cubic B-spline minimizes its bending energy at fixed length and reduced area (augmented Lagrangian) by Newton-CG on exact Hessian-vector products of the curvature-squared, bending and length functionals and of the enclosed area.
-13. CAD reverse engineering with G1 seams: the six-patch ADMM fit of the blob scan is refined as one model, with shared seam control points (C0 exact) and `1 - (n_a . n_b)^2` at seam samples pulled back through the surface adjoint on the `S_u`, `S_v` channels. The largest crease drops from 20 degrees to 0.24 (cube corners, where three patches meet, excluded). Zebra stripes show the result.
+`examples/diff_applications.c` (target `qaws_diff_applications`) applies the API to real data: non-rigid registration, CMA-ES basin hopping on the pose with gradient refinements inside the fitness.
 
 Photos are read as PPM; `examples/photo_to_ppm.ps1` converts any image (`-Crop "x,y,w,h"` in fractions).

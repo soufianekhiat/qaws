@@ -13,7 +13,7 @@
 - [Sampling](sampling.md) -- Generating point arrays from curves
 - [Traversal](traversal.md) -- Motion profiles, constant-speed, arc-length
 - [Inspection](inspection.md) -- Querying curve properties and analysis
-- [Differentiation](differentiation.md) -- Exact tangents, adjoints and second derivatives of evaluation, geometry, solves, operations and functionals
+- [Differentiation](differentiation.md) -- Exact tangents, adjoints and second derivatives of evaluation, geometry, solves and operations
 - [Backends](backends.md) -- Multi-backend architecture (C, HLSL, GLSL, Halide)
 - [Error Handling](error_handling.md) -- Status codes and error patterns
 
@@ -70,11 +70,7 @@ Per-header documentation with all function signatures and parameters:
 
 ### Differentiation
 
-- [qaws_diff*.h](api/diff.md) -- Fields, views, jets, tangents, adjoints, geometry, implicit operations, differential maps, integral functionals
-
-### Meshing
-
-- [meshing](api/meshing.md) -- Surface and volume meshes (`qaws_mesh.h`, `qaws_volume_mesh.h`), references, size, direction and frame fields, remeshing, quads, generation from surfaces and shells, tetrahedra, hexahedra
+- [qaws_diff*.h](api/diff.md) -- Fields, views, jets, tangents, adjoints, geometry, implicit operations, differential maps
 
 ### Headers without dedicated doc pages yet
 

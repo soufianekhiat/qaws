@@ -223,64 +223,6 @@ qaws_curve_compute_winding_number_2d(&winding, curve, point);
 // winding != 0 means the point is inside
 ```
 
-## Curve-curve intersection
-
-Find all intersection points between two curves:
-
-```c
-// 2D
-qaws_intersection_2d hits_2d[32];
-unsigned int hit_count;
-qaws_curve_find_intersections_2d(hits_2d, &hit_count,
-    curve_a, curve_b, 32);
-
-// Each intersection has:
-//   .parameter_a -- parameter on curve_a
-//   .parameter_b -- parameter on curve_b
-//   .position    -- intersection point in space
-
-// 3D
-qaws_intersection_3d hits_3d[32];
-qaws_curve_find_intersections_3d(hits_3d, &hit_count,
-    curve_a, curve_b, 32);
-```
-
-The intersection result structs are defined as:
-
-```c
-typedef struct qaws_intersection_2d {
-    qaws_scalar parameter_a;
-    qaws_scalar parameter_b;
-    qaws_vec2   position;
-} qaws_intersection_2d;
-
-typedef struct qaws_intersection_3d {
-    qaws_scalar parameter_a;
-    qaws_scalar parameter_b;
-    qaws_vec3   position;
-} qaws_intersection_3d;
-```
-
-## Self-intersection detection
-
-Find points where a curve crosses itself:
-
-```c
-// 2D
-qaws_intersection_2d self_hits_2d[32];
-unsigned int self_count;
-qaws_curve_find_self_intersections_2d(self_hits_2d,
-    &self_count, curve, 32);
-
-// parameter_a and parameter_b are the two distinct parameter values
-// where the curve passes through the same position
-
-// 3D
-qaws_intersection_3d self_hits_3d[32];
-qaws_curve_find_self_intersections_3d(self_hits_3d,
-    &self_count, curve, 32);
-```
-
 ## Family-specific inspection
 
 ### Bezier control points

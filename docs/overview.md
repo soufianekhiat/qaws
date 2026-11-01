@@ -10,7 +10,7 @@ Qaws lets you:
 - **Evaluate** position and derivatives at any parameter -- on CPU, GPU, or DSP
 - **Sample** curves into point buffers for rendering or export
 - **Traverse** curves with constant-speed, acceleration, or time-based motion
-- **Inspect** curve properties: tangent, curvature, torsion, arc length, bounds, closest point, intersections, and more
+- **Inspect** curve properties: tangent, curvature, torsion, arc length, bounds, closest point, and more
 - **Operate** on curves: split, join, offset, reparameterize, reverse
 - **Convert** between curve families and export to SVG, polyline, or B-spline fits
 - **Evaluate surfaces**: Bezier, B-spline, NURBS, swept, and ruled patches

@@ -110,7 +110,6 @@ evaluation, sampling, traversal, and inspection API after creation.
 | Geometry | arc length, bounding box, closest point |
 | Differential | tangent, normal, curvature, torsion, speed, Frenet frame |
 | Topology | inflection points, extrema, winding number |
-| Intersection | curve-curve, self-intersection |
 | Visualization | curvature comb |
 
 ### Convert and operate
@@ -210,7 +209,7 @@ Full docs are in [`docs/`](docs/index.md):
 - [Evaluation](docs/evaluation.md) -- eval flags, batch eval, core headers, prepare+eval
 - [Sampling](docs/sampling.md) -- uniform, adaptive, curvature-weighted, streaming
 - [Traversal](docs/traversal.md) -- motion profiles, easing, wrap modes
-- [Inspection](docs/inspection.md) -- geometry queries, intersection, analysis
+- [Inspection](docs/inspection.md) -- geometry queries, closest points, analysis
 - [Building](docs/building.md) -- CMake and Sharpmake configuration
 - [Capabilities](docs/capabilities.md) -- what runs on which backend, and which test or check backs it
 
