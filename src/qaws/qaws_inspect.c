@@ -2454,86 +2454,27 @@ qaws_status qaws_curve_compute_hausdorff_distance_3d(
 /*  Closest point on surface                                           */
 /* ------------------------------------------------------------------ */
 
-static qaws_status surface_closest_sampled(
+/* Newton from (u, v) on the squared distance to point, clamped to the domain; the
+   result's squared distance */
+static qaws_status surface_closest_refine(
 	qaws_surface const *surface,
 	qaws_vec3 point,
-	qaws_scalar *out_u,
-	qaws_scalar *out_v,
-	qaws_vec3 *out_closest_point)
+	qaws_scalar *io_u,
+	qaws_scalar *io_v,
+	qaws_vec3 *out_point,
+	qaws_scalar *out_dist_sq)
 {
-	unsigned int i;
-	unsigned int j;
 	unsigned int iter;
-	qaws_scalar u;
-	qaws_scalar v;
-	qaws_scalar best_u;
-	qaws_scalar best_v;
-	qaws_scalar best_dist_sq;
-	qaws_scalar dx, dy, dz;
-	qaws_scalar dist_sq;
-	qaws_scalar u_min, u_max, v_min, v_max;
-	qaws_scalar g_u, g_v;
-	qaws_scalar h_uu, h_uv, h_vv;
-	qaws_scalar det;
-	qaws_scalar delta_u, delta_v;
-	qaws_scalar delta_len;
-	qaws_range u_range;
-	qaws_range v_range;
+	qaws_scalar u = *io_u, v = *io_v;
+	qaws_scalar g_u, g_v, h_uu, h_uv, h_vv, det, delta_u, delta_v, delta_len;
+	qaws_range u_range = qaws_surface_get_u_range(surface);
+	qaws_range v_range = qaws_surface_get_v_range(surface);
 	qaws_surface_eval_result result;
 	qaws_status status;
-
-	if (!surface || !out_u || !out_v || !out_closest_point)
-		return QAWS_STATUS_INVALID_ARGUMENT;
-
-	u_range = qaws_surface_get_u_range(surface);
-	v_range = qaws_surface_get_v_range(surface);
-	u_min = u_range.min_value;
-	u_max = u_range.max_value;
-	v_min = v_range.min_value;
-	v_max = v_range.max_value;
-
-	/* Coarse search: 8x8 grid */
-	best_u = u_min;
-	best_v = v_min;
-	best_dist_sq = QAWS_LITERAL(1.0e30);
-
-	for (i = 0; i < 8; ++i)
-	{
-		u = u_min + (qaws_scalar)i * (u_max - u_min)
-			/ QAWS_LITERAL(7.0);
-
-		for (j = 0; j < 8; ++j)
-		{
-			v = v_min + (qaws_scalar)j * (v_max - v_min)
-				/ QAWS_LITERAL(7.0);
-
-			status = qaws_surface_evaluate(
-				&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
-			if (status != QAWS_STATUS_OK)
-				return status;
-
-			dx = result.position.x - point.x;
-			dy = result.position.y - point.y;
-			dz = result.position.z - point.z;
-			dist_sq = dx * dx + dy * dy + dz * dz;
-
-			if (dist_sq < best_dist_sq)
-			{
-				best_dist_sq = dist_sq;
-				best_u = u;
-				best_v = v;
-			}
-		}
-	}
-
-	/* Newton refinement */
-	u = best_u;
-	v = best_v;
+	qaws_vec3 r;
 
 	for (iter = 0; iter < 20; ++iter)
 	{
-		qaws_vec3 r;
-
 		status = qaws_surface_evaluate(
 			&result, surface, u,
 			v,
@@ -2577,10 +2518,10 @@ static qaws_status surface_closest_sampled(
 		v -= delta_v;
 
 		/* Clamp to parameter domain */
-		if (u < u_min) u = u_min;
-		if (u > u_max) u = u_max;
-		if (v < v_min) v = v_min;
-		if (v > v_max) v = v_max;
+		if (u < u_range.min_value) u = u_range.min_value;
+		if (u > u_range.max_value) u = u_range.max_value;
+		if (v < v_range.min_value) v = v_range.min_value;
+		if (v > v_range.max_value) v = v_range.max_value;
 
 		delta_len = QAWS_SQRT(delta_u * delta_u + delta_v * delta_v);
 		if (delta_len < QAWS_LITERAL(1.0e-8))
@@ -2592,10 +2533,99 @@ static qaws_status surface_closest_sampled(
 		&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
 	if (status != QAWS_STATUS_OK)
 		return status;
+	r.x = result.position.x - point.x;
+	r.y = result.position.y - point.y;
+	r.z = result.position.z - point.z;
+	*io_u = u;
+	*io_v = v;
+	*out_point = result.position;
+	*out_dist_sq = r.x * r.x + r.y * r.y + r.z * r.z;
+	return QAWS_STATUS_OK;
+}
 
-	*out_u = u;
-	*out_v = v;
-	*out_closest_point = result.position;
+/* an 8 x 8 grid's nearest samples, each refined by Newton, the nearest result kept:
+   several seeds, as a closed surface's seam samples (u at both ends, one point) tie
+   and the one taken by rounding can stall against the domain's end */
+static qaws_status surface_closest_sampled(
+	qaws_surface const *surface,
+	qaws_vec3 point,
+	qaws_scalar *out_u,
+	qaws_scalar *out_v,
+	qaws_vec3 *out_closest_point)
+{
+	unsigned int i, j, k, ns = 0;
+	qaws_scalar u, v, dx, dy, dz, dist_sq, best = QAWS_LITERAL(1.0e30);
+	qaws_scalar su[4], sv[4], sd[4];
+	qaws_scalar u_min, u_max, v_min, v_max;
+	qaws_range u_range;
+	qaws_range v_range;
+	qaws_surface_eval_result result;
+	qaws_status status;
+
+	if (!surface || !out_u || !out_v || !out_closest_point)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	u_range = qaws_surface_get_u_range(surface);
+	v_range = qaws_surface_get_v_range(surface);
+	u_min = u_range.min_value;
+	u_max = u_range.max_value;
+	v_min = v_range.min_value;
+	v_max = v_range.max_value;
+
+	/* Coarse search: 8x8 grid, its 4 nearest samples in order */
+	for (i = 0; i < 8; ++i)
+	{
+		u = u_min + (qaws_scalar)i * (u_max - u_min)
+			/ QAWS_LITERAL(7.0);
+
+		for (j = 0; j < 8; ++j)
+		{
+			v = v_min + (qaws_scalar)j * (v_max - v_min)
+				/ QAWS_LITERAL(7.0);
+
+			status = qaws_surface_evaluate(
+				&result, surface, u, v, QAWS_SURFACE_EVAL_POSITION);
+			if (status != QAWS_STATUS_OK)
+				return status;
+
+			dx = result.position.x - point.x;
+			dy = result.position.y - point.y;
+			dz = result.position.z - point.z;
+			dist_sq = dx * dx + dy * dy + dz * dz;
+
+			if (ns < 4 || dist_sq < sd[ns - 1])
+			{
+				k = ns < 4 ? ns++ : ns - 1;
+				for (; k > 0 && sd[k - 1] > dist_sq; --k)
+				{
+					su[k] = su[k - 1];
+					sv[k] = sv[k - 1];
+					sd[k] = sd[k - 1];
+				}
+				su[k] = u;
+				sv[k] = v;
+				sd[k] = dist_sq;
+			}
+		}
+	}
+
+	/* Newton refinement from each, the nearest result kept (ties: the earlier seed) */
+	for (k = 0; k < ns; ++k)
+	{
+		qaws_vec3 p;
+		u = su[k];
+		v = sv[k];
+		status = surface_closest_refine(surface, point, &u, &v, &p, &dist_sq);
+		if (status != QAWS_STATUS_OK)
+			return status;
+		if (dist_sq < best)
+		{
+			best = dist_sq;
+			*out_u = u;
+			*out_v = v;
+			*out_closest_point = p;
+		}
+	}
 	return QAWS_STATUS_OK;
 }
 
