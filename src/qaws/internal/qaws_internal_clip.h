@@ -60,6 +60,11 @@ typedef struct qaws_internal_arrangement
 	unsigned int face_count;
 	int const* inside;                   /* per face */
 	double tolerance, extent;            /* collinear corners dropped within tolerance; area accuracy */
+	/* open subjects' pieces (operand 2), in path order and each path's in parameter order, and whether each is kept:
+	   consecutive kept pieces of one path meeting at a vertex are one open path */
+	qaws_internal_arr_edge const* open_edges;
+	unsigned int open_edge_count;
+	int const* open_keep;
 } qaws_internal_arrangement;
 
 qaws_status qaws_internal_clip_output_arrangement(qaws_internal_arrangement const* a, qaws_clip_result* result);

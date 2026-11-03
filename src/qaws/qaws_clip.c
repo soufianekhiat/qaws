@@ -915,6 +915,63 @@ qaws_status qaws_internal_clip_result_append(qaws_clip_result* dst, qaws_clip_re
 	return QAWS_STATUS_OK;
 }
 
+/* the kept open pieces, in runs: one open path per run of pieces of one path meeting end to start */
+static qaws_status cl_open_runs(cl_ctx* x, qaws_internal_arrangement const* a)
+{
+	cl_piece* pc = NULL;
+	unsigned int np = 0, cappc = 0, i, last_path = CL_NONE, last_v = CL_NONE;
+	qaws_status s = QAWS_STATUS_OK;
+	for (i = 0; i <= a->open_edge_count && s == QAWS_STATUS_OK; i++)
+	{
+		qaws_internal_arr_edge const* e = i < a->open_edge_count ? &a->open_edges[i] : NULL;
+		int keep = e && a->open_keep[i];
+		if (np && (!keep || x->src[e->src].path != last_path || e->v0 != last_v))
+		{
+			struct cl_out_path op;
+			memset(&op, 0, sizeof(op));
+			op.parent = CL_NONE;
+			s = cl_emit_pieces(x, pc, np, 0, &op);
+			if (s == QAWS_STATUS_OK)
+			{
+				qaws_clip_vertex vr;
+				cl_vertex_record(x, pc[np - 1].vb, &vr);
+				s = cl_res_vertex(x->r, &vr);
+				op.vcount++;
+			}
+			if (s == QAWS_STATUS_OK)
+				s = cl_push_path(x->r, 1, &op);
+			np = 0;
+		}
+		if (keep && s == QAWS_STATUS_OK)
+		{
+			if (np == cappc)
+			{
+				unsigned int nc = qaws_internal_grow(cappc, (size_t)np + 1, 64);
+				cl_piece* g = nc ? (cl_piece*)qaws_internal_realloc(pc, qaws_internal_mul2(sizeof(cl_piece), nc)) : NULL;
+				if (!g)
+				{
+					qaws_internal_free(pc);
+					return QAWS_STATUS_ALLOCATION_FAILURE;
+				}
+				pc = g;
+				cappc = nc;
+			}
+			memset(&pc[np], 0, sizeof(cl_piece));
+			pc[np].src = e->src;
+			pc[np].ta = e->t0;
+			pc[np].tb = e->t1;
+			pc[np].va = e->v0;
+			pc[np].vb = e->v1;
+			pc[np].h = CL_NONE;
+			np++;
+			last_path = x->src[e->src].path;
+			last_v = e->v1;
+		}
+	}
+	qaws_internal_free(pc);
+	return s;
+}
+
 qaws_status qaws_internal_clip_output_arrangement(qaws_internal_arrangement const* a, qaws_clip_result* result)
 {
 	cl_ctx x;
@@ -981,6 +1038,8 @@ qaws_status qaws_internal_clip_output_arrangement(qaws_internal_arrangement cons
 		for (k = 0; k < a->vertices[i].count; k++)
 			x.h[x.vout[a->vertices[i].first + k]].pos = k;
 	s = cl_output(&x, a->face_count, a->inside);
+	if (s == QAWS_STATUS_OK && a->open_edge_count)
+		s = cl_open_runs(&x, a);
 	cl_free_ctx(&x);
 	/* const views of the curves for the path views */
 	if (s == QAWS_STATUS_OK)
