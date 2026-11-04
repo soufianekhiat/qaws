@@ -10,17 +10,6 @@
 #include <math.h>
 #include "qaws_platform.h"
 
-typedef struct qaws_surface_revolution_impl
-{
-	qaws_curve const* profile;
-	qaws_range prof_range;
-	qaws_vec3 origin;
-	qaws_vec3 X_axis;   /* perpendicular to rotation axis */
-	qaws_vec3 Y_axis;   /* perpendicular to rotation axis and X_axis */
-	qaws_vec3 Z_axis;   /* normalized rotation axis direction */
-	qaws_scalar angle;
-} qaws_surface_revolution_impl;
-
 /* S(u,v) = origin + r(v)*cos(theta)*X + r(v)*sin(theta)*Y + h(v)*Z
    where theta = u * angle, r = profile_x(v), h = profile_y(v).
 

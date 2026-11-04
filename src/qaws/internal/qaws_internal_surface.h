@@ -69,6 +69,19 @@ typedef struct qaws_surface_nurbs_impl
 	unsigned int v_knot_count;
 } qaws_surface_nurbs_impl;
 
+/* Surface of revolution impl: S(u, v) = origin + r(t) (cos(theta) X + sin(theta) Y) + h(t) Z, theta = u angle,
+   t = prof_range.min + v (prof_range.max - prof_range.min), (r, h) the 2D profile */
+typedef struct qaws_surface_revolution_impl
+{
+	qaws_curve const* profile;
+	qaws_range prof_range;
+	qaws_vec3 origin;
+	qaws_vec3 X_axis;   /* perpendicular to rotation axis */
+	qaws_vec3 Y_axis;   /* perpendicular to rotation axis and X_axis */
+	qaws_vec3 Z_axis;   /* normalized rotation axis direction */
+	qaws_scalar angle;
+} qaws_surface_revolution_impl;
+
 qaws_surface* qaws_internal_surface_alloc(
 	qaws_surface_kind kind,
 	unsigned int u_degree,
