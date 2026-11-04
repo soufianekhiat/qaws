@@ -1,12 +1,13 @@
 /*
- * Guaranteed ranges of a surface and its derivatives over a parameter box (qaws_surface_enclose): per knot span the
- * B-spline window - its derivatives' windows for the derivatives - blossomed over the span's part of the box into a
- * Bezier net, in interval arithmetic rounded outward; the nets' hulls bound the homogeneous values, the quotient rule in
- * intervals the rational ones.
+ * Guaranteed ranges of a surface or a curve and its derivatives over a parameter box (qaws_surface_enclose,
+ * qaws_curve_enclose): per knot span the B-spline window - its derivatives' windows for the derivatives - blossomed over
+ * the span's part of the box into a Bezier net, in interval arithmetic rounded outward; the nets' hulls bound the
+ * homogeneous values, the quotient rule in intervals the rational ones.
  */
 
 #include "internal/qaws_internal_closest.h"
 #include "internal/qaws_internal_surface.h"
+#include "internal/qaws_internal_types.h"
 #include "qaws_inspect.h"
 #include "qaws_surface.h"
 #include "qaws_platform.h"
@@ -282,6 +283,152 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 	if (!any)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (q = 0; q < (order == 0 ? 3u : order == 1 ? 9u : 18u); q++)
+	{
+		out_lo[q] = acc[q].lo;
+		out_hi[q] = acc[q].hi;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* ---- curves ---- */
+
+/* span s of a curve as a window of homogeneous points (4 intervals each, dim + 1 of them used, the weight last) and its
+   2p knots: the Bezier and spline families through their B-spline windows; a Hermite span its Bezier points (3 p0,
+   3 p0 + m0, 3 p1 - m1, 3 p1) / 3 and a uniform Catmull-Rom span's (6 q1, 6 q1 + q2 - q0, 6 q2 - q3 + q1, 6 q2) / 6, in
+   intervals, over the span */
+static int en_curve_window(qaws_curve const* c, unsigned int s, unsigned int* p, en_iv* win, double* uk)
+{
+	unsigned int const dim = (unsigned int)c->dimension, h = dim + 1;
+	unsigned int i, j, k;
+	if (c->kind == QAWS_CURVE_KIND_HERMITE || c->kind == QAWS_CURVE_KIND_CATMULL_ROM)
+	{
+		double const ta = (double)c->span_boundaries[s], tb = (double)c->span_boundaries[s + 1];
+		en_iv const three = en_exact(3), six = en_exact(6);
+		for (k = 0; k < dim; k++)
+		{
+			en_iv b[4];
+			if (c->kind == QAWS_CURVE_KIND_HERMITE)
+			{
+				qaws_hermite_impl const* m = (qaws_hermite_impl const*)c->impl;
+				en_iv const p0 = en_exact((double)m->points[s * dim + k]), p1 = en_exact((double)m->points[(s + 1) * dim + k]);
+				en_iv const m0 = en_exact((double)m->tangents[s * dim + k]), m1 = en_exact((double)m->tangents[(s + 1) * dim + k]);
+				b[0] = p0, b[3] = p1;
+				b[1] = en_div(en_add(en_mul(three, p0), m0), three);
+				b[2] = en_div(en_sub(en_mul(three, p1), m1), three);
+			}
+			else
+			{
+				qaws_catmull_rom_impl const* m = (qaws_catmull_rom_impl const*)c->impl;
+				unsigned int const n = m->control_point_count, b0 = m->closed ? s + n - 1 : s;
+				en_iv q[4];
+				if (m->parameterization != QAWS_PARAMETERIZATION_UNIFORM || n < 2)
+					return 0;
+				for (j = 0; j < 4; j++)
+					q[j] = en_exact((double)m->control_points[((b0 + j) % n) * dim + k]);
+				b[0] = q[1], b[3] = q[2];
+				b[1] = en_div(en_sub(en_add(en_mul(six, q[1]), q[2]), q[0]), six);
+				b[2] = en_div(en_add(en_sub(en_mul(six, q[2]), q[3]), q[1]), six);
+			}
+			for (j = 0; j < 4; j++)
+				win[j * 4 + k] = b[j];
+		}
+		for (j = 0; j < 4; j++)
+			win[j * 4 + dim] = en_exact(1);
+		for (j = 0; j < 6; j++)
+			uk[j] = j < 3 ? ta : tb;
+		*p = 3;
+		return 1;
+	}
+	{
+		double w[EN_MAX * 4], kn[2 * EN_MAX];
+		if (c->degree >= EN_MAX || !qaws_internal_curve_window(c, s, p, w, kn))
+			return 0;
+		for (j = 0; j <= *p; j++)
+			for (i = 0; i < h; i++)
+				win[j * 4 + i] = en_exact(w[j * h + i]);
+		for (j = 0; j < 2 * *p; j++)
+			uk[j] = kn[j];
+		return 1;
+	}
+}
+
+qaws_status qaws_curve_enclose(double* out_lo, double* out_hi, qaws_curve const* curve, double t0, double t1, unsigned int order)
+{
+	qaws_range r;
+	unsigned int dim, s, any = 0, q, c, d;
+	en_iv acc[9];
+	if (!out_lo || !out_hi || !curve || order > 2 || !(t0 <= t1) || !isfinite(t0) || !isfinite(t1))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	r = qaws_curve_get_parameter_range(curve);
+	if (t0 < (double)r.min_value || t1 > (double)r.max_value)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	dim = (unsigned int)curve->dimension;
+	if (dim < 1 || dim > 3)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	for (s = 0; s < curve->span_count; s++)
+	{
+		double const ta = (double)curve->span_boundaries[s], tb = (double)curve->span_boundaries[s + 1], a0 = fmax(t0, ta), a1 = fmin(t1, tb);
+		en_iv win[EN_MAX * 4], X[3][4], C[9], W;
+		double uk[2 * EN_MAX];
+		unsigned int p, nc;
+		int poly = 1;
+		if (!(tb > ta) || a0 > a1)
+			continue;
+		if (!en_curve_window(curve, s, &p, win, uk))
+			return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		for (q = 0; q <= p; q++)
+			poly = poly && win[q * 4 + dim].lo == 1 && win[q * 4 + dim].hi == 1;
+		nc = poly ? dim : dim + 1;
+		for (d = 0; d <= order; d++)
+		{
+			en_iv w2[EN_MAX * 4];
+			en_weights wt;
+			unsigned int qd = p, i;
+			if (d > p)
+			{
+				for (c = 0; c < 4; c++)
+					X[d][c] = en_exact(0);
+				continue;
+			}
+			memcpy(w2, win, sizeof(en_iv) * 4 * (p + 1));
+			for (i = 0; i < d; i++, qd--)
+				en_derive(w2, 4, uk + i, qd, nc);
+			en_weigh(&wt, uk + d, qd, a0, a1);
+			en_blossom(w2, 4, &wt, nc);
+			if (poly)
+				for (i = 0; i <= qd; i++)
+					w2[i * 4 + dim] = en_exact(d ? 0.0 : 1.0);
+			for (i = 0; i <= qd; i++)
+				for (c = 0; c <= dim; c++)
+					X[d][c] = i == 0 ? w2[c] : en_hull(X[d][c], w2[i * 4 + c]);
+			if (d == 0)
+				for (i = 0; i <= qd; i++)
+				{
+					if (!poly && !(w2[i * 4 + dim].lo > 0))
+						return QAWS_STATUS_NUMERICAL_FAILURE;
+					for (c = 0; c < dim; c++)
+					{
+						en_iv const x = poly ? w2[i * 4 + c] : en_div(w2[i * 4 + c], w2[i * 4 + dim]);
+						C[c] = i == 0 ? x : en_hull(C[c], x);
+					}
+				}
+		}
+		W = X[0][dim];
+		if (!(W.lo > 0))
+			return QAWS_STATUS_NUMERICAL_FAILURE;
+		/* X = C W: C' = (X' - C W') / W, C'' = (X'' - 2 C' W' - C W'') / W */
+		for (c = 0; order >= 1 && c < dim; c++)
+			C[dim + c] = poly ? X[1][c] : en_div(en_sub(X[1][c], en_mul(C[c], X[1][dim])), W);
+		for (c = 0; order >= 2 && c < dim; c++)
+			C[2 * dim + c] = poly ? X[2][c]
+				: en_div(en_sub(en_sub(X[2][c], en_mul(en_exact(2), en_mul(C[dim + c], X[1][dim]))), en_mul(C[c], X[2][dim])), W);
+		for (q = 0; q < (order + 1) * dim; q++)
+			acc[q] = any ? en_hull(acc[q], C[q]) : C[q];
+		any = 1;
+	}
+	if (!any)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (q = 0; q < (order + 1) * dim; q++)
 	{
 		out_lo[q] = acc[q].lo;
 		out_hi[q] = acc[q].hi;

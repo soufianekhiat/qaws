@@ -52,6 +52,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Guaranteed ranges over a parameter interval: `qaws_curve_enclose` bounds C, C' and C'' over [t0, t1] the same way
+  (each span's window blossomed in intervals; Hermite and uniform Catmull-Rom spans as their Bezier points, made in
+  intervals), for Bezier, rational Bezier, B-spline, NURBS, Hermite, Catmull-Rom and borrowed spline curves (test 157).
 - Guaranteed ranges over a parameter box: `qaws_surface_enclose` bounds S and its first and second derivatives over
   [u0, u1] x [v0, v1] from the box's Bezier nets (each span's windows blossomed in interval arithmetic rounded outward;
   the quotient rule for rational surfaces), narrowing with the box (test 156).

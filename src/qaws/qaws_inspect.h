@@ -327,6 +327,21 @@ qaws_status qaws_surface_enclose(
 	double v1,
 	unsigned int order);
 
+/* Guaranteed ranges over a parameter interval: for every t in [t0, t1], C(t) lies in [out_lo[0 .. dim - 1], out_hi[...]];
+   with order 1, C' in [dim .. 2 dim - 1]; with order 2, C'' in [2 dim .. 3 dim - 1]. As qaws_surface_enclose: each span's
+   window - a Hermite or uniform Catmull-Rom span its Bezier points, in intervals - blossomed over the interval's part in
+   the span, every operation rounded outward, the quotient rule for rational curves. Bezier, rational Bezier, B-spline,
+   NURBS (positive weights), Hermite, uniform Catmull-Rom and borrowed spline curves of degree at most 15;
+   QAWS_STATUS_UNSUPPORTED_OPERATION for other curves, QAWS_STATUS_NUMERICAL_FAILURE where a weight's range reaches 0,
+   QAWS_STATUS_INVALID_ARGUMENT for an interval empty, not finite or past the range, an order past 2. */
+qaws_status qaws_curve_enclose(
+	double* out_lo,
+	double* out_hi,
+	qaws_curve const* curve,
+	double t0,
+	double t1,
+	unsigned int order);
+
 /* Curve-plane intersection */
 
 /* Plane defined by a point and a normal vector. */

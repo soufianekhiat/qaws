@@ -70,6 +70,11 @@ static int cl_window(qaws_curve const* c, unsigned int s, unsigned int* p, doubl
 	return 1;
 }
 
+int qaws_internal_curve_window(qaws_curve const* c, unsigned int s, unsigned int* p, double* win, double* uk)
+{
+	return cl_window(c, s, p, win, uk);
+}
+
 /* Bezier point i of the span is the blossom at (u_k ^ (p - i), u_k+1 ^ i): de Boor with those arguments (uk[p - 1] = u_k) */
 static void cl_bezier(double const* win, double const* uk, unsigned int p, unsigned int h, double* bez)
 {
