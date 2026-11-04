@@ -52,6 +52,9 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- Guaranteed ranges over a parameter box: `qaws_surface_enclose` bounds S and its first and second derivatives over
+  [u0, u1] x [v0, v1] from the box's Bezier nets (each span's windows blossomed in interval arithmetic rounded outward;
+  the quotient rule for rational surfaces), narrowing with the box (test 156).
 - References: `QAWS_INTERPOLANT_PHONG` (Phong tessellation, Boubekeur and Alexa 2008), a quadratic patch in the PN machinery
   (test 122).
 - Decimation merge rules: `qaws_decimate_desc.merges` set how vertex attributes meet in a collapse (MINIMUM, MAXIMUM,

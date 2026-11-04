@@ -327,22 +327,14 @@ qaws_status qaws_internal_closest_certify(double* out_distance, double* out_gap,
 
 /* ---- surfaces ------------------------------------------------------------ */
 
-#define SF_MAX 16
+#define SF_MAX QAWS_INTERNAL_NET_MAX
 #define SF_DEPTH 48
 #define SF_WORK 8192
 
-/* a surface's control net: degrees, counts, knots (u, v); the points through sf_point */
-typedef struct sf_net
-{
-	qaws_surface const* s;
-	unsigned int p[2], n[2];
-	qaws_scalar const* k[2];
-	qaws_scalar const* cp;              /* owned: 3 scalars per point, u-major */
-	qaws_scalar const* w;
-	qaws_scalar bez[2][2 * SF_MAX];     /* Bezier: the clamped knots of [0, 1] */
-} sf_net;
+/* (the net: internal/qaws_internal_closest.h) */
+typedef qaws_internal_surface_net sf_net;
 
-static int sf_net_init(qaws_surface const* s, sf_net* m)
+int qaws_internal_surface_net_init(qaws_surface const* s, qaws_internal_surface_net* m)
 {
 	unsigned int d, i;
 	memset(m, 0, sizeof *m);
@@ -382,8 +374,7 @@ static int sf_net_init(qaws_surface const* s, sf_net* m)
 	return m->p[0] < SF_MAX && m->p[1] < SF_MAX;
 }
 
-/* net point (i, j) homogeneous */
-static void sf_point(sf_net const* m, unsigned int i, unsigned int j, double* h)
+void qaws_internal_surface_net_point(qaws_internal_surface_net const* m, unsigned int i, unsigned int j, double* h)
 {
 	unsigned int e = i * m->n[1] + j, c;
 	double w;
@@ -405,7 +396,7 @@ static void sf_bezier(sf_net const* m, unsigned int ku, unsigned int kv, double*
 	unsigned int pu = m->p[0], pv = m->p[1], a, b;
 	for (a = 0; a <= pu; a++)
 		for (b = 0; b <= pv; b++)
-			sf_point(m, ku - pu + a, kv - pv + b, win + (a * (pv + 1) + b) * 4);
+			qaws_internal_surface_net_point(m, ku - pu + a, kv - pv + b, win + (a * (pv + 1) + b) * 4);
 	for (a = 0; a < 2 * pu; a++)
 		uk[a] = (double)m->k[0][ku - pu + 1 + a];
 	for (b = 0; b < 2 * pv; b++)
@@ -608,7 +599,7 @@ qaws_status qaws_internal_surface_closest_certify(double* out_distance, double* 
 	unsigned int i, j, c, ku, kv, top, work = 0, pu, pv, np;
 	qaws_scalar bu = *io_u, bv = *io_v;
 
-	if (!sf_net_init(surface, &m))
+	if (!qaws_internal_surface_net_init(surface, &m))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
 	pu = m.p[0];
 	pv = m.p[1];
@@ -617,7 +608,7 @@ qaws_status qaws_internal_surface_closest_certify(double* out_distance, double* 
 	for (i = 0; i < m.n[0]; i++)
 		for (j = 0; j < m.n[1]; j++)
 		{
-			sf_point(&m, i, j, h);
+			qaws_internal_surface_net_point(&m, i, j, h);
 			if (!(h[3] > 0))
 				return QAWS_STATUS_UNSUPPORTED_OPERATION;
 			for (c = 0; c < 3; c++)
@@ -645,7 +636,7 @@ qaws_status qaws_internal_surface_closest_certify(double* out_distance, double* 
 			for (i = 0; i <= pu; i++)
 				for (j = 0; j <= pv; j++)
 				{
-					sf_point(&m, ku - pu + i, kv - pv + j, h);
+					qaws_internal_surface_net_point(&m, ku - pu + i, kv - pv + j, h);
 					for (c = 0; c < 3; c++)
 						qp[(i * (pv + 1) + j) * 3 + c] = h[c] / h[3];
 				}

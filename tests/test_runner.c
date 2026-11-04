@@ -86,6 +86,7 @@ extern int test_151_surface_tessellation_main(void);
 extern int test_152_sweep_derivatives_main(void);
 extern int test_153_parameterization_main(void);
 extern int test_155_precision_both_main(void);
+extern int test_156_surface_enclose_main(void);
 extern int test_179_motion_main(void);
 
 /* Test registry */
@@ -168,6 +169,7 @@ static test_suite const g_test_suites[] = {
 {"152_sweep_derivatives", test_152_sweep_derivatives_main},
 {"153_parameterization", test_153_parameterization_main},
 {"155_precision_both", test_155_precision_both_main},
+{"156_surface_enclose", test_156_surface_enclose_main},
 	{"179_motion", test_179_motion_main},
 };
 

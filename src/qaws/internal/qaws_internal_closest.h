@@ -21,6 +21,23 @@ int qaws_internal_surface_view_net(qaws_scalar const** u_knots, qaws_scalar cons
 	qaws_surface const* surface);
 void qaws_internal_surface_view_point(double* h, qaws_surface const* surface, unsigned int i, unsigned int j);
 
+/* A surface's control net for its Bezier patches (Bezier, B-spline, NURBS, borrowed; degrees under
+   QAWS_INTERNAL_NET_MAX): degrees, counts, knots (u, v; a Bezier surface's the clamped knots of [0, 1]); its points
+   through qaws_internal_surface_net_point, homogeneous (w x, w y, w z, w), u index major. */
+#define QAWS_INTERNAL_NET_MAX 16
+typedef struct qaws_internal_surface_net
+{
+	qaws_surface const* s;
+	unsigned int p[2], n[2];
+	qaws_scalar const* k[2];
+	qaws_scalar const* cp;              /* 3 scalars per point, u-major (NULL: a borrowed net) */
+	qaws_scalar const* w;
+	qaws_scalar bez[2][2 * QAWS_INTERNAL_NET_MAX];
+} qaws_internal_surface_net;
+/* 0 for other surfaces or degrees too high */
+int qaws_internal_surface_net_init(qaws_surface const* s, qaws_internal_surface_net* m);
+void qaws_internal_surface_net_point(qaws_internal_surface_net const* m, unsigned int i, unsigned int j, double* h);
+
 /* The same for surfaces with Bezier patches (Bezier, B-spline, NURBS, borrowed; degrees up to 15) from (*io_u, *io_v). */
 qaws_status qaws_internal_surface_closest_certify(double* out_distance, double* out_gap, qaws_scalar* io_u, qaws_scalar* io_v,
 	qaws_surface const* surface, double const* q);

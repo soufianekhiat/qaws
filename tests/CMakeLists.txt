@@ -74,6 +74,7 @@ add_executable(
 152_sweep_derivatives.c
 153_parameterization.c
 155_precision_both.c
+156_surface_enclose.c
 179_motion.c
 )
 

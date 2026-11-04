@@ -308,6 +308,25 @@ qaws_status qaws_surface_find_closest_point_certified(
 	qaws_surface const* surface,
 	qaws_vec3 point);
 
+/* Guaranteed ranges over a parameter box: for every (u, v) in [u0, u1] x [v0, v1], S(u, v) lies in
+   [out_lo[0..2], out_hi[0..2]]; with order 1, S_u and S_v in out_lo / out_hi [3..5] and [6..8]; with order 2, S_uu, S_uv and
+   S_vv in [9..11], [12..14], [15..17]. From the Bezier nets of the box - each knot span's B-spline window (its derivatives'
+   windows for the derivatives) blossomed over the part of the box in the span - every operation rounded outward:
+   Bernstein's hull bounds the homogeneous parts, the quotient rule in interval arithmetic the rational ones (S_u = (X_u -
+   S W_u) / W ...). Wider than the true ranges, never narrower; shrinking with the box. Bezier, B-spline, NURBS (positive
+   weights) and borrowed spline surfaces of degree at most 15; QAWS_STATUS_UNSUPPORTED_OPERATION for other surfaces,
+   QAWS_STATUS_NUMERICAL_FAILURE where a weight's range reaches 0, QAWS_STATUS_INVALID_ARGUMENT for a box empty, not finite or
+   past the domain, an order past 2. */
+qaws_status qaws_surface_enclose(
+	double* out_lo,
+	double* out_hi,
+	qaws_surface const* surface,
+	double u0,
+	double u1,
+	double v0,
+	double v1,
+	unsigned int order);
+
 /* Curve-plane intersection */
 
 /* Plane defined by a point and a normal vector. */
