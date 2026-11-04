@@ -20,11 +20,19 @@ typedef struct en_iv
 	double lo, hi;
 } en_iv;
 
+/* outward by at least an ulp without nextafter (a library call, the cost of every operation here): |x| 2^-51 is two ulps
+   or more, so the rounded sum still passes x's neighbour when it crosses into the next binade; 2^-1021 past any
+   subnormal's rounding, itself normal (subnormal operands take microcode, a hundred times slower) */
+static double en_down(double x) { return isfinite(x) ? x - (fabs(x) * 0x1p-51 + 0x1p-1021) : x; }
+static double en_up(double x) { return isfinite(x) ? x + (fabs(x) * 0x1p-51 + 0x1p-1021) : x; }
+/* (fmin and fmax are library calls under /fp:precise: the comparisons inline) */
+static double en_min(double a, double b) { return a < b ? a : b; }
+static double en_max(double a, double b) { return a > b ? a : b; }
 static en_iv en_out(double lo, double hi)
 {
 	en_iv r;
-	r.lo = nextafter(lo, -INFINITY);
-	r.hi = nextafter(hi, INFINITY);
+	r.lo = en_down(lo);
+	r.hi = en_up(hi);
 	return r;
 }
 static en_iv en_exact(double v)
@@ -33,33 +41,75 @@ static en_iv en_exact(double v)
 	r.lo = r.hi = v;
 	return r;
 }
-static en_iv en_add(en_iv a, en_iv b) { return en_out(a.lo + b.lo, a.hi + b.hi); }
-static en_iv en_sub(en_iv a, en_iv b) { return en_out(a.lo - b.hi, a.hi - b.lo); }
+/* a point 0 kept exact (a net's zero coordinates would otherwise carry a floor's noise through every product) */
+static int en_zero(en_iv a) { return a.lo == 0 && a.hi == 0; }
+static en_iv en_add(en_iv a, en_iv b) { return en_zero(a) ? b : en_zero(b) ? a : en_out(a.lo + b.lo, a.hi + b.hi); }
+static en_iv en_sub(en_iv a, en_iv b)
+{
+	en_iv r;
+	if (en_zero(b))
+		return a;
+	if (a.lo == a.hi && b.lo == b.hi && a.lo == b.lo)
+	{
+		r.lo = r.hi = 0;   /* (x - x, exact: a constant weight's derivative) */
+		return r;
+	}
+	if (en_zero(a))
+	{
+		r.lo = -b.hi, r.hi = -b.lo;   /* (exact) */
+		return r;
+	}
+	return en_out(a.lo - b.hi, a.hi - b.lo);
+}
 static en_iv en_mul(en_iv a, en_iv b)
 {
+	if (en_zero(a) || en_zero(b))
+		return en_zero(a) ? a : b;
 	double const p0 = a.lo * b.lo, p1 = a.lo * b.hi, p2 = a.hi * b.lo, p3 = a.hi * b.hi;
-	return en_out(fmin(fmin(p0, p1), fmin(p2, p3)), fmax(fmax(p0, p1), fmax(p2, p3)));
+	return en_out(en_min(en_min(p0, p1), en_min(p2, p3)), en_max(en_max(p0, p1), en_max(p2, p3)));
 }
 /* b not holding 0 */
 static en_iv en_div(en_iv a, en_iv b)
 {
 	double const p0 = a.lo / b.lo, p1 = a.lo / b.hi, p2 = a.hi / b.lo, p3 = a.hi / b.hi;
-	return en_out(fmin(fmin(p0, p1), fmin(p2, p3)), fmax(fmax(p0, p1), fmax(p2, p3)));
+	return en_out(en_min(en_min(p0, p1), en_min(p2, p3)), en_max(en_max(p0, p1), en_max(p2, p3)));
 }
 static en_iv en_hull(en_iv a, en_iv b)
 {
 	en_iv r;
-	r.lo = fmin(a.lo, b.lo);
-	r.hi = fmax(a.hi, b.hi);
+	r.lo = en_min(a.lo, b.lo);
+	r.hi = en_max(a.hi, b.hi);
 	return r;
 }
 
-/* a window of p + 1 homogeneous points (4 intervals each, stride 4 between points of the window, `step` between windows)
-   with its 2p local knots, blossomed over [a, b]: Bezier point i the blossom at (a ^ (p - i), b ^ i), de Boor with those
+/* de Boor's weights for blossoming a window of degree p with its 2p local knots at a or b: per argument (a, b), step r and
+   point j, al = (x - k_(j-1)) / (k_(j+p-r) - k_(j-1)) and 1 - al - the same for every row or column of a net */
+typedef struct en_weights
+{
+	unsigned int p;
+	en_iv al[2][EN_MAX][EN_MAX], be[2][EN_MAX][EN_MAX];
+} en_weights;
+
+static void en_weigh(en_weights* w, double const* uk, unsigned int p, double a, double b)
+{
+	unsigned int x, r, j;
+	w->p = p;
+	for (x = 0; x < 2; x++)
+		for (r = 1; r <= p; r++)
+			for (j = r; j <= p; j++)
+			{
+				w->al[x][r][j] = en_div(en_sub(en_exact(x ? b : a), en_exact(uk[j - 1])), en_sub(en_exact(uk[j + p - r]), en_exact(uk[j - 1])));
+				w->be[x][r][j] = en_sub(en_exact(1), w->al[x][r][j]);
+			}
+}
+
+/* a window of p + 1 homogeneous points (4 intervals each, `stride` between points; the first nc of them worked)
+   blossomed over [a, b] (its weights w): Bezier point i the blossom at (a ^ (p - i), b ^ i), de Boor with those
    arguments */
-static void en_blossom(en_iv* pts, unsigned int stride, double const* uk, unsigned int p, double a, double b)
+static void en_blossom(en_iv* pts, unsigned int stride, en_weights const* w, unsigned int nc)
 {
 	en_iv tmp[EN_MAX * 4], out[EN_MAX * 4];
+	unsigned int const p = w->p;
 	unsigned int i, r, j, c;
 	for (i = 0; i <= p; i++)
 	{
@@ -67,13 +117,11 @@ static void en_blossom(en_iv* pts, unsigned int stride, double const* uk, unsign
 			memcpy(tmp + j * 4, pts + j * stride, sizeof(en_iv) * 4);
 		for (r = 1; r <= p; r++)
 		{
-			double const x = r <= p - i ? a : b;
+			unsigned int const x = r <= p - i ? 0u : 1u;
 			for (j = p; j >= r; j--)
 			{
-				/* al = (x - k_(j-1)) / (k_(j+p-r) - k_(j-1)) */
-				en_iv const al = en_div(en_sub(en_exact(x), en_exact(uk[j - 1])), en_sub(en_exact(uk[j + p - r]), en_exact(uk[j - 1])));
-				en_iv const be = en_sub(en_exact(1), al);
-				for (c = 0; c < 4; c++)
+				en_iv const al = w->al[x][r][j], be = w->be[x][r][j];
+				for (c = 0; c < nc; c++)
 					tmp[j * 4 + c] = en_add(en_mul(be, tmp[(j - 1) * 4 + c]), en_mul(al, tmp[j * 4 + c]));
 			}
 		}
@@ -84,25 +132,27 @@ static void en_blossom(en_iv* pts, unsigned int stride, double const* uk, unsign
 }
 
 /* a window's derivative window: p points p (P_(j+1) - P_j) / (k_(j+p) - k_j), its knots the window's but the ends */
-static void en_derive(en_iv* pts, unsigned int stride, double const* uk, unsigned int p)
+static void en_derive(en_iv* pts, unsigned int stride, double const* uk, unsigned int p, unsigned int nc)
 {
 	unsigned int j, c;
 	for (j = 0; j < p; j++)
 	{
 		en_iv const f = en_div(en_exact((double)p), en_sub(en_exact(uk[j + p]), en_exact(uk[j])));
-		for (c = 0; c < 4; c++)
+		for (c = 0; c < nc; c++)
 			pts[j * stride + c] = en_mul(f, en_sub(pts[(j + 1) * stride + c], pts[j * stride + c]));
 	}
 }
 
 /* the box [a0, a1] x [b0, b1] (inside span (ku, kv)): the hulls of the derivative nets' homogeneous values, d/du^du d/dv^dv,
-   into hull (4 intervals); with du = dv = 0 the projected points' hull too */
-static void en_net(qaws_internal_surface_net const* m, unsigned int ku, unsigned int kv, double a0, double a1, double b0, double b1,
-	unsigned int du, unsigned int dv, en_iv* hull, en_iv* proj, int* weight_ok)
+   into hull (4 intervals); with du = dv = 0 the projected points' hull too. A polynomial net's weights are 1 exactly (its
+   derivatives' 0): not worked, so no rounding's noise reaches the quotient rule */
+static void en_net(qaws_internal_surface_net const* m, int poly, unsigned int ku, unsigned int kv, double a0, double a1, double b0,
+	double b1, unsigned int du, unsigned int dv, en_iv* hull, en_iv* proj, int* weight_ok)
 {
 	en_iv win[EN_MAX * EN_MAX * 4];
+	en_weights w;
 	double uk[2 * EN_MAX], vk[2 * EN_MAX];
-	unsigned int const pu = m->p[0], pv = m->p[1], s = (pv + 1) * 4;
+	unsigned int const pu = m->p[0], pv = m->p[1], s = (pv + 1) * 4, nc = poly ? 3u : 4u;
 	unsigned int a, b, c, d, qu, qv;
 	if (du > pu || dv > pv)
 	{
@@ -127,19 +177,23 @@ static void en_net(qaws_internal_surface_net const* m, unsigned int ku, unsigned
 	qu = pu, qv = pv;
 	for (d = 0; d < du; d++, qu--)
 		for (b = 0; b <= qv; b++)
-			en_derive(win + b * 4, s, uk + d, qu);
+			en_derive(win + b * 4, s, uk + d, qu, nc);
 	for (d = 0; d < dv; d++, qv--)
 		for (a = 0; a <= qu; a++)
-			en_derive(win + a * s, 4, vk + d, qv);
+			en_derive(win + a * s, 4, vk + d, qv, nc);
 	/* blossomed over the box: rows (v) then columns (u) */
+	en_weigh(&w, vk + dv, qv, b0, b1);
 	for (a = 0; a <= qu; a++)
-		en_blossom(win + a * s, 4, vk + dv, qv, b0, b1);
+		en_blossom(win + a * s, 4, &w, nc);
+	en_weigh(&w, uk + du, qu, a0, a1);
 	for (b = 0; b <= qv; b++)
-		en_blossom(win + b * 4, s, uk + du, qu, a0, a1);
+		en_blossom(win + b * 4, s, &w, nc);
 	for (a = 0; a <= qu; a++)
 		for (b = 0; b <= qv; b++)
 		{
-			en_iv const* h = win + a * s + b * 4;
+			en_iv* h = win + a * s + b * 4;
+			if (poly)
+				h[3] = en_exact(du || dv ? 0.0 : 1.0);
 			for (c = 0; c < 4; c++)
 				hull[c] = a == 0 && b == 0 ? h[c] : en_hull(hull[c], h[c]);
 			if (proj)
@@ -151,7 +205,7 @@ static void en_net(qaws_internal_surface_net const* m, unsigned int ku, unsigned
 				}
 				for (c = 0; c < 3; c++)
 				{
-					en_iv const x = en_div(h[c], h[3]);
+					en_iv const x = poly ? h[c] : en_div(h[c], h[3]);
 					proj[c] = a == 0 && b == 0 ? x : en_hull(proj[c], x);
 				}
 			}
@@ -164,6 +218,7 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 	qaws_internal_surface_net m;
 	qaws_range ur, vr;
 	unsigned int ku, kv, c, q, any = 0;
+	int poly;
 	en_iv acc[18];
 	int weight_ok = 1;
 	if (!out_lo || !out_hi || !surface || order > 2 || !(u0 <= u1) || !(v0 <= v1) || !isfinite(u0) || !isfinite(u1) || !isfinite(v0)
@@ -175,6 +230,7 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (!qaws_internal_surface_net_init(surface, &m))
 		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	poly = m.cp && !m.w;
 	for (ku = m.p[0]; ku < m.n[0]; ku++)
 	{
 		double const ka = (double)m.k[0][ku], kb = (double)m.k[0][ku + 1], a0 = fmax(u0, ka), a1 = fmin(u1, kb);
@@ -186,7 +242,7 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 			en_iv base[4], proj[3], X[6][4], S[18], W;
 			if (!(lb > la) || b0 > b1)
 				continue;
-			en_net(&m, ku, kv, a0, a1, b0, b1, 0, 0, base, proj, &weight_ok);
+			en_net(&m, poly, ku, kv, a0, a1, b0, b1, 0, 0, base, proj, &weight_ok);
 			if (!weight_ok || !(base[3].lo > 0))
 				return QAWS_STATUS_NUMERICAL_FAILURE;
 			W = base[3];
@@ -195,8 +251,8 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 			if (order >= 1)
 			{
 				/* X = S W: S_u = (X_u - S W_u) / W, S_v likewise */
-				en_net(&m, ku, kv, a0, a1, b0, b1, 1, 0, X[0], NULL, NULL);
-				en_net(&m, ku, kv, a0, a1, b0, b1, 0, 1, X[1], NULL, NULL);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 1, 0, X[0], NULL, NULL);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 0, 1, X[1], NULL, NULL);
 				for (c = 0; c < 3; c++)
 				{
 					S[3 + c] = en_div(en_sub(X[0][c], en_mul(S[c], X[0][3])), W);
@@ -207,9 +263,9 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 			{
 				/* X_uu = S_uu W + 2 S_u W_u + S W_uu; X_uv = S_uv W + S_u W_v + S_v W_u + S W_uv */
 				en_iv const two = en_exact(2);
-				en_net(&m, ku, kv, a0, a1, b0, b1, 2, 0, X[2], NULL, NULL);
-				en_net(&m, ku, kv, a0, a1, b0, b1, 1, 1, X[3], NULL, NULL);
-				en_net(&m, ku, kv, a0, a1, b0, b1, 0, 2, X[4], NULL, NULL);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 2, 0, X[2], NULL, NULL);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 1, 1, X[3], NULL, NULL);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 0, 2, X[4], NULL, NULL);
 				for (c = 0; c < 3; c++)
 				{
 					en_iv const su = S[3 + c], sv = S[6 + c], s0 = S[c];
