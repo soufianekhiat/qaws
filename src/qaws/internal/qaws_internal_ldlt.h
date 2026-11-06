@@ -33,6 +33,10 @@ typedef struct qaws_internal_ldlt
    after 3 retries */
 qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int const* row_ptr, unsigned int const* col, double const* val,
 	double const* xyz, unsigned int n, double shift);
+/* The same, stop (may be NULL) called before each supernode's panel with user: non-zero ends the factorization with
+   QAWS_STATUS_CANCELLED (f freed) */
+qaws_status qaws_internal_ldlt_factor_stop(qaws_internal_ldlt* f, unsigned int const* row_ptr, unsigned int const* col, double const* val,
+	double const* xyz, unsigned int n, double shift, int (*stop)(void* user), void* user);
 /* A x = b; b and x may alias. The solve works in f's workspace: solves on one factor are not for concurrent threads */
 void qaws_internal_ldlt_solve(double* x, qaws_internal_ldlt const* f, double const* b);
 void qaws_internal_ldlt_free(qaws_internal_ldlt* f);

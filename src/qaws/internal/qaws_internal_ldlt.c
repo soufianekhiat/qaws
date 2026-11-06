@@ -105,9 +105,12 @@ typedef struct ld_work
 {
 	unsigned int *super, *map, *head, *next, *pos;
 	double *acc, *t;
+	int (*stop)(void* user);            /* NULL: none; called before each panel */
+	void* user;
 } ld_work;
 
-/* the panels from C's lower triangle by columns (cp, ci, cx) with the shift; 0 on a pivot that is not positive */
+/* the panels from C's lower triangle by columns (cp, ci, cx) with the shift; 0 on a pivot that is not positive, -1 once
+   stop asks */
 static int ld_numeric(qaws_internal_ldlt* f, unsigned int const* cp, unsigned int const* ci, double const* cx, double shift, ld_work* wk)
 {
 	unsigned int s, c, i, k;
@@ -117,6 +120,8 @@ static int ld_numeric(qaws_internal_ldlt* f, unsigned int const* cp, unsigned in
 	{
 		unsigned int c0 = f->sf[s], w = f->sf[s + 1] - c0, nr = f->rp[s + 1] - f->rp[s], *R = f->ri + f->rp[s], d, dn;
 		double* P = f->lx + f->lp[s];
+		if (wk->stop && wk->stop(wk->user))
+			return -1;
 		memset(P, 0, sizeof(double) * nr * w);
 		for (i = 0; i < nr; i++)
 			wk->map[R[i]] = i;
@@ -193,6 +198,12 @@ static int ld_numeric(qaws_internal_ldlt* f, unsigned int const* cp, unsigned in
 qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int const* row_ptr, unsigned int const* col, double const* val,
 	double const* xyz, unsigned int n, double shift)
 {
+	return qaws_internal_ldlt_factor_stop(f, row_ptr, col, val, xyz, n, shift, NULL, NULL);
+}
+
+qaws_status qaws_internal_ldlt_factor_stop(qaws_internal_ldlt* f, unsigned int const* row_ptr, unsigned int const* col, double const* val,
+	double const* xyz, unsigned int n, double shift, int (*stop)(void* user), void* user)
+{
 	unsigned int *pinv = NULL, *rp = NULL, *rj = NULL, *cp = NULL, *ci = NULL, *parent = NULL, *flag = NULL, *lnz = NULL, *kids = NULL;
 	double *cx = NULL, dmax = 0;
 	unsigned int r, p, k, i, s, tries, nnzc, maxr = 1, maxw = 1;
@@ -201,6 +212,8 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int const*
 	qaws_status st = QAWS_STATUS_ALLOCATION_FAILURE;
 	memset(f, 0, sizeof *f);
 	memset(&wk, 0, sizeof wk);
+	wk.stop = stop;
+	wk.user = user;
 	f->n = n;
 	f->perm = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 	f->d = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), (n + 1)));
@@ -342,9 +355,10 @@ qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int const*
 	st = QAWS_STATUS_INVALID_ARGUMENT;
 	for (tries = 0; tries < 4; tries++)
 	{
-		if (ld_numeric(f, cp, ci, cx, shift, &wk))
+		int got = ld_numeric(f, cp, ci, cx, shift, &wk);
+		if (got)
 		{
-			st = QAWS_STATUS_OK;
+			st = got > 0 ? QAWS_STATUS_OK : QAWS_STATUS_CANCELLED;
 			break;
 		}
 		shift = shift > 0 ? 10 * shift : 1e-12 * (dmax > 0 ? dmax : 1);

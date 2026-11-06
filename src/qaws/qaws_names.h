@@ -566,6 +566,7 @@
 #define qaws_internal_hermite_basis QAWS_SFX(qaws_internal_hermite_basis)
 #define qaws_internal_ldlt QAWS_SFX(qaws_internal_ldlt)
 #define qaws_internal_ldlt_factor QAWS_SFX(qaws_internal_ldlt_factor)
+#define qaws_internal_ldlt_factor_stop QAWS_SFX(qaws_internal_ldlt_factor_stop)
 #define qaws_internal_ldlt_free QAWS_SFX(qaws_internal_ldlt_free)
 #define qaws_internal_ldlt_solve QAWS_SFX(qaws_internal_ldlt_solve)
 #define qaws_internal_motion_second_bound QAWS_SFX(qaws_internal_motion_second_bound)
