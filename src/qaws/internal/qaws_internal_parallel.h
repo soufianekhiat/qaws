@@ -14,5 +14,10 @@ unsigned int qaws_internal_chunk_count(unsigned int count, unsigned int grain);
 
 qaws_status qaws_internal_parallel(unsigned int count, unsigned int grain, qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end),
 	void* user, qaws_batch_executor const* executor);
+/* The same, stop (may be NULL) called with stop_user before each chunk when the chunks run serially (no executor; through
+   one, only before they start): non-zero ends it with QAWS_STATUS_CANCELLED, the chunks after left undone */
+qaws_status qaws_internal_parallel_stop(unsigned int count, unsigned int grain,
+	qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end), void* user, qaws_batch_executor const* executor,
+	int (*stop)(void* stop_user), void* stop_user);
 
 #endif /* QAWS_INTERNAL_PARALLEL_H */
