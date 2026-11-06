@@ -32,16 +32,30 @@ typedef struct ld_order
 	unsigned int* tmp;
 	ld_key* key;
 	unsigned int gen;
+	int (*stop)(void* user);        /* NULL: none; called every 32768 rows sorted */
+	void* user;
+	size_t work;                    /* rows sorted since the last call */
+	int stopped;
 } ld_order;
 
 /* set (n rows) ordered in place: the left half less its separator, the right half, the separator (the left rows with a
-   neighbour on the right); both halves dissected again, sets of 64 rows or fewer kept in their order */
+   neighbour on the right); both halves dissected again, sets of 64 rows or fewer kept in their order; o->stopped once
+   stop asks (the order then unfinished) */
 static void ld_dissect(ld_order* o, unsigned int* set, unsigned int n)
 {
 	double lo[3], hi[3];
 	unsigned int i, k, a = 0, half = n / 2, nl = 0, ns = 0, g;
-	if (n <= 64)
+	if (n <= 64 || o->stopped)
 		return;
+	if (o->stop && (o->work += n) >= 32768)
+	{
+		o->work = 0;
+		if (o->stop(o->user))
+		{
+			o->stopped = 1;
+			return;
+		}
+	}
 	for (k = 0; k < 3; k++)
 	{
 		lo[k] = HUGE_VAL;
@@ -239,12 +253,21 @@ qaws_status qaws_internal_ldlt_factor_stop(qaws_internal_ldlt* f, unsigned int c
 		o.col = col;
 		o.xyz = xyz;
 		o.gen = 0;
+		o.stop = stop;
+		o.user = user;
+		o.work = 0;
+		o.stopped = 0;
 		o.stamp = (unsigned int*)qaws_internal_zalloc((size_t)n + 1, sizeof(unsigned int));
 		o.tmp = (unsigned int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(unsigned int), (n + 1)));
 		o.key = (ld_key*)qaws_internal_malloc(qaws_internal_mul2(sizeof(ld_key), (n + 1)));
 		if (o.stamp && o.tmp && o.key)
 			ld_dissect(&o, f->perm, n);
 		qaws_internal_free(o.stamp); qaws_internal_free(o.tmp); qaws_internal_free(o.key);
+		if (o.stopped)
+		{
+			st = QAWS_STATUS_CANCELLED;
+			goto done;
+		}
 		if (o.gen == 0)
 			goto done;
 	}
