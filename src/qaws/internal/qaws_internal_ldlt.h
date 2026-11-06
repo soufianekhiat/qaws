@@ -33,12 +33,15 @@ typedef struct qaws_internal_ldlt
    after 3 retries */
 qaws_status qaws_internal_ldlt_factor(qaws_internal_ldlt* f, unsigned int const* row_ptr, unsigned int const* col, double const* val,
 	double const* xyz, unsigned int n, double shift);
-/* The same, stop (may be NULL) called with user every 32768 rows the ordering sorts and before each supernode's panel:
-   non-zero ends the factorization with QAWS_STATUS_CANCELLED (f freed) */
+/* The same, stop (may be NULL) called with user every 32768 rows the ordering sorts, every 1024 rows of the elimination
+   tree, before each supernode's panel and every 2^22 multiply-adds: non-zero ends the factorization with
+   QAWS_STATUS_CANCELLED (f freed) */
 qaws_status qaws_internal_ldlt_factor_stop(qaws_internal_ldlt* f, unsigned int const* row_ptr, unsigned int const* col, double const* val,
 	double const* xyz, unsigned int n, double shift, int (*stop)(void* user), void* user);
 /* A x = b; b and x may alias. The solve works in f's workspace: solves on one factor are not for concurrent threads */
 void qaws_internal_ldlt_solve(double* x, qaws_internal_ldlt const* f, double const* b);
+/* The same, stop (may be NULL) called with user every 2^22 multiply-adds: 1 when it asked (x then unwritten), else 0 */
+int qaws_internal_ldlt_solve_stop(double* x, qaws_internal_ldlt const* f, double const* b, int (*stop)(void* user), void* user);
 void qaws_internal_ldlt_free(qaws_internal_ldlt* f);
 
 #endif /* QAWS_INTERNAL_LDLT_H */

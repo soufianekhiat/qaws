@@ -119,9 +119,19 @@ typedef struct ld_work
 {
 	unsigned int *super, *map, *head, *next, *pos;
 	double *acc, *t;
-	int (*stop)(void* user);            /* NULL: none; called before each panel */
+	int (*stop)(void* user);            /* NULL: none; called before each panel and every 2^22 multiply-adds */
 	void* user;
+	size_t work;                        /* multiply-adds since the last call */
 } ld_work;
+
+/* n multiply-adds done: stop called once 2^22 gathered (a few milliseconds); non-zero when it asks */
+static int ld_spent(ld_work* wk, size_t n)
+{
+	if (!wk->stop || (wk->work += n) < ((size_t)1 << 22))
+		return 0;
+	wk->work = 0;
+	return wk->stop(wk->user) != 0;
+}
 
 /* the panels from C's lower triangle by columns (cp, ci, cx) with the shift; 0 on a pivot that is not positive, -1 once
    stop asks */
@@ -154,6 +164,8 @@ static int ld_numeric(qaws_internal_ldlt* f, unsigned int const* cp, unsigned in
 			dn = wk->next[d];
 			for (p2 = p1; p2 < dnr && Rd[p2] < c0 + w; p2++)
 				;
+			if (ld_spent(wk, (size_t)(p2 - p1) * (dnr - p1) * dw))
+				return -1;
 			for (jj = p1; jj < p2; jj++)
 			{
 				unsigned int len = dnr - jj;
@@ -187,6 +199,8 @@ static int ld_numeric(qaws_internal_ldlt* f, unsigned int const* cp, unsigned in
 			unsigned int c2;
 			if (!(dd > 0))
 				return 0;
+			if (ld_spent(wk, (size_t)(w - c) * (nr - c)))
+				return -1;
 			f->d[c0 + c] = dd;
 			inv = 1 / dd;
 			for (i = c + 1; i < nr; i++)
@@ -307,6 +321,11 @@ qaws_status qaws_internal_ldlt_factor_stop(qaws_internal_ldlt* f, unsigned int c
 	/* the elimination tree and the column counts (marks per row, each path walked once) */
 	for (k = 0; k < n; k++)
 	{
+		if (stop && !(k & 1023) && stop(user))
+		{
+			st = QAWS_STATUS_CANCELLED;
+			goto done;
+		}
 		parent[k] = LD_NONE;
 		flag[k] = k;
 		lnz[k] = 0;
@@ -396,8 +415,14 @@ done:
 
 void qaws_internal_ldlt_solve(double* x, qaws_internal_ldlt const* f, double const* b)
 {
+	qaws_internal_ldlt_solve_stop(x, f, b, NULL, NULL);
+}
+
+int qaws_internal_ldlt_solve_stop(double* x, qaws_internal_ldlt const* f, double const* b, int (*stop)(void* user), void* user)
+{
 	unsigned int n = f->n, j, s, c, i;
 	double *y = f->w, *t = f->w + n;
+	size_t work = 0;   /* (multiply-adds since stop was last called) */
 	for (j = 0; j < n; j++)
 		y[j] = b[f->perm[j]];
 	/* per supernode: its own columns' triangle, then the rows below gathered into t (one scatter per row) */
@@ -405,6 +430,12 @@ void qaws_internal_ldlt_solve(double* x, qaws_internal_ldlt const* f, double con
 	{
 		unsigned int c0 = f->sf[s], w = f->sf[s + 1] - c0, nr = f->rp[s + 1] - f->rp[s], *R = f->ri + f->rp[s];
 		double const* P = f->lx + f->lp[s];
+		if (stop && (work += (size_t)w * nr) >= ((size_t)1 << 22))
+		{
+			work = 0;
+			if (stop(user))
+				return 1;
+		}
 		for (i = w; i < nr; i++)
 			t[i] = 0;
 		for (c = 0; c < w; c++)
@@ -425,6 +456,12 @@ void qaws_internal_ldlt_solve(double* x, qaws_internal_ldlt const* f, double con
 	{
 		unsigned int c0 = f->sf[s - 1], w = f->sf[s] - c0, nr = f->rp[s] - f->rp[s - 1], *R = f->ri + f->rp[s - 1];
 		double const* P = f->lx + f->lp[s - 1];
+		if (stop && (work += (size_t)w * nr) >= ((size_t)1 << 22))
+		{
+			work = 0;
+			if (stop(user))
+				return 1;
+		}
 		for (i = w; i < nr; i++)
 			t[i] = y[R[i]];
 		for (c = w; c > 0; c--)
@@ -440,4 +477,5 @@ void qaws_internal_ldlt_solve(double* x, qaws_internal_ldlt const* f, double con
 	}
 	for (j = 0; j < n; j++)
 		x[f->perm[j]] = y[j];
+	return 0;
 }
