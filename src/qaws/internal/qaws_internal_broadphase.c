@@ -921,6 +921,13 @@ qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid 
 	void* accept_user, qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user,
 	qaws_batch_executor const* executor)
 {
+	return qaws_internal_grid_pairs_stop(out_candidates, grid, boxes, accept, accept_user, visit, visit_user, executor, NULL, NULL);
+}
+
+qaws_status qaws_internal_grid_pairs_stop(unsigned int* out_candidates, qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept,
+	void* accept_user, qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user,
+	qaws_batch_executor const* executor, int (*stop)(void* user), void* stop_user)
+{
 	bp_par P;
 	unsigned int k, n = qaws_internal_grid_pair_chunks(grid);
 	qaws_status s;
@@ -944,7 +951,7 @@ qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid 
 		if (keys && bp_sweep_cost(boxes, keys, nk, axis) < bp_grid_cost(grid))
 			s = bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, visit, visit_user, &P.candidates[0]);
 		else
-			s = qaws_internal_parallel(n, 1, bp_par_job, &P, executor);
+			s = qaws_internal_parallel_stop(n, 1, bp_par_job, &P, executor, stop, stop_user);
 		qaws_internal_free(keys);
 	}
 	for (k = 0; k < n && out_candidates; k++)

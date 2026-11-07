@@ -79,5 +79,10 @@ unsigned int qaws_internal_grid_pair_chunks(qaws_bp_grid const* grid);
 qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept,
 	void* accept_user, qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user,
 	struct qaws_batch_executor const* executor);
+/* The same, stop (may be NULL) called with stop_user as qaws_internal_parallel_stop calls it: non-zero ends it with
+   QAWS_STATUS_CANCELLED */
+qaws_status qaws_internal_grid_pairs_stop(unsigned int* out_candidates, qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept,
+	void* accept_user, qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user,
+	struct qaws_batch_executor const* executor, int (*stop)(void* user), void* stop_user);
 
 #endif /* QAWS_INTERNAL_BROADPHASE_H */

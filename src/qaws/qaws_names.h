@@ -561,6 +561,7 @@
 #define qaws_internal_grid_destroy QAWS_SFX(qaws_internal_grid_destroy)
 #define qaws_internal_grid_pair_chunks QAWS_SFX(qaws_internal_grid_pair_chunks)
 #define qaws_internal_grid_pairs QAWS_SFX(qaws_internal_grid_pairs)
+#define qaws_internal_grid_pairs_stop QAWS_SFX(qaws_internal_grid_pairs_stop)
 #define qaws_internal_grid_ray QAWS_SFX(qaws_internal_grid_ray)
 #define qaws_internal_grid_ring QAWS_SFX(qaws_internal_grid_ring)
 #define qaws_internal_hermite_basis QAWS_SFX(qaws_internal_hermite_basis)
