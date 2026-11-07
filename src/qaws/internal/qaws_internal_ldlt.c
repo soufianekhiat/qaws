@@ -164,12 +164,12 @@ static int ld_numeric(qaws_internal_ldlt* f, unsigned int const* cp, unsigned in
 			dn = wk->next[d];
 			for (p2 = p1; p2 < dnr && Rd[p2] < c0 + w; p2++)
 				;
-			if (ld_spent(wk, (size_t)(p2 - p1) * (dnr - p1) * dw))
-				return -1;
 			for (jj = p1; jj < p2; jj++)
 			{
 				unsigned int len = dnr - jj;
 				double* Pc = P + (size_t)(Rd[jj] - c0) * nr;
+				if (ld_spent(wk, (size_t)len * dw))
+					return -1;
 				for (k = 0; k < dw; k++)
 					wk->t[k] = Ld[jj + (size_t)k * dnr] * Dd[k];
 				memset(wk->acc, 0, sizeof(double) * len);
