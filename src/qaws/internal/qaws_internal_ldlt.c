@@ -173,7 +173,24 @@ static int ld_numeric(qaws_internal_ldlt* f, unsigned int const* cp, unsigned in
 				for (k = 0; k < dw; k++)
 					wk->t[k] = Ld[jj + (size_t)k * dnr] * Dd[k];
 				memset(wk->acc, 0, sizeof(double) * len);
-				for (k = 0; k < dw; k++)
+				/* four columns a pass over acc, each row's sum still added in column order (the same result, a quarter of
+				   the passes) */
+				for (k = 0; k + 4 <= dw; k += 4)
+				{
+					double t0 = wk->t[k], t1 = wk->t[k + 1], t2 = wk->t[k + 2], t3 = wk->t[k + 3];
+					double const* L0 = Ld + (size_t)k * dnr + jj;
+					double const *L1 = L0 + dnr, *L2 = L1 + dnr, *L3 = L2 + dnr;
+					for (ii = 0; ii < len; ii++)
+					{
+						double a = wk->acc[ii];
+						a += L0[ii] * t0;
+						a += L1[ii] * t1;
+						a += L2[ii] * t2;
+						a += L3[ii] * t3;
+						wk->acc[ii] = a;
+					}
+				}
+				for (; k < dw; k++)
 				{
 					double tk = wk->t[k];
 					double const* Lk = Ld + (size_t)k * dnr + jj;
