@@ -3,6 +3,7 @@
  *
  *   - every method passes through its points, open and closed
  *   - continuity at the joins: C2 for the uniform cubic, G1 for Hobby, the curvature's magnitude for kappa
+ *   - curvature continuous at the points for the G2 and S9 solvers
  *   - Hobby through four points of a circle stays close to the circle
  *   - collinear points, duplicates, scale, invalid input
  *   - offsets: the distance to a sampled curve within the tolerance on a cubic, an
@@ -76,10 +77,10 @@ static double io_curvature(qaws_eval_result_2d const* r)
 
 static void test_through_points(void)
 {
-	static qaws_interpolating_method const methods[3] = { QAWS_INTERPOLATING_CUBIC_C2, QAWS_INTERPOLATING_HOBBY, QAWS_INTERPOLATING_KAPPA };
+	static qaws_interpolating_method const methods[5] = { QAWS_INTERPOLATING_CUBIC_C2, QAWS_INTERPOLATING_HOBBY, QAWS_INTERPOLATING_KAPPA, QAWS_INTERPOLATING_CUBIC_G2, QAWS_INTERPOLATING_S9 };
 	int m, closed;
 	unsigned int i;
-	for (m = 0; m < 3; m++)
+	for (m = 0; m < 5; m++)
 		for (closed = 0; closed < 2; closed++)
 		{
 			qaws_curve* c = io_make(methods[m], io_points, 6, closed);
@@ -142,6 +143,48 @@ static void test_continuity(void)
 	qaws_curve_destroy(kappa);
 }
 
+/* signed curvature either side of every point of a closed spline */
+static void test_curvature_matching(void)
+{
+	static qaws_interpolating_method const methods[2] = { QAWS_INTERPOLATING_CUBIC_G2, QAWS_INTERPOLATING_S9 };
+	static double const limit[2] = { 2e-3, 2e-2 };
+	double const h = QAWS_SCALAR_IS_FLOAT ? 1e-3 : 1e-6;
+	int m;
+	unsigned int i;
+	for (m = 0; m < 2; m++)
+	{
+		qaws_curve* c = io_make(methods[m], io_points, 6, 1);
+		double worst = 0;
+		unsigned int spans = c ? qaws_curve_get_span_count(c) : 0, seen = 0;
+		char msg[96];
+		sprintf(msg, "curvature-matching method %d is made", m);
+		TEST_ASSERT(c != NULL, msg);
+		/* (a point is at a join between cubics, but S9 has several cubics per point) */
+		for (i = 1; i < spans; i++)
+		{
+			qaws_eval_result_2d p = io_at(c, i), a, b;
+			unsigned int q, on_point = 0;
+			double ka, kb, rel;
+			for (q = 0; q < 6; q++)
+				on_point |= fabs((double)p.position.x - (double)io_points[q].x) + fabs((double)p.position.y - (double)io_points[q].y) < 1e-3;
+			if (!on_point)
+				continue;
+			seen++;
+			a = io_at(c, i - h);
+			b = io_at(c, i + h);
+			ka = io_curvature(&a);
+			kb = io_curvature(&b);
+			rel = fabs(ka - kb) / (fabs(ka) + fabs(kb) + 1e-3);
+			worst = rel > worst ? rel : worst;
+		}
+		sprintf(msg, "curvature-matching method %d has a join at each inner point", m);
+		TEST_ASSERT(seen == 5, msg);
+		sprintf(msg, "curvature-matching method %d is G2 at its points (%.2e)", m, worst);
+		TEST_ASSERT(worst < (QAWS_SCALAR_IS_FLOAT ? 0.1 : limit[m]), msg);
+		qaws_curve_destroy(c);
+	}
+}
+
 static void test_circle(void)
 {
 	static qaws_vec2 const p[4] = { { 2, 0 }, { 0, 2 }, { -2, 0 }, { 0, -2 } };
@@ -166,12 +209,12 @@ static void test_edge_cases(void)
 	static qaws_vec2 const two[2] = { { 0, 0 }, { 4, 2 } };
 	static qaws_vec2 const three[3] = { { 0, 0 }, { 1, 2 }, { 3, 0 } };
 	static qaws_vec2 const same[3] = { { 1, 1 }, { 1, 1 }, { 1, 1 } };
-	static qaws_interpolating_method const methods[3] = { QAWS_INTERPOLATING_CUBIC_C2, QAWS_INTERPOLATING_HOBBY, QAWS_INTERPOLATING_KAPPA };
+	static qaws_interpolating_method const methods[5] = { QAWS_INTERPOLATING_CUBIC_C2, QAWS_INTERPOLATING_HOBBY, QAWS_INTERPOLATING_KAPPA, QAWS_INTERPOLATING_CUBIC_G2, QAWS_INTERPOLATING_S9 };
 	qaws_interpolating_spline_desc d;
 	qaws_curve* c = NULL;
 	qaws_vec2 bad[3];
 	int m;
-	for (m = 0; m < 3; m++)
+	for (m = 0; m < 5; m++)
 	{
 		qaws_curve* a = io_make(methods[m], line, 4, 0);
 		qaws_curve* b = io_make(methods[m], dup, 5, 0);
@@ -422,6 +465,7 @@ int test_84_interpolating_offset_main(void)
 	printf("Test 84: splines solved from points, parallel curves as cubics\n");
 	test_through_points();
 	test_continuity();
+	test_curvature_matching();
 	test_circle();
 	test_edge_cases();
 	test_offset();

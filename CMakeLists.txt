@@ -73,6 +73,8 @@ set(QAWS_SOURCES
   src/qaws/qaws_yuksel.c
   src/qaws/qaws_operations.c
   src/qaws/qaws_interpolating.c
+  src/qaws/qaws_interpolating_g2.c
+  src/qaws/qaws_interpolating_s9.c
   src/qaws/qaws_curve_offset_cubic.c
   src/qaws/qaws_extract.c
   src/qaws/qaws_path.c

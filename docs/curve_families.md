@@ -463,6 +463,8 @@ Smooth 2D splines solved from points alone: a global solve finds the tangents, s
 | `QAWS_INTERPOLATING_CUBIC_C2` | cubic | C2 | equal parameter intervals; an open curve has zero second derivative at its ends |
 | `QAWS_INTERPOLATING_HOBBY` | cubic | G1 | close to circular arcs where the points allow it |
 | `QAWS_INTERPOLATING_KAPPA` | quadratic | curvature maximum on each point | G2 at the joins, G1 where a join inflects; a point is inside a segment, not at an integer parameter |
+| `QAWS_INTERPOLATING_CUBIC_G2` | cubic | G2 | tangent directions and lengths solved so the curvature matches |
+| `QAWS_INTERPOLATING_S9` | cubic, approximating curves whose curvature is a function of arc length | G2 to the approximation's accuracy | low curvature variation; a solve uses about 145 KB of stack |
 
 **When to use:** Drawing tools and any path given only by the points it must pass through.
 

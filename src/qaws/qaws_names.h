@@ -568,6 +568,8 @@
 #define qaws_internal_grid_ray QAWS_SFX(qaws_internal_grid_ray)
 #define qaws_internal_grid_ring QAWS_SFX(qaws_internal_grid_ring)
 #define qaws_internal_hermite_basis QAWS_SFX(qaws_internal_hermite_basis)
+#define qaws_internal_interpolate_cubic_g2 QAWS_SFX(qaws_internal_interpolate_cubic_g2)
+#define qaws_internal_interpolate_s9 QAWS_SFX(qaws_internal_interpolate_s9)
 #define qaws_internal_ldlt QAWS_SFX(qaws_internal_ldlt)
 #define qaws_internal_ldlt_factor QAWS_SFX(qaws_internal_ldlt_factor)
 #define qaws_internal_ldlt_factor_stop QAWS_SFX(qaws_internal_ldlt_factor_stop)

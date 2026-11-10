@@ -37,6 +37,17 @@
  *             point. Segments join
  *             between points, so a point is inside a segment, not at an
  *             integer parameter; an open curve needs at least 3 points.
+ *   CUBIC_G2  Cubic segments with the tangent directions and lengths solved
+ *             so the curvature matches at every point: G2. Point i is at
+ *             parameter i.
+ *   S9        Segments whose curvature is a function of arc length, set by
+ *             their end angles, the angles solved so the curvature matches at
+ *             every point: rounder than a single cubic allows, with low
+ *             curvature variation. The result is those segments as cubics,
+ *             so G2 holds to the accuracy of that approximation, and a point
+ *             is at a join between cubics, several per point: not at an
+ *             integer parameter matching its index. A solve uses about
+ *             145 KB of stack.
  *
  * An open curve of two distinct points is the straight segment for every
  * method. A closed curve needs at least 3 distinct points.
@@ -52,7 +63,9 @@ typedef enum qaws_interpolating_method
 {
 	QAWS_INTERPOLATING_CUBIC_C2 = 0,
 	QAWS_INTERPOLATING_HOBBY,
-	QAWS_INTERPOLATING_KAPPA
+	QAWS_INTERPOLATING_KAPPA,
+	QAWS_INTERPOLATING_CUBIC_G2,
+	QAWS_INTERPOLATING_S9
 } qaws_interpolating_method;
 #endif
 

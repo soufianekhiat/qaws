@@ -1,7 +1,7 @@
 /*
  * Interpolating splines solved from their points.
  *
- * The C2, Hobby and kappa solvers follow aurimasg/splines:
+ * The C2, Hobby and kappa solvers follow aurimasg/splines (the G2 and S9 solvers, from the same source, are in their own files):
  *
  * MIT License
  *
@@ -476,7 +476,7 @@ qaws_status qaws_curve_create_interpolating_spline(
 	if (!out_curve || !desc || !desc->points || desc->point_count < 1)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	*out_curve = NULL;
-	if (desc->method != QAWS_INTERPOLATING_CUBIC_C2 && desc->method != QAWS_INTERPOLATING_HOBBY && desc->method != QAWS_INTERPOLATING_KAPPA)
+	if ((unsigned int)desc->method > (unsigned int)QAWS_INTERPOLATING_S9)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < desc->point_count; i++)
 		if (!(fabs((double)desc->points[i].x) <= DBL_MAX) || !(fabs((double)desc->points[i].y) <= DBL_MAX))
@@ -533,8 +533,16 @@ qaws_status qaws_curve_create_interpolating_spline(
 		st = is_cubic_c2(unit, n, desc->closed != 0, out, &segments);
 	else if (st == QAWS_STATUS_OK && desc->method == QAWS_INTERPOLATING_HOBBY)
 		st = is_hobby(unit, n, desc->closed != 0, out, &segments);
-	else if (st == QAWS_STATUS_OK)
+	else if (st == QAWS_STATUS_OK && desc->method == QAWS_INTERPOLATING_KAPPA)
 		st = is_kappa(unit, n, desc->closed != 0, out, &segments);
+	else if (st == QAWS_STATUS_OK)
+	{
+		/* (these two lay out their own output) */
+		qaws_internal_free(out);
+		out = NULL;
+		st = desc->method == QAWS_INTERPOLATING_CUBIC_G2 ? qaws_internal_interpolate_cubic_g2(&out, &segments, unit, n, desc->closed != 0)
+		                                                 : qaws_internal_interpolate_s9(&out, &segments, unit, n, desc->closed != 0);
+	}
 	if (st == QAWS_STATUS_OK)
 	{
 		size_t count = 2 * ((size_t)degree * segments + 1), q;
@@ -545,7 +553,7 @@ qaws_status qaws_curve_create_interpolating_spline(
 			out[q] = out[q] * m + ((q & 1) ? ty : tx);
 		}
 		/* (the points themselves back exactly, past the scaling's rounding) */
-		if (degree == 3)
+		if (degree == 3 && segments == (desc->closed ? n : n - 1))
 			for (i = 0; i <= segments; i++)
 			{
 				unsigned int j = i % n;
