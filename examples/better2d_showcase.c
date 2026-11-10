@@ -37,6 +37,8 @@
  *   b2d25_shell_trimmed.svg  shells of trimmed faces: a plane split by a circle, a
  *                      plate with a hole and a tube, a cube of trimmed planes, a T-junction,
  *                      a cylinder and a torus with holes on their seams
+ *   b2d26_splines.svg  splines through points by each method, open and closed
+ *                      with a curvature comb, and their offsets as cubics
  *
  * Each figure lives in better2d_showcase/NN_*.c, compiled as one translation
  * unit.
@@ -60,6 +62,7 @@
 #include "example_svg.h"
 
 #include "better2d_showcase/01_extract.c"
+#include "better2d_showcase/02_splines.c"
 
 /* figure n wanted: every one with no arguments, else those listed */
 static int b2d_want(int argc, char** argv, int n)
@@ -76,5 +79,6 @@ int main(int argc, char** argv)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	MAKE_DIR("shots");
 	if (b2d_want(argc, argv, 1)) demo_extract();
+	if (b2d_want(argc, argv, 26)) demo_splines();
 	return 0;
 }
