@@ -4,6 +4,15 @@ All notable changes to Qaws are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `qaws_curve_create_interpolating_spline`: 2D splines solved from points
+  alone (uniform C2 cubics, Hobby's spline, kappa curves), open or closed, as
+  a composite of Bezier segments. Test 84.
+- `qaws_curve_offset_cubic_2d`: the parallel curve as cubic Bezier segments
+  within a tolerance, from any 2D curve; cusps become arcs, corners between
+  spans lines. Test 84.
+
 ### Removed (2.0.0, breaking)
 
 - **qaws is curve and surface evaluation.** Processing left the library:

@@ -43,6 +43,7 @@
 #include "qaws_curve_batch.h"
 #include "qaws_view.h"
 #include "qaws_operations.h"
+#include "qaws_interpolating.h"
 #include "qaws_convert.h"
 #include "qaws_export.h"
 #include "qaws_import.h"

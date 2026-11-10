@@ -86,6 +86,27 @@ Joins two curves end-to-end into a single curve.
 
 ---
 
+## qaws_curve_offset_cubic_2d
+
+```c
+qaws_status qaws_curve_offset_cubic_2d(
+    qaws_curve** out_curve,
+    qaws_curve const* curve,
+    qaws_scalar distance,
+    qaws_scalar tolerance);
+```
+
+The parallel curve at a signed distance as a composite of cubic Bezier segments, within `tolerance` of the true offset. 2D only. Positive distance is to the left of the travel direction.
+
+Each span is first made cubics (a cubic polynomial span is one exactly). Each cubic is then split at its inflections and curvature maxima, and each piece tried as a single offset cubic, then as circular arcs, then halved. A cusp becomes an arc about it, a corner between spans a line. Where the curvature radius is below `|distance|` the result keeps its loops: use `qaws_curve_offset_2d` to have them trimmed.
+
+**Parameters:**
+- `curve` -- The 2D source curve, any family.
+- `distance` -- Signed offset distance. Positive = left, negative = right.
+- `tolerance` -- The largest distance error, greater than 0, in the curve's units.
+
+Returns `QAWS_STATUS_DEGENERATE_CURVE` when the curve has no extent.
+
 ## qaws_curve_offset_2d
 
 ```c

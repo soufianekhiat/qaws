@@ -72,6 +72,8 @@ set(QAWS_SOURCES
   src/qaws/qaws_trajectory.c
   src/qaws/qaws_yuksel.c
   src/qaws/qaws_operations.c
+  src/qaws/qaws_interpolating.c
+  src/qaws/qaws_curve_offset_cubic.c
   src/qaws/qaws_extract.c
   src/qaws/qaws_path.c
   src/qaws/qaws_clip.c
@@ -514,6 +516,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_batch_executor.h
       src/qaws/qaws_surface_batch.h
       src/qaws/qaws_operations.h
+      src/qaws/qaws_interpolating.h
       src/qaws/qaws_convert.h
       src/qaws/qaws_export.h
       src/qaws/qaws_import.h

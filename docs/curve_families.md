@@ -452,6 +452,34 @@ qaws_curve_create_composite(&c, &desc);
 
 ---
 
+## Interpolating splines
+
+**Header:** `qaws_interpolating.h`
+
+Smooth 2D splines solved from points alone: a global solve finds the tangents, so moving one point moves the whole curve a little. The result is a composite of Bezier segments, not a family of its own.
+
+| Method | Segments | At the points | Notes |
+|---|---|---|---|
+| `QAWS_INTERPOLATING_CUBIC_C2` | cubic | C2 | equal parameter intervals; an open curve has zero second derivative at its ends |
+| `QAWS_INTERPOLATING_HOBBY` | cubic | G1 | close to circular arcs where the points allow it |
+| `QAWS_INTERPOLATING_KAPPA` | quadratic | curvature maximum on each point | G2 at the joins, G1 where a join inflects; a point is inside a segment, not at an integer parameter |
+
+**When to use:** Drawing tools and any path given only by the points it must pass through.
+
+```c
+qaws_vec2 points[] = { {0,0}, {2,1}, {4,0}, {5,3} };
+qaws_interpolating_spline_desc desc = {
+    .points = points,
+    .point_count = 4,
+    .method = QAWS_INTERPOLATING_HOBBY,
+    .closed = 0
+};
+qaws_curve* c = NULL;
+qaws_curve_create_interpolating_spline(&c, &desc);
+```
+
+---
+
 ## Surfaces
 
 Surface types (Bezier patches, B-spline surfaces, NURBS surfaces, swept surfaces, and ruled surfaces) are documented in [Surfaces](surfaces.md).

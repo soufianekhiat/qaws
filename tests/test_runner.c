@@ -73,6 +73,7 @@ extern int test_69_exact_surface_main(void);
 extern int test_76_exact_composite_main(void);
 extern int test_82_curve_extract_main(void);
 extern int test_83_path_main(void);
+extern int test_84_interpolating_offset_main(void);
 extern int test_140_eval_limits_main(void);
 extern int test_141_eval_threads_main(void);
 extern int test_142_curve_view_main(void);
@@ -157,6 +158,7 @@ static test_suite const g_test_suites[] = {
 	{"76_exact_composite", test_76_exact_composite_main},
 	{"82_curve_extract", test_82_curve_extract_main},
 	{"83_path", test_83_path_main},
+	{"84_interpolating_offset", test_84_interpolating_offset_main},
 {"140_eval_limits", test_140_eval_limits_main},
 {"141_eval_threads", test_141_eval_threads_main},
 {"142_curve_view", test_142_curve_view_main},

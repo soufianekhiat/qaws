@@ -82,6 +82,27 @@ qaws_status qaws_curve_offset_2d(
 	int trim);
 
 /*
+ * The parallel curve at signed distance as a chain of cubic Bezier segments
+ * (a composite), within tolerance of the true offset. Positive distance is to
+ * the left of the travel direction. 2D only.
+ *
+ * Each span is first made cubics (a cubic polynomial span is one exactly),
+ * then each cubic offset: split at inflections and curvature maxima, each
+ * piece tried as a single offset cubic, then as circular arcs, then halved. A
+ * cusp becomes an arc about it, a corner between spans a line. Where the
+ * curvature radius is below |distance| the result keeps its loops: use
+ * qaws_curve_offset_2d to have them trimmed.
+ *
+ * tolerance: the largest distance error, > 0, in the curve's units.
+ * Returns DEGENERATE_CURVE when the curve has no extent.
+ */
+qaws_status qaws_curve_offset_cubic_2d(
+	qaws_curve** out_curve,
+	qaws_curve const* curve,
+	qaws_scalar distance,
+	qaws_scalar tolerance);
+
+/*
  * Create an arc-length reparameterized wrapper curve.
  * The resulting curve has parameter domain [0, total_arc_length]
  * and maps uniformly to arc length along the source curve.
