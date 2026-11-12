@@ -4,7 +4,9 @@
  *   - a NURBS torus (rational), a cubic B-spline surface (several spans), a bicubic Bezier patch: over boxes of a half, a
  *     tenth and a hundredth of the domain, every sampled S, S_u, S_v, S_uu, S_uv, S_vv inside its range;
  *   - the ranges shrink with the box (a point box: the position to rounding);
- *   - the refusals: a box past the domain, an empty one, an order past 2, an unsupported surface.
+ *   - order 3: the third derivatives (central differences of the second) inside their ranges on the torus beside a knot,
+ *     the B-spline (its simple cubic knots C2) and the Bezier patch; unbounded over the torus's double knot (C1 there), bounded beside it;
+ *   - the refusals: a box past the domain, an empty one, an order past 3, an unsupported surface.
  */
 
 #include "test_common.h"
@@ -144,6 +146,52 @@ int test_156_surface_enclose_main(void)
 		printf("    %s\n", msg);
 		TEST_ASSERT(all && widths[1] < widths[0] && widths[2] < widths[1] && point_hi[0] - point_lo[0] < 1e-12, msg);
 	}
+	/* order 3: S_uuu ... S_vvv against central differences of the second derivatives at a box's samples */
+	{
+		unsigned int inside = 1, bounded = 1, z;
+		double lo[30], hi[30];
+		double const step = 1e-4, slack = sizeof(qaws_scalar) == sizeof(double) ? 1e-5 : 0.5;
+		for (k = 0; k < 3; k++)
+		{
+			/* (the B-spline's box across its knot 0.3; the torus's beside its knot 0.25, rational) */
+			double const u0 = k ? 0.25 : 0.27, u1 = k ? 0.4 : 0.33, v0 = 0.5, v1 = 0.6;
+			bounded &= qaws_surface_enclose(lo, hi, surfaces[k], u0, u1, v0, v1, 3) == QAWS_STATUS_OK;
+			for (z = 0; bounded && z < 25; z++)
+			{
+				double const u = u0 + step + (u1 - u0 - 2 * step) * (z % 5) / 4, v = v0 + step + (v1 - v0 - 2 * step) * (z / 5) / 4;
+				qaws_surface_eval_result a, b, c, e;
+				unsigned int q;
+				unsigned int const flags = QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV;
+				qaws_surface_evaluate(&a, surfaces[k], (qaws_scalar)(u + step), (qaws_scalar)v, flags);
+				qaws_surface_evaluate(&b, surfaces[k], (qaws_scalar)(u - step), (qaws_scalar)v, flags);
+				qaws_surface_evaluate(&c, surfaces[k], (qaws_scalar)u, (qaws_scalar)(v + step), flags);
+				qaws_surface_evaluate(&e, surfaces[k], (qaws_scalar)u, (qaws_scalar)(v - step), flags);
+				for (q = 0; q < 3; q++)
+				{
+					double d3[4];
+#define SE_C(r, f) ((double)(q == 0 ? (r).f.x : q == 1 ? (r).f.y : (r).f.z))
+					d3[0] = (SE_C(a, duu) - SE_C(b, duu)) / (2 * step);
+					d3[1] = (SE_C(c, duu) - SE_C(e, duu)) / (2 * step);
+					d3[2] = (SE_C(c, duv) - SE_C(e, duv)) / (2 * step);
+					d3[3] = (SE_C(c, dvv) - SE_C(e, dvv)) / (2 * step);
+#undef SE_C
+					{
+						unsigned int t;
+						for (t = 0; t < 4; t++)
+							if (d3[t] < lo[18 + 3 * t + q] - slack * (1 + fabs(d3[t])) || d3[t] > hi[18 + 3 * t + q] + slack * (1 + fabs(d3[t])))
+								inside = 0;
+					}
+				}
+			}
+		}
+		/* the torus: across its double knot u = 0.25 unbounded, beside it bounded */
+		bounded &= qaws_surface_enclose(lo, hi, surfaces[0], 0.2, 0.3, 0.6, 0.7, 3) == QAWS_STATUS_OK && lo[18] == -INFINITY && hi[29] == INFINITY;
+		bounded &= qaws_surface_enclose(lo, hi, surfaces[0], 0.26, 0.3, 0.6, 0.7, 3) == QAWS_STATUS_OK && isfinite(lo[18]) && isfinite(hi[29]);
+		bounded &= qaws_surface_enclose(lo, hi, surfaces[0], 0.25, 0.3, 0.6, 0.7, 3) == QAWS_STATUS_OK && isfinite(lo[18]) && isfinite(hi[29]);
+		sprintf(msg, "order 3: the third derivatives inside their ranges %u, unbounded only across the torus's double knot %u", inside, bounded);
+		printf("    %s\n", msg);
+		TEST_ASSERT(inside && bounded, msg);
+	}
 	/* refusals */
 	{
 		double lo[18], hi[18];
@@ -154,7 +202,7 @@ int test_156_surface_enclose_main(void)
 		pts[0].x = 0, pts[0].y = 0, pts[0].z = 0, pts[1].x = 1, pts[1].y = 0, pts[1].z = 0;
 		TEST_ASSERT(qaws_surface_enclose(lo, hi, surfaces[0], -0.1, 0.2, 0, 1, 0) == QAWS_STATUS_INVALID_ARGUMENT, "a box past the domain refused");
 		TEST_ASSERT(qaws_surface_enclose(lo, hi, surfaces[0], 0.3, 0.2, 0, 1, 0) == QAWS_STATUS_INVALID_ARGUMENT, "an empty box refused");
-		TEST_ASSERT(qaws_surface_enclose(lo, hi, surfaces[0], 0, 1, 0, 1, 3) == QAWS_STATUS_INVALID_ARGUMENT, "an order past 2 refused");
+		TEST_ASSERT(qaws_surface_enclose(lo, hi, surfaces[0], 0, 1, 0, 1, 4) == QAWS_STATUS_INVALID_ARGUMENT, "an order past 3 refused");
 		{
 			qaws_bezier_desc bd;
 			memset(&bd, 0, sizeof bd);

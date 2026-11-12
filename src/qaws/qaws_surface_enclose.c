@@ -220,9 +220,10 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 	qaws_range ur, vr;
 	unsigned int ku, kv, c, q, any = 0;
 	int poly;
-	en_iv acc[18];
+	en_iv acc[30];
 	int weight_ok = 1;
-	if (!out_lo || !out_hi || !surface || order > 2 || !(u0 <= u1) || !(v0 <= v1) || !isfinite(u0) || !isfinite(u1) || !isfinite(v0)
+	unsigned int const count = order == 0 ? 3u : order == 1 ? 9u : order == 2 ? 18u : 30u;
+	if (!out_lo || !out_hi || !surface || order > 3 || !(u0 <= u1) || !(v0 <= v1) || !isfinite(u0) || !isfinite(u1) || !isfinite(v0)
 		|| !isfinite(v1))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	ur = qaws_surface_get_u_range(surface);
@@ -240,7 +241,7 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 		for (kv = m.p[1]; kv < m.n[1]; kv++)
 		{
 			double const la = (double)m.k[1][kv], lb = (double)m.k[1][kv + 1], b0 = fmax(v0, la), b1 = fmin(v1, lb);
-			en_iv base[4], proj[3], X[6][4], S[18], W;
+			en_iv base[4], proj[3], X[9][4], S[30], W;
 			if (!(lb > la) || b0 > b1)
 				continue;
 			en_net(&m, poly, ku, kv, a0, a1, b0, b1, 0, 0, base, proj, &weight_ok);
@@ -275,14 +276,60 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 					S[15 + c] = en_div(en_sub(en_sub(X[4][c], en_mul(two, en_mul(sv, X[1][3]))), en_mul(s0, X[4][3])), W);
 				}
 			}
-			for (q = 0; q < (order == 0 ? 3u : order == 1 ? 9u : 18u); q++)
+			if (order >= 3)
+			{
+				/* X_uuu = S_uuu W + 3 S_uu W_u + 3 S_u W_uu + S W_uuu;
+				   X_uuv = S_uuv W + S_uu W_v + 2 S_uv W_u + 2 S_u W_uv + S_v W_uu + S W_uuv; X_uvv and X_vvv alike */
+				en_iv const two = en_exact(2), three = en_exact(3);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 3, 0, X[5], NULL, NULL);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 2, 1, X[6], NULL, NULL);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 1, 2, X[7], NULL, NULL);
+				en_net(&m, poly, ku, kv, a0, a1, b0, b1, 0, 3, X[8], NULL, NULL);
+				for (c = 0; c < 3; c++)
+				{
+					en_iv const s0 = S[c], su = S[3 + c], sv = S[6 + c], suu = S[9 + c], suv = S[12 + c], svv = S[15 + c];
+					en_iv const Wu = X[0][3], Wv = X[1][3], Wuu = X[2][3], Wuv = X[3][3], Wvv = X[4][3];
+					en_iv r;
+					r = en_sub(en_sub(X[5][c], en_mul(three, en_mul(suu, Wu))), en_mul(three, en_mul(su, Wuu)));
+					S[18 + c] = en_div(en_sub(r, en_mul(s0, X[5][3])), W);
+					r = en_sub(en_sub(en_sub(X[6][c], en_mul(suu, Wv)), en_mul(two, en_mul(suv, Wu))), en_mul(two, en_mul(su, Wuv)));
+					S[21 + c] = en_div(en_sub(en_sub(r, en_mul(sv, Wuu)), en_mul(s0, X[6][3])), W);
+					r = en_sub(en_sub(en_sub(X[7][c], en_mul(svv, Wu)), en_mul(two, en_mul(suv, Wv))), en_mul(two, en_mul(sv, Wuv)));
+					S[24 + c] = en_div(en_sub(en_sub(r, en_mul(su, Wvv)), en_mul(s0, X[7][3])), W);
+					r = en_sub(en_sub(X[8][c], en_mul(three, en_mul(svv, Wv))), en_mul(three, en_mul(sv, Wvv)));
+					S[27 + c] = en_div(en_sub(r, en_mul(s0, X[8][3])), W);
+				}
+			}
+			for (q = 0; q < count; q++)
 				acc[q] = any ? en_hull(acc[q], S[q]) : S[q];
 			any = 1;
 		}
 	}
 	if (!any)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	for (q = 0; q < (order == 0 ? 3u : order == 1 ? 9u : 18u); q++)
+	/* the third derivatives over a knot line inside the box across which S is not C2 (multiplicity past the degree less 2):
+	   the second derivatives jump there, so no bound holds them over the box - unbounded */
+	if (order >= 3)
+	{
+		unsigned int d, j, i, cut = 0;
+		for (d = 0; d < 2 && !cut; d++)
+		{
+			double const a = d ? v0 : u0, b = d ? v1 : u1;
+			for (j = m.p[d] + 1; j < m.n[d] && !cut; j++)
+			{
+				double const kk = (double)m.k[d][j];
+				int mult = 0;
+				if (!(kk > a && kk < b))
+					continue;
+				for (i = 0; i < m.n[d] + m.p[d] + 1; i++)
+					mult += (double)m.k[d][i] == kk;
+				cut = mult > (int)m.p[d] - 2;
+			}
+		}
+		for (q = 18; cut && q < 30; q++)
+			acc[q].lo = -INFINITY, acc[q].hi = INFINITY;
+	}
+	for (q = 0; q < count; q++)
 	{
 		out_lo[q] = acc[q].lo;
 		out_hi[q] = acc[q].hi;
