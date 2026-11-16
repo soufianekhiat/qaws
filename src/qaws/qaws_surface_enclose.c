@@ -11,6 +11,7 @@
 #include "qaws_inspect.h"
 #include "qaws_surface.h"
 #include "qaws_platform.h"
+#include <float.h>
 #include <math.h>
 #include <string.h>
 
@@ -23,9 +24,10 @@ typedef struct en_iv
 
 /* outward by at least an ulp without nextafter (a library call, the cost of every operation here): |x| 2^-51 is two ulps
    or more, so the rounded sum still passes x's neighbour when it crosses into the next binade; 2^-1021 past any
-   subnormal's rounding, itself normal (subnormal operands take microcode, a hundred times slower) */
-static double en_down(double x) { return isfinite(x) ? x - (fabs(x) * 0x1p-51 + 0x1p-1021) : x; }
-static double en_up(double x) { return isfinite(x) ? x + (fabs(x) * 0x1p-51 + 0x1p-1021) : x; }
+   subnormal's rounding, itself normal (subnormal operands take microcode, a hundred times slower); infinities and NaN
+   kept (|x| <= DBL_MAX false: one compare, cheaper than isfinite here) */
+static double en_down(double x) { return fabs(x) <= DBL_MAX ? x - (fabs(x) * 0x1p-51 + 0x1p-1021) : x; }
+static double en_up(double x) { return fabs(x) <= DBL_MAX ? x + (fabs(x) * 0x1p-51 + 0x1p-1021) : x; }
 /* (fmin and fmax are library calls under /fp:precise: the comparisons inline) */
 static double en_min(double a, double b) { return a < b ? a : b; }
 static double en_max(double a, double b) { return a > b ? a : b; }
@@ -88,6 +90,7 @@ static en_iv en_hull(en_iv a, en_iv b)
 typedef struct en_weights
 {
 	unsigned int p;
+	int point;   /* a == b: both arguments' weights the same */
 	en_iv al[2][EN_MAX][EN_MAX], be[2][EN_MAX][EN_MAX];
 } en_weights;
 
@@ -95,7 +98,8 @@ static void en_weigh(en_weights* w, double const* uk, unsigned int p, double a, 
 {
 	unsigned int x, r, j;
 	w->p = p;
-	for (x = 0; x < 2; x++)
+	w->point = a == b;
+	for (x = 0; x < (w->point ? 1u : 2u); x++)
 		for (r = 1; r <= p; r++)
 			for (j = r; j <= p; j++)
 			{
@@ -104,29 +108,45 @@ static void en_weigh(en_weights* w, double const* uk, unsigned int p, double a, 
 			}
 }
 
+/* de Boor step r of a window (p + 1 points of 4 intervals, the first nc worked) with argument x's weights */
+static void en_step(en_iv* t, en_weights const* w, unsigned int x, unsigned int r, unsigned int nc)
+{
+	unsigned int j, c;
+	for (j = w->p; j >= r; j--)
+	{
+		en_iv const al = w->al[x][r][j], be = w->be[x][r][j];
+		for (c = 0; c < nc; c++)
+			t[j * 4 + c] = en_add(en_mul(be, t[(j - 1) * 4 + c]), en_mul(al, t[j * 4 + c]));
+	}
+}
+
 /* a window of p + 1 homogeneous points (4 intervals each, `stride` between points; the first nc of them worked)
    blossomed over [a, b] (its weights w): Bezier point i the blossom at (a ^ (p - i), b ^ i), de Boor with those
-   arguments */
+   arguments - steps 1 .. p - i at a, the rest at b, so the steps at a are shared: point p - k from the window after k
+   of them. Over a point (a == b, the same weights) every Bezier point is the one value: computed once */
 static void en_blossom(en_iv* pts, unsigned int stride, en_weights const* w, unsigned int nc)
 {
-	en_iv tmp[EN_MAX * 4], out[EN_MAX * 4];
+	en_iv at_a[EN_MAX * 4], tmp[EN_MAX * 4], out[EN_MAX * 4];
 	unsigned int const p = w->p;
-	unsigned int i, r, j, c;
+	unsigned int i, k, r;
 	for (i = 0; i <= p; i++)
+		memcpy(at_a + i * 4, pts + i * stride, sizeof(en_iv) * 4);
+	if (w->point)
 	{
-		for (j = 0; j <= p; j++)
-			memcpy(tmp + j * 4, pts + j * stride, sizeof(en_iv) * 4);
 		for (r = 1; r <= p; r++)
-		{
-			unsigned int const x = r <= p - i ? 0u : 1u;
-			for (j = p; j >= r; j--)
-			{
-				en_iv const al = w->al[x][r][j], be = w->be[x][r][j];
-				for (c = 0; c < nc; c++)
-					tmp[j * 4 + c] = en_add(en_mul(be, tmp[(j - 1) * 4 + c]), en_mul(al, tmp[j * 4 + c]));
-			}
-		}
-		memcpy(out + i * 4, tmp + p * 4, sizeof(en_iv) * 4);
+			en_step(at_a, w, 0, r, nc);
+		for (i = 0; i <= p; i++)
+			memcpy(pts + i * stride, at_a + p * 4, sizeof(en_iv) * 4);
+		return;
+	}
+	for (k = 0; k <= p; k++)
+	{
+		memcpy(tmp, at_a, sizeof(en_iv) * 4 * (p + 1));
+		for (r = k + 1; r <= p; r++)
+			en_step(tmp, w, 1, r, nc);
+		memcpy(out + (p - k) * 4, tmp + p * 4, sizeof(en_iv) * 4);
+		if (k < p)
+			en_step(at_a, w, 0, k + 1, nc);
 	}
 	for (i = 0; i <= p; i++)
 		memcpy(pts + i * stride, out + i * 4, sizeof(en_iv) * 4);
@@ -235,12 +255,12 @@ qaws_status qaws_surface_enclose(double* out_lo, double* out_hi, qaws_surface co
 	poly = m.cp && !m.w;
 	for (ku = m.p[0]; ku < m.n[0]; ku++)
 	{
-		double const ka = (double)m.k[0][ku], kb = (double)m.k[0][ku + 1], a0 = fmax(u0, ka), a1 = fmin(u1, kb);
+		double const ka = (double)m.k[0][ku], kb = (double)m.k[0][ku + 1], a0 = en_max(u0, ka), a1 = en_min(u1, kb);
 		if (!(kb > ka) || a0 > a1)
 			continue;
 		for (kv = m.p[1]; kv < m.n[1]; kv++)
 		{
-			double const la = (double)m.k[1][kv], lb = (double)m.k[1][kv + 1], b0 = fmax(v0, la), b1 = fmin(v1, lb);
+			double const la = (double)m.k[1][kv], lb = (double)m.k[1][kv + 1], b0 = en_max(v0, la), b1 = en_min(v1, lb);
 			en_iv base[4], proj[3], X[9][4], S[30], W;
 			if (!(lb > la) || b0 > b1)
 				continue;
