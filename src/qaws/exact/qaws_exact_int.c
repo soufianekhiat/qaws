@@ -732,8 +732,8 @@ double qaws_exact_ratio_to_double(qaws_exact_int const* num, qaws_exact_int cons
 
 int qaws_exact_split_double(double d, int64_t* m, int* e)
 {
+	uint64_t bits, mant;
 	int ex;
-	double f;
 	if (!(d == d) || d - d != 0.0)
 		return 0;
 	if (d == 0.0)
@@ -742,14 +742,28 @@ int qaws_exact_split_double(double d, int64_t* m, int* e)
 		*e = 0;
 		return 1;
 	}
-	f = frexp(d, &ex);
-	*m = (int64_t)ldexp(f, 53);
-	*e = ex - 53;
-	while ((*m & 1) == 0)
+	/* the IEEE fields read directly (frexp and ldexp were most of an exact predicate's decoding): d = mant 2^(ex - 1075),
+	   the subnormals' exponent field read as 1; then the one odd mantissa */
+	memcpy(&bits, &d, sizeof bits);
+	ex = (int)((bits >> 52) & 0x7FF);
+	mant = bits & ((1ull << 52) - 1);
+	if (ex)
+		mant |= 1ull << 52;
+	else
+		ex = 1;
+	ex -= 1075;
+	while (!(mant & 0xFF))
 	{
-		*m /= 2;
-		(*e)++;
+		mant >>= 8;
+		ex += 8;
 	}
+	while (!(mant & 1))
+	{
+		mant >>= 1;
+		ex++;
+	}
+	*m = bits >> 63 ? -(int64_t)mant : (int64_t)mant;
+	*e = ex;
 	return 1;
 }
 

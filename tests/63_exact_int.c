@@ -152,7 +152,7 @@ static void test_capacity(void)
 
 static void test_split_double(void)
 {
-	static double const values[] = { 1.0, -0.75, 3.0e-310, 1.0e300, 0.1, -1234567.125 };
+	static double const values[] = { 1.0, -0.75, 3.0e-310, 1.0e300, 0.1, -1234567.125, 4.9406564584124654e-324, -2.0 };
 	int ok = 1;
 	unsigned int i;
 	for (i = 0; i < sizeof(values) / sizeof(values[0]); i++)
