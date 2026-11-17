@@ -11,7 +11,8 @@ C-only, built with `QAWS_ENABLE_EXACT` (default ON), independent of
   `qaws_exact_compare_ratio` return the true sign of the polynomial in the
   given doubles. An f64 evaluation with Shewchuk's error bound decides when
   it can; otherwise the inputs are decoded exactly and evaluated in
-  multi-limb integers. The f64 filter never decides a zero.
+  multi-limb integers; points sharing a coordinate (a zero column) are a
+  zero at once, on the exact path. The f64 filter never decides a zero.
 - **Exact curves** are exact relative to their lattice inputs: coordinates
   are rounded once onto `x = i 2^space_exp2`, weights scaled by a common
   power of two, knots and parameters onto `t = T 2^-shift`. After that

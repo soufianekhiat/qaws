@@ -135,6 +135,9 @@ All notable changes to Qaws are documented here.
 
 ### Changed
 
+- `qaws_exact_orient2d` and `qaws_exact_orient3d` decide points sharing a coordinate (all equal in x, say) zero at
+  once: a zero column of the determinant. Such zeros sit past the f64 filter and were decoded into multi-limb
+  integers; flat faces of CAD models give many of them. Same signs, same `out_path` (exact).
 - Motions from two poses turn any number of turns: the angular velocities say how many (a quaternion only says where the
   body ends), and past a half turn the motion is cut into pieces of an eighth of a turn at most, joined with matching
   positions, orientations and rates (three turns about z within 1.2e-3 of the uniform spin). Only a half turn the

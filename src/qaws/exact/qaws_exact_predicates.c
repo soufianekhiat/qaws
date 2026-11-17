@@ -11,7 +11,9 @@
  * overflows. Below QAWS_EXACT_FILTER_TINY, or when a term overflowed (not
  * finite), the filter is skipped. The exact path scales every input to the smallest
  * binary exponent among them: a positive common factor that leaves every
- * sign unchanged.
+ * sign unchanged. Points sharing a coordinate (all of them equal in x, say)
+ * give the determinant a zero column: an exact zero, decided at once (flat
+ * CAD faces put many such cases here, every one past the filter).
  */
 
 #define QAWS_EXACT_EPS (1.0 / 9007199254740992.0)   /* 2^-53 */
@@ -71,6 +73,12 @@ qaws_status qaws_exact_orient2d(qaws_exact_sign* out_sign, qaws_exact_path* out_
 	v[0] = a[0]; v[1] = a[1]; v[2] = b[0]; v[3] = b[1]; v[4] = c[0]; v[5] = c[1];
 	if (!finite_all(v, 6))
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	if ((a[0] == c[0] && b[0] == c[0]) || (a[1] == c[1] && b[1] == c[1]))
+	{
+		*out_sign = QAWS_EXACT_ZERO;
+		if (out_path) *out_path = QAWS_EXACT_PATH_EXACT;
+		return QAWS_STATUS_OK;
+	}
 	detleft = (a[0] - c[0]) * (b[1] - c[1]);
 	detright = (a[1] - c[1]) * (b[0] - c[0]);
 	det = detleft - detright;
@@ -112,6 +120,13 @@ qaws_status qaws_exact_orient3d(qaws_exact_sign* out_sign, qaws_exact_path* out_
 	}
 	if (!finite_all(v, 12))
 		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < 3; i++)
+		if (a[i] == d[i] && b[i] == d[i] && c[i] == d[i])
+		{
+			*out_sign = QAWS_EXACT_ZERO;
+			if (out_path) *out_path = QAWS_EXACT_PATH_EXACT;
+			return QAWS_STATUS_OK;
+		}
 	adx = a[0] - d[0]; bdx = b[0] - d[0]; cdx = c[0] - d[0];
 	ady = a[1] - d[1]; bdy = b[1] - d[1]; cdy = c[1] - d[1];
 	adz = a[2] - d[2]; bdz = b[2] - d[2]; cdz = c[2] - d[2];
