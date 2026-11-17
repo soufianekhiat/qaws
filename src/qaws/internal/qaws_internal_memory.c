@@ -105,6 +105,113 @@ static void mem_store(long volatile* p, long v) { __atomic_store_n(p, v, __ATOMI
 static void mem_yield(void) { sched_yield(); }
 #endif
 
+/* ---- freed system blocks kept for reuse -------------------------------- */
+
+/* Blocks of the C allocator from CACHE_MIN to CACHE_MAX bytes (header included) are made at their size class's bytes, so any
+   block of a class serves any request of it; freed, they are kept (up to g_cache_limit bytes in all, CACHE_SLOTS a class) and
+   handed to the next requests of their class instead of going back to the C allocator, which on some systems returns the
+   pages and faults them in again at the next touch. One lock, held for a push or a pop. */
+#define CACHE_MIN ((size_t)4096)
+#define CACHE_MAX ((size_t)1 << 20)
+#define CACHE_CLASSES 33            /* a quarter octave apart: 4, 5, 6, 7, 8, 10 .. 896, 1024 KB */
+#define CACHE_SLOTS 64
+
+static long volatile g_cache_lock;
+static size_t g_cache_limit = (size_t)16 << 20, g_cache_bytes;
+static void* g_cache_block[CACHE_CLASSES][CACHE_SLOTS];
+static unsigned int g_cache_count[CACHE_CLASSES];
+
+static size_t cache_size(unsigned int c)
+{
+	return (CACHE_MIN << (c / 4)) / 4 * (4 + c % 4);
+}
+
+/* the class of a block of n bytes, CACHE_CLASSES when it is not kept */
+static unsigned int cache_class(size_t n)
+{
+	unsigned int c = 0;
+	if (n < CACHE_MIN || n > CACHE_MAX)
+		return CACHE_CLASSES;
+	while (cache_size(c) < n)
+		c++;
+	return c;
+}
+
+static void cache_lock(void)
+{
+	while (!mem_cas(&g_cache_lock, 0, 1))
+		mem_yield();
+}
+
+static void cache_unlock(void)
+{
+	mem_store(&g_cache_lock, 0);
+}
+
+/* a block of at least n bytes: one kept of its class, else a new one at the class's bytes */
+static void* cache_take(size_t n)
+{
+	unsigned int c = cache_class(n);
+	void* p = NULL;
+	if (c == CACHE_CLASSES)
+		return sys_alloc(n);
+	cache_lock();
+	if (g_cache_count[c])
+	{
+		p = g_cache_block[c][--g_cache_count[c]];
+		g_cache_bytes -= cache_size(c);
+	}
+	cache_unlock();
+	return p ? p : sys_alloc(cache_size(c));
+}
+
+/* a block of n bytes given back: kept when its class has room and the total its limit, else freed */
+static void cache_give(void* p, size_t n)
+{
+	unsigned int c = cache_class(n);
+	int kept = 0;
+	if (c < CACHE_CLASSES)
+	{
+		cache_lock();
+		if (g_cache_count[c] < CACHE_SLOTS && g_cache_bytes + cache_size(c) <= g_cache_limit)
+		{
+			g_cache_block[c][g_cache_count[c]++] = p;
+			g_cache_bytes += cache_size(c);
+			kept = 1;
+		}
+		cache_unlock();
+	}
+	if (!kept)
+		sys_free(p);
+}
+
+/* the kept blocks past bytes freed (0: all of them) */
+static void cache_trim(size_t bytes)
+{
+	unsigned int c;
+	cache_lock();
+	for (c = CACHE_CLASSES; c-- > 0 && g_cache_bytes > bytes;)
+		while (g_cache_count[c] && g_cache_bytes > bytes)
+		{
+			sys_free(g_cache_block[c][--g_cache_count[c]]);
+			g_cache_bytes -= cache_size(c);
+		}
+	cache_unlock();
+}
+
+void qaws_set_kept_memory_limit(size_t bytes)
+{
+	cache_lock();
+	g_cache_limit = bytes;
+	cache_unlock();
+	cache_trim(bytes);
+}
+
+void qaws_release_kept_memory(void)
+{
+	cache_trim(0);
+}
+
 /* the default: settable until the library first reads it, then sealed */
 enum { DEF_OPEN = 0, DEF_WRITING = 1, DEF_OPEN_SET = 2, DEF_SEALED = 3, DEF_SEALED_SET = 4 };
 static long volatile g_default_state;
@@ -275,7 +382,7 @@ static int mem_block(void const* ptr, mem_tail* t, unsigned char** raw, qaws_all
 static void mem_release(unsigned char* raw, unsigned int kind, qaws_allocator const* a, size_t total)
 {
 	if (kind == MEM_SYSTEM)
-		sys_free(raw);
+		cache_give(raw, total);
 	else if (kind == MEM_SIZED)
 	{
 		if (a->dealloc_sized)
@@ -316,7 +423,7 @@ void* qaws_internal_alloc_from(size_t size, qaws_allocator const* allocator)
 		return NULL;
 	total = size + head;
 	if (kind == MEM_SYSTEM)
-		raw = (unsigned char*)sys_alloc(total);
+		raw = (unsigned char*)cache_take(total);
 	else if (kind == MEM_SIZED)
 		raw = (unsigned char*)allocator->alloc_sized(total, MEM_ALIGN, allocator->user_data);
 	else
@@ -422,8 +529,22 @@ void* qaws_internal_realloc(void* ptr, size_t size)
 		return NULL;
 	if (t.kind == MEM_SYSTEM)
 	{
-		unsigned char* q = (unsigned char*)sys_realloc(raw, t.size + head, size + head);
-		return q ? mem_finish(q, MEM_SYSTEM, NULL, size, 0) : NULL;
+		unsigned char* q;
+		unsigned int co = cache_class(t.size + head), cn = cache_class(size + head);
+		if (co == CACHE_CLASSES && cn == CACHE_CLASSES)
+		{
+			q = (unsigned char*)sys_realloc(raw, t.size + head, size + head);
+			return q ? mem_finish(q, MEM_SYSTEM, NULL, size, 0) : NULL;
+		}
+		if (co == cn)
+			return mem_finish(raw, MEM_SYSTEM, NULL, size, 0);   /* (its class's bytes hold it) */
+		/* (a kept class at either end: moved, so every kept block has its class's bytes) */
+		q = (unsigned char*)cache_take(size + head);
+		if (!q)
+			return NULL;
+		memcpy(q + head, ptr, t.size < size ? t.size : size);
+		cache_give(raw, t.size + head);
+		return mem_finish(q, MEM_SYSTEM, NULL, size, 0);
 	}
 	if (t.kind == MEM_SIZED && a.resize && a.resize(raw, t.size + head, size + head, MEM_ALIGN, a.user_data))
 		return mem_finish(raw, MEM_SIZED, &a, size, 0);

@@ -75,6 +75,17 @@ void qaws_exchange_thread_allocator(qaws_allocator* out_previous, qaws_allocator
 void qaws_exchange_thread_scratch_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator);
 
 /*
+ * Memory kept for reuse: blocks of the C allocator (no custom allocator in effect) from 4 KB to 1 MB that the library frees
+ * are kept, up to a limit in all (16 MB by default), and handed to the next requests of their size, so repeated calls do
+ * not take their memory from the system each time (a system heap may return freed pages and fault them in again at the
+ * next touch). Such blocks are made at their size class's bytes, a quarter octave apart. The limit is process-wide and may
+ * be changed at any time (0: none kept); lowering it frees the kept blocks past it. qaws_release_kept_memory frees every
+ * kept block (the limit stays). Both are thread-safe.
+ */
+void qaws_set_kept_memory_limit(size_t bytes);
+void qaws_release_kept_memory(void);
+
+/*
  * An allocator over caller memory (sized interface): a mapped file, pinned memory, a host frame arena. The memory must
  * be CPU-accessible and coherent for the CPU; placing the library's data there does not move any computation to a GPU.
  *

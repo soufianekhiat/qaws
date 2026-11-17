@@ -6,6 +6,11 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `qaws_set_kept_memory_limit`, `qaws_release_kept_memory`: blocks of the C
+  allocator from 4 KB to 1 MB that the library frees are kept (16 MB in all by
+  default) and handed to the next requests of their size class, so repeated
+  calls stop taking their memory from the system each time (on Windows the
+  heap returned freed pages and faulted them in again at the next touch).
 - `qaws_curve_create_interpolating_spline`: 2D splines solved from points
   alone (uniform C2 cubics, Hobby's spline, kappa curves, curvature-matching
   G2 cubics and the S9 spline), open or closed, as

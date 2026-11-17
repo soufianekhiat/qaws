@@ -89,6 +89,21 @@ qaws_arena_reset(&frame_arena);                                    /* OK: the ar
 - **Coverage.** Other operations take their temporaries from the persistent order as before. Without a scratch allocator, nothing changes.
 - **Tests.** With `QAWS_TEST_SCRATCH=1`, the test runner installs a scratch arena for every suite and fails a suite that leaves a block in it.
 
+## Memory kept for reuse
+
+```c
+void qaws_set_kept_memory_limit(size_t bytes);   /* 0: none kept; default 16 MB */
+void qaws_release_kept_memory(void);
+```
+
+Without a custom allocator in effect, blocks of the C allocator from 4 KB to 1 MB (header included) that the library frees are kept, up to the limit in all, and handed to the next requests of their size. Repeated calls then do not take their memory from the system each time: a system heap may return freed pages to the operating system and fault them in again at the next touch, which on Windows cost a chain of small mesh operations about a tenth of its time.
+
+- **Size classes.** Such blocks are made at their size class's bytes, a quarter octave apart (4, 5, 6, 7, 8, 10 ... 896, 1024 KB), so a kept block serves any request of its class. At most 64 blocks a class are kept.
+- **The limit** is process-wide and can be changed at any time. Lowering it frees the kept blocks past it; 0 keeps none. `qaws_release_kept_memory` frees every kept block and leaves the limit as it is.
+- **Threads.** Blocks freed on any thread are kept for all; one lock guards the kept blocks, held for a push or a pop. Both calls are thread-safe.
+- **Custom allocators** (an `_ex` argument, a thread or default allocator, a scratch allocator) are not affected: their blocks go back to them as before.
+- **Contents.** A kept block is handed out as it was left: the library initializes what it reads, as with any heap block.
+
 ## Sizes and overflow
 
 - **Allocation sizes** are computed with checked arithmetic (`qaws_internal_mul2/3/4`, `qaws_internal_add2`). A product or sum that does not fit `size_t` becomes `SIZE_MAX`, which every allocation refuses before calling an allocator. The call returns `QAWS_STATUS_ALLOCATION_FAILURE`: the request cannot be represented, so it is reported the same way as memory the allocator does not have. A size never wraps into a short block that the library would then overrun.
