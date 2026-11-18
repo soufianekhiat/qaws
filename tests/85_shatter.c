@@ -13,6 +13,13 @@
  *   - 2D regions of curves: two circles' crossings, a bowtie's own crossing,
  *     a short buffer; a circle shattered by a circle (the lens inside, the
  *     crescent outside, areas exact), by an open cut, a ring by a line;
+ *   - 2D edge cases: squares sharing a side, overlapping along collinear
+ *     sides, identical, nested either way, touching at a corner, circles
+ *     touching at a point; a square cut corner to corner, along its side,
+ *     through a cut's vertex; seams where boundaries only touch or coincide;
+ *   - surface edge cases: coplanar overlapping sheets (no seam, one piece), a
+ *     sheet touching a cube's corner (no seam), a sheet through a cube's
+ *     opposite edges (a quarter inside), a sheet on a cube's face;
  *   - refusals.
  */
 
@@ -428,6 +435,224 @@ static void test_regions(void)
 	qaws_curve_destroy(line);
 }
 
+/* ---- 2D edge cases ---- */
+
+/* A shattered by B: OK, the piece count, the areas inside and outside B (inside -1: total in out) */
+static void sht_shatter2d_case(char const* name, qaws_path_2d const* a, unsigned int na, qaws_path_2d const* b, unsigned int nb, int b_region,
+	unsigned int count, double in_area, double out_area)
+{
+	qaws_region_seam_desc d;
+	qaws_region_shatter* H = NULL;
+	qaws_status s;
+	unsigned int i, n;
+	double ain = 0, aout = 0;
+	char msg[300];
+	memset(&d, 0, sizeof d);
+	d.a = a; d.a_count = na; d.a_rule = QAWS_FILL_NON_ZERO;
+	d.b = b; d.b_count = nb; d.b_rule = QAWS_FILL_NON_ZERO;
+	d.b_is_region = b_region;
+	s = qaws_region_shatter_create_2d(&H, &d);
+	n = qaws_region_shatter_get_count(H);
+	for (i = 0; i < n; i++)
+	{
+		qaws_path_2d const* pp = NULL;
+		unsigned int np = 0;
+		int inside = 0;
+		qaws_scalar ar = 0;
+		qaws_region_shatter_get(&pp, &np, &inside, H, i);
+		qaws_region_compute_area_2d(&ar, pp, np);
+		if (inside == 1)
+			ain += (double)ar;
+		else
+			aout += (double)ar;
+	}
+	sprintf(msg, "2D edge case, %s: status %d, %u pieces (%u), inside %.9f (%.9f), outside %.9f (%.9f)", name, (int)s, n, count, ain, in_area, aout,
+		out_area);
+	printf("  %s\n", msg);
+	TEST_ASSERT(s == QAWS_STATUS_OK && n == count && fabs(ain - in_area) < 1e3 * SHT_TOL && fabs(aout - out_area) < 1e3 * SHT_TOL, msg);
+	qaws_region_shatter_destroy(H);
+}
+
+static unsigned int sht_seams2d_count(qaws_path_2d const* a, unsigned int na, qaws_path_2d const* b, unsigned int nb, unsigned int kinds)
+{
+	qaws_region_seam_desc d;
+	qaws_region_seam_point pts[32];
+	unsigned int n = 0;
+	memset(&d, 0, sizeof d);
+	d.a = a; d.a_count = na; d.a_rule = QAWS_FILL_NON_ZERO;
+	d.b = b; d.b_count = nb; d.b_rule = QAWS_FILL_NON_ZERO;
+	d.b_is_region = 1;
+	d.kinds = kinds;
+	if (qaws_region_seams_2d(pts, &n, &d, 32) != QAWS_STATUS_OK)
+		return 999;
+	return n;
+}
+
+static qaws_curve* sht_rect(double x0, double y0, double x1, double y1)
+{
+	qaws_scalar const p[8] = { (qaws_scalar)x0, (qaws_scalar)y0, (qaws_scalar)x1, (qaws_scalar)y0, (qaws_scalar)x1, (qaws_scalar)y1, (qaws_scalar)x0,
+		(qaws_scalar)y1 };
+	qaws_curve* c = NULL;
+	qaws_curve_create_polyline_2d(&c, p, 4, 1);
+	return c;
+}
+
+static void test_regions_edge_cases(void)
+{
+	qaws_curve *sq = sht_rect(0, 0, 1, 1), *right = sht_rect(1, 0, 2, 1), *wide = sht_rect(0, 0, 2, 1), *shifted = sht_rect(1, 0, 3, 1);
+	qaws_curve *same = sht_rect(0, 0, 1, 1), *big = sht_rect(-1, -1, 2, 2), *small = sht_rect(0.25, 0.25, 0.75, 0.75), *corner = sht_rect(1, 1, 2, 2);
+	qaws_curve *c0 = NULL, *c1 = NULL, *diag = NULL, *along = NULL, *through = NULL;
+	qaws_curve const *lsq[1], *lright[1], *lwide[1], *lshift[1], *lsame[1], *lbig[1], *lsmall[1], *lcorner[1], *lc0[1], *lc1[1], *ldiag[1],
+		*lalong[1], *lthrough[1];
+	qaws_path_2d Sq, Right, Wide, Shift, Same, Big, Small, Corner, C0, C1, Diag, Along, Through;
+	qaws_scalar const dpts[4] = { -0.5, -0.5, 1.5, 1.5 }, apts[4] = { -0.5, 0, 1.5, 0 }, tpts[6] = { 0.5, -0.5, 0.5, 0.5, 0.5, 1.5 };
+	double const pi = 3.14159265358979323846;
+	unsigned int n;
+	char msg[200];
+	qaws_curve_create_ellipse_2d(&c0, 0, 0, 1, 1, 0);
+	qaws_curve_create_ellipse_2d(&c1, 2, 0, 1, 1, 0);
+	qaws_curve_create_polyline_2d(&diag, dpts, 2, 0);
+	qaws_curve_create_polyline_2d(&along, apts, 2, 0);
+	qaws_curve_create_polyline_2d(&through, tpts, 3, 0);
+	lsq[0] = sq; lright[0] = right; lwide[0] = wide; lshift[0] = shifted; lsame[0] = same; lbig[0] = big; lsmall[0] = small; lcorner[0] = corner;
+	lc0[0] = c0; lc1[0] = c1; ldiag[0] = diag; lalong[0] = along; lthrough[0] = through;
+	Sq = sht_path(lsq, 1, 1); Right = sht_path(lright, 1, 1); Wide = sht_path(lwide, 1, 1); Shift = sht_path(lshift, 1, 1);
+	Same = sht_path(lsame, 1, 1); Big = sht_path(lbig, 1, 1); Small = sht_path(lsmall, 1, 1); Corner = sht_path(lcorner, 1, 1);
+	C0 = sht_path(lc0, 1, 1); C1 = sht_path(lc1, 1, 1); Diag = sht_path(ldiag, 1, 0); Along = sht_path(lalong, 1, 0); Through = sht_path(lthrough, 1, 0);
+	/* overlapping and touching boundaries */
+	sht_shatter2d_case("squares sharing a side", &Sq, 1, &Right, 1, 1, 1, 0, 1);
+	sht_shatter2d_case("squares overlapping along collinear sides", &Wide, 1, &Shift, 1, 1, 2, 1, 1);
+	sht_shatter2d_case("identical squares", &Sq, 1, &Same, 1, 1, 1, 1, 0);
+	sht_shatter2d_case("a square in a bigger one", &Sq, 1, &Big, 1, 1, 1, 1, 0);
+	sht_shatter2d_case("a square around a smaller one", &Sq, 1, &Small, 1, 1, 2, 0.25, 0.75);
+	sht_shatter2d_case("squares touching at a corner", &Sq, 1, &Corner, 1, 1, 1, 0, 1);
+	sht_shatter2d_case("circles touching at a point", &C0, 1, &C1, 1, 1, 1, 0, pi);
+	/* cuts through vertices and along a side */
+	sht_shatter2d_case("a square cut corner to corner", &Sq, 1, &Diag, 1, 0, 2, 0, 1);
+	sht_shatter2d_case("a square with a cut along its side", &Sq, 1, &Along, 1, 0, 1, 0, 1);
+	sht_shatter2d_case("a square cut through a cut's vertex", &Sq, 1, &Through, 1, 0, 2, 0, 1);
+	/* seams there: no crossing where boundaries only touch or run together */
+	n = sht_seams2d_count(&C0, 1, &C1, 1, QAWS_SEAM_A_B);
+	sprintf(msg, "2D edge case, circles touching: %u points (1, where they touch)", n);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 1, msg);
+	n = sht_seams2d_count(&Sq, 1, &Corner, 1, QAWS_SEAM_A_B);
+	sprintf(msg, "2D edge case, squares touching at a corner: %u points (1)", n);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 1, msg);
+	n = sht_seams2d_count(&Sq, 1, &Right, 1, QAWS_SEAM_A_B);
+	sprintf(msg, "2D edge case, squares sharing a side: %u points (0: running together is no crossing)", n);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 0, msg);
+	n = sht_seams2d_count(&Sq, 1, &Same, 1, QAWS_SEAM_A_B);
+	sprintf(msg, "2D edge case, identical squares: %u points (0)", n);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 0, msg);
+	n = sht_seams2d_count(&Wide, 1, &Shift, 1, QAWS_SEAM_A_B);
+	sprintf(msg, "2D edge case, squares overlapping along collinear sides: %u points (0: the overlap's ends are no crossing)", n);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 0, msg);
+	qaws_curve_destroy(sq); qaws_curve_destroy(right); qaws_curve_destroy(wide); qaws_curve_destroy(shifted); qaws_curve_destroy(same);
+	qaws_curve_destroy(big); qaws_curve_destroy(small); qaws_curve_destroy(corner); qaws_curve_destroy(c0); qaws_curve_destroy(c1);
+	qaws_curve_destroy(diag); qaws_curve_destroy(along); qaws_curve_destroy(through);
+}
+
+/* ---- surface edge cases ---- */
+
+/* A (one surface) shattered by B: OK, piece count (0: not checked), the shares of A's domain inside and outside B */
+static void sht_surface_case(char const* name, qaws_surface* a, qaws_surface** b, unsigned int nb, int solid, unsigned int count, double in_share,
+	double out_share)
+{
+	qaws_surface_seam_desc d;
+	qaws_surface_shatter* H = NULL;
+	qaws_status st;
+	unsigned int i, n;
+	double sin_ = 0, sout = 0;
+	char msg[300];
+	memset(&d, 0, sizeof d);
+	d.a = (qaws_surface const* const*)&a;
+	d.a_count = 1;
+	d.b = (qaws_surface const* const*)b;
+	d.b_count = nb;
+	st = qaws_surface_shatter_create(&H, &d, solid);
+	n = qaws_surface_shatter_get_count(H);
+	for (i = 0; i < n; i++)
+	{
+		qaws_surface const* p = NULL;
+		int inside = 0;
+		double sh;
+		qaws_surface_shatter_get(&p, NULL, &inside, H, i);
+		sh = sht_trim_share(p);
+		if (inside == 1)
+			sin_ += sh;
+		else
+			sout += sh;
+	}
+	sprintf(msg, "surface edge case, %s: status %d, %u pieces (%u), inside %.4f (%.4f), outside %.4f (%.4f)", name, (int)st, n, count, sin_, in_share,
+		sout, out_share);
+	printf("  %s\n", msg);
+	/* (in_share negative: only the whole domain checked) */
+	TEST_ASSERT(st == QAWS_STATUS_OK && (!count || n == count)
+		&& (in_share < 0 ? fabs(sin_ + sout - 1) < 0.01 : fabs(sin_ - in_share) < 0.01 && fabs(sout - out_share) < 0.01), msg);
+	qaws_surface_shatter_destroy(H);
+}
+
+static unsigned int sht_surface_seam_count(qaws_surface* a, qaws_surface** b, unsigned int nb)
+{
+	qaws_surface_seam_desc d;
+	qaws_surface_seams* S = NULL;
+	unsigned int n;
+	memset(&d, 0, sizeof d);
+	d.a = (qaws_surface const* const*)&a;
+	d.a_count = 1;
+	d.b = (qaws_surface const* const*)b;
+	d.b_count = nb;
+	d.kinds = QAWS_SEAM_A_B;
+	if (qaws_surface_seams_create(&S, &d) != QAWS_STATUS_OK)
+		return 999;
+	n = qaws_surface_seams_get_count(S);
+	qaws_surface_seams_destroy(S);
+	return n;
+}
+
+static void test_surface_edge_cases(void)
+{
+	qaws_surface* flat = sht_bilinear(sht_v(-1, -1, 0), sht_v(1, -1, 0), sht_v(-1, 1, 0), sht_v(1, 1, 0));
+	qaws_surface* over = sht_bilinear(sht_v(0, -1, 0), sht_v(2, -1, 0), sht_v(0, 1, 0), sht_v(2, 1, 0));
+	qaws_surface* tilt = sht_bilinear(sht_v(0.5, 0.5, 0.5), sht_v(2, 0.5, 2), sht_v(0.5, 2, 2), sht_v(2, 2, 3.5));
+	qaws_surface* diag = sht_bilinear(sht_v(-1, -1, -1), sht_v(1, 1, -1), sht_v(-1, -1, 1), sht_v(1, 1, 1));
+	qaws_surface* onface = sht_bilinear(sht_v(-1, -1, 0.5), sht_v(1, -1, 0.5), sht_v(-1, 1, 0.5), sht_v(1, 1, 0.5));
+	qaws_surface* cube[6];
+	double const lo[3] = { -0.5, -0.5, -0.5 }, hi[3] = { 0.5, 0.5, 0.5 };
+	unsigned int n, i;
+	char msg[200];
+	sht_box(lo, hi, cube);
+	/* coplanar sheets overlapping: no seam, the sheet whole */
+	n = sht_surface_seam_count(flat, &over, 1);
+	sprintf(msg, "surface edge case, coplanar overlapping sheets: %u seams (0)", n);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 0, msg);
+	sht_surface_case("a sheet by a coplanar sheet", flat, &over, 1, 0, 1, 0, 1);
+	/* a sheet touching the cube at a corner only: no seam, the sheet whole and outside */
+	n = sht_surface_seam_count(tilt, cube, 6);
+	sprintf(msg, "surface edge case, a sheet touching a cube's corner: %u seams (0)", n);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 0, msg);
+	sht_surface_case("a sheet touching a cube's corner", tilt, cube, 6, 1, 1, 0, 1);
+	/* a sheet through two opposite edges of the cube: cut along both diagonals of its top and bottom and the two edges */
+	sht_surface_case("a sheet through a cube's opposite edges", diag, cube, 6, 1, 2, 0.25, 0.75);
+	/* a sheet lying on the cube's top face: cut along the face's border into two pieces, nothing lost (its part on the
+	   face told inside or outside as the perturbation of the crossings decides) */
+	sht_surface_case("a sheet on a cube's face", onface, cube, 6, 1, 2, -1, -1);
+	for (i = 0; i < 6; i++)
+		qaws_surface_destroy(cube[i]);
+	qaws_surface_destroy(flat);
+	qaws_surface_destroy(over);
+	qaws_surface_destroy(tilt);
+	qaws_surface_destroy(diag);
+	qaws_surface_destroy(onface);
+}
+
 int test_85_shatter_main(void)
 {
 	g_pass = 0;
@@ -436,6 +661,8 @@ int test_85_shatter_main(void)
 	test_seams();
 	test_shatter();
 	test_regions();
+	test_regions_edge_cases();
+	test_surface_edge_cases();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

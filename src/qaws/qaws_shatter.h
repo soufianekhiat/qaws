@@ -47,6 +47,13 @@
  * the winding number of B's triangles at a point of it (inside from 1/2).
  * A piece is valid while the shatter lives and A's surfaces do.
  *
+ * Exact coincidences between the operands - a grid vertex on the other's
+ * surface, a border lying in it, coplanar faces - are decided one way for
+ * every triangle pair by moving each operand's grids a little (1e-8 of the
+ * extent, 1e-5 in f32) along a direction of its own while the crossings are
+ * found; a seam no bigger than a hundred such moves (a touch at a point) is
+ * left out. A surface lying on B's boundary is cut along B's edges there,
+ * its part on the boundary told inside or outside as that move decides.
  * Tangential contacts and crossings finer than the grid are not resolved:
  * raise the resolution. Thread-safe on immutable surfaces.
  */
@@ -126,7 +133,13 @@ qaws_status qaws_surface_shatter_get(qaws_surface const** out_piece, unsigned in
  * told by the winding numbers carried from face to face across the curves
  * (each operand's fill rule on its own), not by sampling.
  *
- * Tangencies and crossings closer than the flatness are not resolved.
+ * Degenerate meetings: collinear chords split one another where they
+ * overlap, so boundaries running together (shared sides, identical regions)
+ * share their edges and every operand's winding change across them counts;
+ * seams leave out a meeting where the curves run together on either side
+ * (an overlap is no crossing) and give one where they only touch (a
+ * tangency, a corner on a side). Crossings closer than the flatness are not
+ * resolved.
  */
 typedef struct qaws_region_seam_desc
 {
