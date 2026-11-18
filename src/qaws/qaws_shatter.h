@@ -102,4 +102,71 @@ unsigned int qaws_surface_shatter_get_count(qaws_surface_shatter const* shatter)
 qaws_status qaws_surface_shatter_get(qaws_surface const** out_piece, unsigned int* out_surface, int* out_inside,
 	qaws_surface_shatter const* shatter, unsigned int index);
 
+/*
+ * Seams and shatter of 2D regions of curves.
+ *
+ * Operands are lists of paths (qaws_path.h). A is a region (closed paths
+ * read with a_rule); B is a region (b_rule) or, with b_is_region 0, curves
+ * with no inside (open or closed paths), as a surface is in 3D. Every curve
+ * is flattened into chords within flatness, the chords of both arranged,
+ * and every crossing moved onto both curves by Newton's method.
+ *
+ * Seams: the points where a curve of A crosses one of B (QAWS_SEAM_A_B), or
+ * two curves of one operand cross (QAWS_SEAM_A_A, QAWS_SEAM_B_B; not where a
+ * path's curves join), each with its parameter on both curves (curve1 the
+ * lower operand, path and curve).
+ *
+ * Shatter: A's region cut along B's curves into pieces - A's own curves
+ * where its region lies on both sides (crossings of its paths inside it) do
+ * not cut it - each a region of closed paths (its outer path
+ * counter-clockwise, its holes clockwise) whose
+ * curves are exact pieces of A's and B's (qaws_curve_extract, reversed where
+ * walked backwards), each told inside or outside B when B is a region. The
+ * paths and their curves are owned by the shatter. Inside and outside are
+ * told by the winding numbers carried from face to face across the curves
+ * (each operand's fill rule on its own), not by sampling.
+ *
+ * Tangencies and crossings closer than the flatness are not resolved.
+ */
+typedef struct qaws_region_seam_desc
+{
+	qaws_path_2d const* a;
+	unsigned int a_count;
+	qaws_fill_rule a_rule;
+	qaws_path_2d const* b;
+	unsigned int b_count;
+	qaws_fill_rule b_rule;
+	int b_is_region;                  /* 0: B's paths are curves with no inside */
+	unsigned int kinds;               /* QAWS_SEAM_*: the seams wanted */
+	qaws_scalar flatness;             /* the chords' deviation from the curves; 0: 1e-3 of the extent */
+	qaws_scalar tolerance;            /* a crossing's gap between its curves; 0: 1e-12 (f32: 1e-6) of the extent */
+} qaws_region_seam_desc;
+
+typedef struct qaws_region_seam_point
+{
+	qaws_vec2 position;
+	unsigned int kind;                /* QAWS_SEAM_* */
+	unsigned int operand1, path1, curve1;
+	qaws_scalar t1;
+	unsigned int operand2, path2, curve2;
+	qaws_scalar t2;
+} qaws_region_seam_point;
+
+/* The crossing points (at most capacity written; out_points may be NULL to count), their number in *out_count;
+   BUFFER_TOO_SMALL when there are more than capacity. INVALID_ARGUMENT: no path in A (or in B), a path without curves,
+   kinds 0. */
+qaws_status qaws_region_seams_2d(qaws_region_seam_point* out_points, unsigned int* out_count, qaws_region_seam_desc const* desc,
+	unsigned int capacity);
+
+typedef struct qaws_region_shatter qaws_region_shatter;
+
+/* INVALID_ARGUMENT as qaws_region_seams_2d (kinds ignored) */
+qaws_status qaws_region_shatter_create_2d(qaws_region_shatter** out_shatter, qaws_region_seam_desc const* desc);
+void qaws_region_shatter_destroy(qaws_region_shatter* shatter);
+unsigned int qaws_region_shatter_get_count(qaws_region_shatter const* shatter);
+/* piece index: its paths (outer first, then holes) and their count, and 1 inside B, 0 outside, -1 not told; any output
+   may be NULL */
+qaws_status qaws_region_shatter_get(qaws_path_2d const** out_paths, unsigned int* out_path_count, int* out_inside,
+	qaws_region_shatter const* shatter, unsigned int index);
+
 #endif /* QAWS_SHATTER_H */

@@ -8,6 +8,9 @@
  *   shatter2_pieces.png   shatter: a wavy patch by a box (the piece inside
  *                         lifted out), a saddle by a wavy patch, a wavy patch
  *                         by two crossing patches (four pieces pulled apart)
+ *   shatter3_regions.svg  2D: seams of two crossing ellipses and a circle,
+ *                         the ellipses' region shattered by the circle, a
+ *                         disc cut by three open polylines
  */
 
 #include "qaws.h"
@@ -213,6 +216,148 @@ static unsigned int ss_seams(qaws_surface_seam_desc const* d, double** lines, un
 static double const ss_wavy[4][4] = { { 0.05, 0.25, -0.15, 0.0 }, { 0.2, -0.25, 0.3, -0.1 }, { -0.1, 0.3, -0.25, 0.15 }, { 0.0, -0.15, 0.25, 0.05 } };
 static double const ss_bend[4][4] = { { 0.1, -0.2, 0.2, -0.05 }, { -0.15, 0.25, -0.2, 0.1 }, { 0.2, -0.1, 0.25, -0.2 }, { -0.05, 0.15, -0.1, 0.1 } };
 
+/* ---- 2D regions: an SVG of seams and pieces ---- */
+
+/* the paths' curves sampled into an SVG path (nonzero: holes turn the other way), moved by (ox, oy), in the panel at (px, py), scale k */
+static void ss_svg_paths(FILE* f, qaws_path_2d const* p, unsigned int n, double ox, double oy, double px, double py, double k, char const* fill,
+	char const* stroke)
+{
+	unsigned int i, c, j;
+	fprintf(f, "<path fill-rule=\"nonzero\" fill=\"%s\" stroke=\"%s\" stroke-width=\"1.2\" d=\"", fill, stroke);
+	for (i = 0; i < n; i++)
+	{
+		int first = 1;
+		for (c = 0; c < p[i].curve_count; c++)
+		{
+			qaws_range r = qaws_curve_get_parameter_range(p[i].curves[c]);
+			for (j = 0; j <= 64; j++)
+			{
+				qaws_eval_result_2d e;
+				double t = r.min_value + (r.max_value - r.min_value) * j / 64;
+				memset(&e, 0, sizeof e);
+				qaws_curve_evaluate_2d(&e, p[i].curves[c], (qaws_scalar)t, QAWS_EVAL_FLAG_POSITION);
+				fprintf(f, "%s%.2f %.2f ", first ? "M" : "L", px + k * (e.position.x + ox), py - k * (e.position.y + oy));
+				first = 0;
+			}
+		}
+		fprintf(f, "Z ");
+	}
+	fprintf(f, "\"/>\n");
+}
+
+static void ss_regions(void)
+{
+	static char const* const warm[4] = { "#ecaa68", "#e6c07a", "#e0956a", "#f0c890" };
+	static char const* const cool[4] = { "#8cacde", "#9cc8d2", "#a8b4e8", "#82bcc0" };
+	static char const* const pal[8] = { "#8cacde", "#ecaa68", "#8cc88c", "#d68cb4", "#e6d678", "#96c8d2", "#c8a078", "#aa96dc" };
+	qaws_curve *e1 = NULL, *e2 = NULL, *ci = NULL, *disc = NULL, *z1 = NULL, *z2 = NULL, *z3 = NULL;
+	qaws_curve const *l1[1], *l2[1], *lc[1], *ld[1], *lz1[1], *lz2[1], *lz3[1];
+	qaws_path_2d A[2], B, D, Z[3];
+	qaws_region_seam_desc d;
+	qaws_region_seam_point pts[64];
+	qaws_region_shatter* H = NULL;
+	unsigned int n = 0, i;
+	FILE* f = fopen("shots/shatter3_regions.svg", "w");
+	qaws_scalar const zz1[10] = { -1.6, 0.9, -0.5, 0.2, 0.2, 0.7, 0.8, -0.1, 1.6, 0.4 };
+	qaws_scalar const zz2[8] = { -1.5, -0.9, -0.3, -0.2, 0.3, -0.7, 1.5, -0.3 };
+	qaws_scalar const zz3[6] = { 0.1, -1.6, -0.2, 0.0, 0.3, 1.6 };
+	if (!f)
+		return;
+	qaws_curve_create_ellipse_2d(&e1, 0, 0, 1.3, 0.6, 0.35);
+	qaws_curve_create_ellipse_2d(&e2, 0, 0, 0.6, 1.3, 0.35);
+	qaws_curve_create_ellipse_2d(&ci, 0.65, 0.35, 0.8, 0.8, 0);
+	qaws_curve_create_ellipse_2d(&disc, 0, 0, 1.2, 1.2, 0);
+	qaws_curve_create_polyline_2d(&z1, zz1, 5, 0);
+	qaws_curve_create_polyline_2d(&z2, zz2, 4, 0);
+	qaws_curve_create_polyline_2d(&z3, zz3, 3, 0);
+	l1[0] = e1; l2[0] = e2; lc[0] = ci; ld[0] = disc; lz1[0] = z1; lz2[0] = z2; lz3[0] = z3;
+	A[0].curves = l1; A[0].curve_count = 1; A[0].closed = 1;
+	A[1].curves = l2; A[1].curve_count = 1; A[1].closed = 1;
+	B.curves = lc; B.curve_count = 1; B.closed = 1;
+	D.curves = ld; D.curve_count = 1; D.closed = 1;
+	Z[0].curves = lz1; Z[0].curve_count = 1; Z[0].closed = 0;
+	Z[1].curves = lz2; Z[1].curve_count = 1; Z[1].closed = 0;
+	Z[2].curves = lz3; Z[2].curve_count = 1; Z[2].closed = 0;
+	fprintf(f, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1500\" height=\"560\" viewBox=\"0 0 1500 560\" font-family=\"Segoe UI, Helvetica, Arial, sans-serif\">\n");
+	fprintf(f, "<rect width=\"1500\" height=\"560\" fill=\"#fcfcfa\"/>\n");
+	memset(&d, 0, sizeof d);
+	d.a = A; d.a_count = 2; d.a_rule = QAWS_FILL_NON_ZERO;
+	d.b = &B; d.b_count = 1; d.b_rule = QAWS_FILL_NON_ZERO;
+	d.b_is_region = 1;
+	/* seams: the cross's own crossings and its crossings with the circle */
+	d.kinds = QAWS_SEAM_A_B | QAWS_SEAM_A_A;
+	qaws_region_seams_2d(pts, &n, &d, 64);
+	ss_svg_paths(f, A, 2, 0, 0, 250, 300, 150, "#c8cad0", "#555a66");
+	ss_svg_paths(f, &B, 1, 0, 0, 250, 300, 150, "none", "#c87830");
+	for (i = 0; i < n && i < 64; i++)
+		fprintf(f, "<circle cx=\"%.2f\" cy=\"%.2f\" r=\"6\" fill=\"%s\" stroke=\"#ffffff\" stroke-width=\"1.5\"/>\n", 250 + 150 * pts[i].position.x,
+			300 - 150 * pts[i].position.y, pts[i].kind == QAWS_SEAM_A_B ? "#c81e2d" : "#2d5ac8");
+	fprintf(f, "<text x=\"24\" y=\"40\" font-size=\"22\" font-weight=\"600\" fill=\"#1b1f24\">2D seams</text>\n");
+	fprintf(f, "<text x=\"24\" y=\"64\" font-size=\"14\" fill=\"#57606a\">%u points: red where the cross meets the circle, blue where it meets itself</text>\n", n);
+	printf("  2D seams: %u points\n", n);
+	/* shatter: the cross by the circle */
+	qaws_region_shatter_create_2d(&H, &d);
+	n = qaws_region_shatter_get_count(H);
+	{
+		unsigned int a = 0, b = 0;
+		for (i = 0; i < n; i++)
+		{
+			qaws_path_2d const* pp;
+			unsigned int np;
+			int inside;
+			qaws_region_shatter_get(&pp, &np, &inside, H, i);
+			ss_svg_paths(f, pp, np, 0, 0, 750, 300, 150, inside == 1 ? warm[a++ % 4] : cool[b++ % 4], "#ffffff");
+		}
+	}
+	fprintf(f, "<text x=\"524\" y=\"40\" font-size=\"22\" font-weight=\"600\" fill=\"#1b1f24\">2D shatter</text>\n");
+	fprintf(f, "<text x=\"524\" y=\"64\" font-size=\"14\" fill=\"#57606a\">the cross by the circle: %u pieces, warm inside it, cool outside</text>\n", n);
+	printf("  2D shatter, the cross by the circle: %u pieces\n", n);
+	qaws_region_shatter_destroy(H);
+	H = NULL;
+	/* shatter by open curves: a disc cut by three polylines, the pieces pulled apart */
+	d.a = &D; d.a_count = 1;
+	d.b = Z; d.b_count = 3;
+	d.b_is_region = 0;
+	qaws_region_shatter_create_2d(&H, &d);
+	n = qaws_region_shatter_get_count(H);
+	for (i = 0; i < n; i++)
+	{
+		qaws_path_2d const* pp;
+		unsigned int np, c, j, m = 0;
+		double gx = 0, gy = 0, l;
+		qaws_region_shatter_get(&pp, &np, NULL, H, i);
+		for (c = 0; c < pp[0].curve_count; c++)
+			for (j = 0; j < 8; j++)
+			{
+				qaws_eval_result_2d e;
+				qaws_range r = qaws_curve_get_parameter_range(pp[0].curves[c]);
+				memset(&e, 0, sizeof e);
+				qaws_curve_evaluate_2d(&e, pp[0].curves[c], (qaws_scalar)(r.min_value + (r.max_value - r.min_value) * j / 8), QAWS_EVAL_FLAG_POSITION);
+				gx += e.position.x;
+				gy += e.position.y;
+				m++;
+			}
+		gx /= m ? m : 1;
+		gy /= m ? m : 1;
+		l = sqrt(gx * gx + gy * gy);
+		ss_svg_paths(f, pp, np, l > 0 ? 0.18 * gx / l : 0, l > 0 ? 0.18 * gy / l : 0, 1250, 300, 140, pal[i % 8], "#ffffff");
+	}
+	fprintf(f, "<text x=\"1024\" y=\"40\" font-size=\"22\" font-weight=\"600\" fill=\"#1b1f24\">2D shatter by open curves</text>\n");
+	fprintf(f, "<text x=\"1024\" y=\"64\" font-size=\"14\" fill=\"#57606a\">a disc cut by three polylines: %u pieces, pulled apart</text>\n", n);
+	printf("  2D shatter, a disc by open curves: %u pieces\n", n);
+	qaws_region_shatter_destroy(H);
+	fprintf(f, "</svg>\n");
+	fclose(f);
+	printf("shatter3_regions.svg\n");
+	qaws_curve_destroy(e1);
+	qaws_curve_destroy(e2);
+	qaws_curve_destroy(ci);
+	qaws_curve_destroy(disc);
+	qaws_curve_destroy(z1);
+	qaws_curve_destroy(z2);
+	qaws_curve_destroy(z3);
+}
+
 int main(void)
 {
 	static double const grey[3] = { 200, 202, 208 }, warm[3] = { 236, 170, 104 }, blue[3] = { 140, 172, 222 }, green[3] = { 140, 200, 140 };
@@ -383,5 +528,6 @@ int main(void)
 	qaws_surface_destroy(plane);
 	for (i = 0; i < 6; i++)
 		qaws_surface_destroy(box[i]);
+	ss_regions();
 	return 0;
 }

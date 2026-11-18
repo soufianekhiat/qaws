@@ -16,6 +16,14 @@ All notable changes to Qaws are documented here.
   surface's seams cut at its trim. Shatter: every surface of A cut along its
   seams with B into trimmed pieces over its base, each told inside or
   outside B when B bounds a solid. Test 85.
+- `qaws_region_seams_2d`, `qaws_region_shatter_*` (`qaws_shatter.h`): the same
+  for 2D regions of curves. Seams: where A's curves cross B's (or an
+  operand's cross each other), refined onto both curves, each with its two
+  parameters. Shatter: A's region cut along B's curves (a region, or open
+  curves with no inside) into pieces whose paths are exact pieces of the
+  input curves (`qaws_curve_extract`), A's own inner crossings merged away,
+  each piece told inside or outside B by winding numbers carried across the
+  arranged curves. Test 85.
 - `qaws_set_kept_memory_limit`, `qaws_release_kept_memory`: blocks of the C
   allocator from 4 KB to 1 MB that the library frees are kept (16 MB in all by
   default) and handed to the next requests of their size class, so repeated

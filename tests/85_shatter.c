@@ -10,6 +10,9 @@
  *   - shatter: a square sheet by a cube (six bilinear faces, a solid): two
  *     pieces, the one inside the cube a quarter of the sheet; the saddle by
  *     the plane: three pieces, not told inside or outside;
+ *   - 2D regions of curves: two circles' crossings, a bowtie's own crossing,
+ *     a short buffer; a circle shattered by a circle (the lens inside, the
+ *     crescent outside, areas exact), by an open cut, a ring by a line;
  *   - refusals.
  */
 
@@ -269,6 +272,162 @@ static void test_shatter(void)
 		qaws_surface_destroy(cube[i]);
 }
 
+/* ---- 2D regions of curves ---- */
+
+static qaws_path_2d sht_path(qaws_curve const** c, unsigned int n, int closed)
+{
+	qaws_path_2d p;
+	p.curves = c;
+	p.curve_count = n;
+	p.closed = closed;
+	return p;
+}
+
+static void test_regions(void)
+{
+	qaws_curve *c0 = NULL, *c1 = NULL, *bow = NULL, *cut = NULL, *outer = NULL, *inner = NULL, *line = NULL;
+	qaws_curve const *l0[1], *l1[1], *lb[1], *lc[1], *lo[1], *li[1], *ll[1];
+	qaws_path_2d A, B, Bow, Cut, Ring[2], Line;
+	qaws_region_seam_desc d;
+	qaws_region_seam_point pts[16];
+	qaws_region_shatter* H = NULL;
+	unsigned int n = 0, i, k;
+	double lens = 2 * acos(0.5) - 0.5 * sqrt(3.0), area_in = 0, area_out = 0, total = 0;
+	int bad = 0;
+	char msg[256];
+	qaws_scalar const bow_pts[8] = { -1, -1, 1, 1, 1, -1, -1, 1 };
+	qaws_scalar const cut_pts[8] = { -1.5, -0.3, -0.2, 0.25, 0.4, -0.2, 1.5, 0.35 };
+	qaws_scalar const line_pts[4] = { 0.05, -3, -0.05, 3 };
+	qaws_curve_create_ellipse_2d(&c0, 0, 0, 1, 1, 0);
+	qaws_curve_create_ellipse_2d(&c1, 1, 0, 1, 1, 0);
+	qaws_curve_create_polyline_2d(&bow, bow_pts, 4, 1);
+	qaws_curve_create_polyline_2d(&cut, cut_pts, 4, 0);
+	qaws_curve_create_ellipse_2d(&outer, 0, 0, 2, 2, 0);
+	qaws_curve_create_ellipse_2d(&inner, 0, 0, 1, 1, 0);
+	qaws_curve_create_polyline_2d(&line, line_pts, 2, 0);
+	l0[0] = c0; l1[0] = c1; lb[0] = bow; lc[0] = cut; lo[0] = outer; ll[0] = line;
+	{
+		qaws_curve* rev = NULL;
+		qaws_curve_reverse(&rev, inner);
+		qaws_curve_destroy(inner);
+		inner = rev;
+		li[0] = inner;
+	}
+	A = sht_path(l0, 1, 1);
+	B = sht_path(l1, 1, 1);
+	Bow = sht_path(lb, 1, 1);
+	Cut = sht_path(lc, 1, 0);
+	Ring[0] = sht_path(lo, 1, 1);
+	Ring[1] = sht_path(li, 1, 1);
+	Line = sht_path(ll, 1, 0);
+	/* two unit circles a radius apart: crossings at (1/2, +-sqrt(3)/2) */
+	memset(&d, 0, sizeof d);
+	d.a = &A; d.a_count = 1; d.a_rule = QAWS_FILL_NON_ZERO;
+	d.b = &B; d.b_count = 1; d.b_rule = QAWS_FILL_NON_ZERO;
+	d.b_is_region = 1;
+	d.kinds = QAWS_SEAM_A_B;
+	TEST_ASSERT_STATUS(qaws_region_seams_2d(pts, &n, &d, 16));
+	for (i = 0; i < n; i++)
+		bad += fabs((double)pts[i].position.x - 0.5) > SHT_TOL || fabs(fabs((double)pts[i].position.y) - sqrt(3.0) / 2) > SHT_TOL
+			|| pts[i].kind != QAWS_SEAM_A_B;
+	sprintf(msg, "2D seams of two circles: %u points (2), %d off", n, bad);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 2 && !bad, msg);
+	/* a bowtie crosses itself once, at the origin */
+	d.a = &Bow;
+	d.b_count = 0;
+	d.kinds = QAWS_SEAM_A_A;
+	n = 0;
+	TEST_ASSERT_STATUS(qaws_region_seams_2d(pts, &n, &d, 16));
+	sprintf(msg, "2D seams of a bowtie: %u points (1) at (%.3g, %.3g)", n, n ? (double)pts[0].position.x : 9.0, n ? (double)pts[0].position.y : 9.0);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 1 && fabs((double)pts[0].position.x) < SHT_TOL && fabs((double)pts[0].position.y) < SHT_TOL && pts[0].kind == QAWS_SEAM_A_A, msg);
+	/* buffer too small */
+	d.a = &A; d.b = &B; d.b_count = 1; d.kinds = QAWS_SEAM_A_B;
+	TEST_ASSERT(qaws_region_seams_2d(pts, &n, &d, 1) == QAWS_STATUS_BUFFER_TOO_SMALL && n == 2, "2D seams: a short buffer told");
+	/* the first circle shattered by the second: the lens inside, the crescent outside, areas exact */
+	TEST_ASSERT_STATUS(qaws_region_shatter_create_2d(&H, &d));
+	n = qaws_region_shatter_get_count(H);
+	bad = 0;
+	for (i = 0; i < n; i++)
+	{
+		qaws_path_2d const* pp = NULL;
+		unsigned int np = 0;
+		int inside = -2;
+		qaws_scalar a = 0;
+		qaws_region_shatter_get(&pp, &np, &inside, H, i);
+		qaws_region_compute_area_2d(&a, pp, np);
+		if (inside == 1)
+			area_in += (double)a;
+		else if (inside == 0)
+			area_out += (double)a;
+		else
+			bad++;
+		for (k = 0; k < np; k++)
+			bad += !pp[k].closed || !pp[k].curve_count;
+	}
+	sprintf(msg, "2D shatter of a circle by a circle: %u pieces (2), lens %.12f (%.12f), crescent %.12f (%.12f)", n, area_in, lens, area_out,
+		3.14159265358979323846 - lens);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 2 && !bad && fabs(area_in - lens) < 100 * SHT_TOL && fabs(area_out - (3.14159265358979323846 - lens)) < 100 * SHT_TOL, msg);
+	qaws_region_shatter_destroy(H);
+	/* a circle by an open polyline (no inside): two pieces, the circle's area */
+	d.b = &Cut;
+	d.b_is_region = 0;
+	H = NULL;
+	TEST_ASSERT_STATUS(qaws_region_shatter_create_2d(&H, &d));
+	n = qaws_region_shatter_get_count(H);
+	bad = 0;
+	total = 0;
+	for (i = 0; i < n; i++)
+	{
+		qaws_path_2d const* pp = NULL;
+		unsigned int np = 0;
+		int inside = 0;
+		qaws_scalar a = 0;
+		qaws_region_shatter_get(&pp, &np, &inside, H, i);
+		qaws_region_compute_area_2d(&a, pp, np);
+		total += (double)a;
+		bad += inside != -1;
+	}
+	sprintf(msg, "2D shatter of a circle by an open cut: %u pieces (2), area %.12f (pi)", n, total);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 2 && !bad && fabs(total - 3.14159265358979323846) < 100 * SHT_TOL, msg);
+	qaws_region_shatter_destroy(H);
+	/* a ring (a hole: a clockwise inner circle) cut by a line: two half rings, the ring's area */
+	d.a = Ring;
+	d.a_count = 2;
+	d.b = &Line;
+	H = NULL;
+	TEST_ASSERT_STATUS(qaws_region_shatter_create_2d(&H, &d));
+	n = qaws_region_shatter_get_count(H);
+	total = 0;
+	for (i = 0; i < n; i++)
+	{
+		qaws_path_2d const* pp = NULL;
+		unsigned int np = 0;
+		qaws_scalar a = 0;
+		qaws_region_shatter_get(&pp, &np, NULL, H, i);
+		qaws_region_compute_area_2d(&a, pp, np);
+		total += (double)a;
+	}
+	sprintf(msg, "2D shatter of a ring by a line: %u pieces (2), area %.12f (3 pi)", n, total);
+	printf("  %s\n", msg);
+	TEST_ASSERT(n == 2 && fabs(total - 3 * 3.14159265358979323846) < 100 * SHT_TOL, msg);
+	qaws_region_shatter_destroy(H);
+	/* refusals */
+	d.b_count = 0;
+	H = (qaws_region_shatter*)1;
+	TEST_ASSERT(qaws_region_shatter_create_2d(&H, &d) == QAWS_STATUS_INVALID_ARGUMENT && H == NULL, "2D shatter: no B refused");
+	qaws_curve_destroy(c0);
+	qaws_curve_destroy(c1);
+	qaws_curve_destroy(bow);
+	qaws_curve_destroy(cut);
+	qaws_curve_destroy(outer);
+	qaws_curve_destroy(inner);
+	qaws_curve_destroy(line);
+}
+
 int test_85_shatter_main(void)
 {
 	g_pass = 0;
@@ -276,6 +435,7 @@ int test_85_shatter_main(void)
 	printf("Test 85: seams and shatter of curved surfaces\n");
 	test_seams();
 	test_shatter();
+	test_regions();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

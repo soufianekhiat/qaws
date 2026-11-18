@@ -8,6 +8,8 @@
 #include "internal/qaws_internal_memory.h"
 #include "internal/qaws_internal_broadphase.h"
 #include "internal/qaws_internal_surface.h"
+#include "internal/qaws_internal_flatten.h"
+#include "qaws_operations.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -732,6 +734,12 @@ typedef struct sh_arr
 	double* loop_area;              /* signed */
 	unsigned int nloop;
 	unsigned int* hole_of;          /* per cycle: the face it is a hole of (negative cycles), else SH_NONE */
+	/* sources (sh_arr_add_from): per segment its curve and parameters at its ends; per cycle step the curve and its
+	   parameters where the step starts and ends */
+	unsigned int* sown;
+	double* sst;
+	unsigned int* loop_c;
+	double* loop_t;
 } sh_arr;
 
 static void sh_arr_free(sh_arr* A)
@@ -742,6 +750,10 @@ static void sh_arr_free(sh_arr* A)
 	qaws_internal_free(A->loop_v);
 	qaws_internal_free(A->loop_area);
 	qaws_internal_free(A->hole_of);
+	qaws_internal_free(A->sown);
+	qaws_internal_free(A->sst);
+	qaws_internal_free(A->loop_c);
+	qaws_internal_free(A->loop_t);
 	memset(A, 0, sizeof *A);
 }
 
@@ -761,6 +773,30 @@ static int sh_arr_add(sh_arr* A, double x0, double y0, double x1, double y1)
 	A->seg[4 * (size_t)A->ns] = x0; A->seg[4 * (size_t)A->ns + 1] = y0;
 	A->seg[4 * (size_t)A->ns + 2] = x1; A->seg[4 * (size_t)A->ns + 3] = y1;
 	A->ns++;
+	return 1;
+}
+
+/* a segment of curve owner from parameter t0 to t1 */
+static int sh_arr_add_from(sh_arr* A, double x0, double y0, double x1, double y1, unsigned int owner, double t0, double t1)
+{
+	unsigned int n = A->ns, cap = A->caps;
+	if (!sh_arr_add(A, x0, y0, x1, y1))
+		return 0;
+	if (A->ns == n)
+		return 1;
+	if (!A->sown || A->caps != cap || n == 0)
+	{
+		unsigned int* o2 = (unsigned int*)qaws_internal_realloc(A->sown, qaws_internal_mul2(sizeof(unsigned int), (size_t)A->caps + 1));
+		double* t2 = o2 ? (double*)qaws_internal_realloc(A->sst, qaws_internal_mul3(sizeof(double), 2, (size_t)A->caps + 1)) : NULL;
+		if (o2)
+			A->sown = o2;
+		if (!t2)
+			return 0;
+		A->sst = t2;
+	}
+	A->sown[n] = owner;
+	A->sst[2 * (size_t)n] = t0;
+	A->sst[2 * (size_t)n + 1] = t1;
 	return 1;
 }
 
@@ -846,7 +882,24 @@ typedef struct sh_out_edge
 {
 	unsigned int from, to;
 	double angle;
+	unsigned int edge;              /* its edge, whose first vertex it leaves when fwd */
+	int fwd;
 } sh_out_edge;
+
+/* an edge: its vertices (key: lower << 32 | higher), the segment it lies on and that segment's parameters at its lower
+   and higher vertex */
+typedef struct sh_edge
+{
+	unsigned long long key;
+	unsigned int seg;
+	double sa, sb;
+} sh_edge;
+
+static int sh_cmp_edge(void const* p, void const* q)
+{
+	sh_edge const *a = (sh_edge const*)p, *b = (sh_edge const*)q;
+	return a->key < b->key ? -1 : a->key > b->key ? 1 : a->seg < b->seg ? -1 : a->seg > b->seg;
+}
 
 static int sh_cmp_out(void const* p, void const* q)
 {
@@ -885,7 +938,7 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 	qaws_bp_box* box = NULL;
 	sh_pt* pt = NULL;
 	unsigned int *par = NULL, *pid = NULL, *deg = NULL, *nxt = NULL, *first = NULL, i, j, k, npt, ne = 0, nh;
-	unsigned long long* ed = NULL;
+	sh_edge* ed = NULL;
 	sh_out_edge* he = NULL;
 	double* cuts = NULL;
 	unsigned char* seen = NULL;
@@ -959,7 +1012,7 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 		pid[i] = pid[r];
 	}
 	A->vx = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)A->nv + 1));
-	ed = (unsigned long long*)qaws_internal_malloc(sizeof(unsigned long long) * ((size_t)npt + 1));
+	ed = (sh_edge*)qaws_internal_malloc(qaws_internal_mul2(sizeof(sh_edge), (size_t)npt + 1));
 	if (!A->vx || !ed)
 		goto done;
 	for (i = 0; i < npt; i++)
@@ -972,12 +1025,17 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 		if (J.cut[2 * (size_t)i] == J.cut[2 * (size_t)i + 2])
 		{
 			unsigned long long a = pid[i], b = pid[i + 1];
-			if (a != b)
-				ed[ne++] = a < b ? (a << 32 | b) : (b << 32 | a);
+			double ta = J.cut[2 * (size_t)i + 1], tb = J.cut[2 * (size_t)i + 3];
+			if (a == b)
+				continue;
+			ed[ne].key = a < b ? (a << 32 | b) : (b << 32 | a);
+			ed[ne].seg = (unsigned int)J.cut[2 * (size_t)i];
+			ed[ne].sa = a < b ? ta : tb;
+			ed[ne++].sb = a < b ? tb : ta;
 		}
-	qsort(ed, ne, sizeof *ed, sh_cmp_u64);
+	qsort(ed, ne, sizeof *ed, sh_cmp_edge);
 	for (i = 0, k = 0; i < ne; i++)
-		if (!k || ed[k - 1] != ed[i])
+		if (!k || ed[k - 1].key != ed[i].key)
 			ed[k++] = ed[i];
 	ne = k;
 	/* (edges with a free end pruned, again and again) */
@@ -987,18 +1045,18 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 		goto done;
 	for (i = 0; i < ne; i++)
 	{
-		deg[ed[i] >> 32]++;
-		deg[ed[i] & 0xFFFFFFFFu]++;
+		deg[ed[i].key >> 32]++;
+		deg[ed[i].key & 0xFFFFFFFFu]++;
 	}
 	for (;;)
 	{
 		unsigned int pruned = 0;
 		for (i = 0; i < ne; i++)
-			if (!seen[i] && (deg[ed[i] >> 32] < 2 || deg[ed[i] & 0xFFFFFFFFu] < 2))
+			if (!seen[i] && (deg[ed[i].key >> 32] < 2 || deg[ed[i].key & 0xFFFFFFFFu] < 2))
 			{
 				seen[i] = 1;
-				deg[ed[i] >> 32]--;
-				deg[ed[i] & 0xFFFFFFFFu]--;
+				deg[ed[i].key >> 32]--;
+				deg[ed[i].key & 0xFFFFFFFFu]--;
 				pruned++;
 			}
 		if (!pruned)
@@ -1011,10 +1069,10 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 	for (i = 0, nh = 0; i < ne; i++)
 		if (!seen[i])
 		{
-			unsigned int a = (unsigned int)(ed[i] >> 32), b = (unsigned int)(ed[i] & 0xFFFFFFFFu);
-			he[nh].from = a; he[nh].to = b;
+			unsigned int a = (unsigned int)(ed[i].key >> 32), b = (unsigned int)(ed[i].key & 0xFFFFFFFFu);
+			he[nh].from = a; he[nh].to = b; he[nh].edge = i; he[nh].fwd = 1;
 			he[nh++].angle = atan2(A->vx[2 * (size_t)b + 1] - A->vx[2 * (size_t)a + 1], A->vx[2 * (size_t)b] - A->vx[2 * (size_t)a]);
-			he[nh].from = b; he[nh].to = a;
+			he[nh].from = b; he[nh].to = a; he[nh].edge = i; he[nh].fwd = 0;
 			he[nh++].angle = atan2(A->vx[2 * (size_t)a + 1] - A->vx[2 * (size_t)b + 1], A->vx[2 * (size_t)a] - A->vx[2 * (size_t)b]);
 		}
 	qsort(he, nh, sizeof *he, sh_cmp_out);
@@ -1026,7 +1084,12 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 	A->loop_v = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nh + 1));
 	A->loop_area = (double*)qaws_internal_malloc(sizeof(double) * ((size_t)nh + 1));
 	A->hole_of = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nh + 1));
-	if (!first || !nxt || !seen || !A->loop_first || !A->loop_v || !A->loop_area || !A->hole_of)
+	if (A->sown)
+	{
+		A->loop_c = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nh + 1));
+		A->loop_t = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)nh + 1));
+	}
+	if (!first || !nxt || !seen || !A->loop_first || !A->loop_v || !A->loop_area || !A->hole_of || (A->sown && (!A->loop_c || !A->loop_t)))
 		goto done;
 	for (i = 0, j = 0; i <= A->nv; i++)
 	{
@@ -1055,6 +1118,15 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 		{
 			unsigned int a = he[h].from, b = he[h].to;
 			seen[h] = 1;
+			if (A->sown)
+			{
+				sh_edge const* E = &ed[he[h].edge];
+				double const* tt = A->sst + 2 * (size_t)E->seg;
+				double s0 = he[h].fwd ? E->sa : E->sb, s1 = he[h].fwd ? E->sb : E->sa;
+				A->loop_c[k] = A->sown[E->seg];
+				A->loop_t[2 * (size_t)k] = tt[0] + s0 * (tt[1] - tt[0]);
+				A->loop_t[2 * (size_t)k + 1] = tt[0] + s1 * (tt[1] - tt[0]);
+			}
 			A->loop_v[k++] = a;
 			area += A->vx[2 * (size_t)a] * A->vx[2 * (size_t)b + 1] - A->vx[2 * (size_t)b] * A->vx[2 * (size_t)a + 1];
 			h = nxt[h];
@@ -1113,46 +1185,73 @@ done:
 	return st;
 }
 
-/* a point inside face f and outside its holes: an edge's middle moved left of it, the first edge that gives one */
+/* the distance from (x, y) to the edges of cycle c */
+static double sh_cycle_dist(sh_arr const* A, unsigned int c, double x, double y)
+{
+	unsigned int f = A->loop_first[c], n = A->loop_first[c + 1] - f, q;
+	double best = HUGE_VAL;
+	for (q = 0; q < n; q++)
+	{
+		double const *a = A->vx + 2 * (size_t)A->loop_v[f + q], *b = A->vx + 2 * (size_t)A->loop_v[f + (q + 1) % n];
+		double ex = b[0] - a[0], ey = b[1] - a[1], l2 = ex * ex + ey * ey, t = l2 > 0 ? ((x - a[0]) * ex + (y - a[1]) * ey) / l2 : 0, dx, dy;
+		t = t < 0 ? 0 : t > 1 ? 1 : t;
+		dx = a[0] + t * ex - x;
+		dy = a[1] + t * ey - y;
+		best = fmin(best, dx * dx + dy * dy);
+	}
+	return sqrt(best);
+}
+
+/* a point inside face f and outside its holes, as far from their edges as a few candidates give (edges' middles moved
+   left of them by a quarter and a sixteenth of their length, over up to 64 edges): the curves the chords stand for
+   stay within the flatness of the chords, so a point farther than that is on the same side of them */
 static int sh_arr_inner(sh_arr const* A, unsigned int f, double eps, double* out)
 {
-	unsigned int q, n = A->loop_first[f + 1] - A->loop_first[f], h, m;
+	unsigned int n = A->loop_first[f + 1] - A->loop_first[f], h, m, q, step = n > 64 ? n / 64 : 1;
 	double* poly = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)A->loop_first[A->nloop] + 1));
+	double best = -1;
 	int found = 0;
 	if (!poly)
 		return 0;
-	for (q = 0; q < n && !found; q++)
+	for (q = 0; q < n; q += step)
 	{
-		unsigned int a = A->loop_v[A->loop_first[f] + q], b = A->loop_v[A->loop_first[f] + (q + 1) % n];
+		unsigned int a = A->loop_v[A->loop_first[f] + q], b = A->loop_v[A->loop_first[f] + (q + 1) % n], z;
 		double ex = A->vx[2 * (size_t)b] - A->vx[2 * (size_t)a], ey = A->vx[2 * (size_t)b + 1] - A->vx[2 * (size_t)a + 1], l = sqrt(ex * ex + ey * ey);
-		double px, py;
-		int ok;
 		if (!(l > 0))
 			continue;
-		px = 0.5 * (A->vx[2 * (size_t)a] + A->vx[2 * (size_t)b]) - ey / l * fmin(eps, 0.25 * l);
-		py = 0.5 * (A->vx[2 * (size_t)a + 1] + A->vx[2 * (size_t)b + 1]) + ex / l * fmin(eps, 0.25 * l);
-		for (m = 0; m < n; m++)
+		for (z = 0; z < 3; z++)
 		{
-			poly[2 * m] = A->vx[2 * (size_t)A->loop_v[A->loop_first[f] + m]];
-			poly[2 * m + 1] = A->vx[2 * (size_t)A->loop_v[A->loop_first[f] + m] + 1];
-		}
-		ok = sh_wind(poly, n, px, py) != 0;
-		for (h = 0; ok && h < A->nloop; h++)
-			if (A->hole_of[h] == f)
+			double off = z == 0 ? 0.25 * l : z == 1 ? 0.0625 * l : fmin(eps, 0.25 * l), px, py, clear;
+			int ok;
+			px = 0.5 * (A->vx[2 * (size_t)a] + A->vx[2 * (size_t)b]) - ey / l * off;
+			py = 0.5 * (A->vx[2 * (size_t)a + 1] + A->vx[2 * (size_t)b + 1]) + ex / l * off;
+			for (m = 0; m < n; m++)
 			{
-				unsigned int nh2 = A->loop_first[h + 1] - A->loop_first[h];
-				for (m = 0; m < nh2; m++)
-				{
-					poly[2 * m] = A->vx[2 * (size_t)A->loop_v[A->loop_first[h] + m]];
-					poly[2 * m + 1] = A->vx[2 * (size_t)A->loop_v[A->loop_first[h] + m] + 1];
-				}
-				ok = sh_wind(poly, nh2, px, py) == 0;
+				poly[2 * m] = A->vx[2 * (size_t)A->loop_v[A->loop_first[f] + m]];
+				poly[2 * m + 1] = A->vx[2 * (size_t)A->loop_v[A->loop_first[f] + m] + 1];
 			}
-		if (ok)
-		{
-			out[0] = px;
-			out[1] = py;
-			found = 1;
+			ok = sh_wind(poly, n, px, py) != 0;
+			clear = ok ? sh_cycle_dist(A, f, px, py) : 0;
+			for (h = 0; ok && h < A->nloop; h++)
+				if (A->hole_of[h] == f)
+				{
+					unsigned int nh2 = A->loop_first[h + 1] - A->loop_first[h];
+					for (m = 0; m < nh2; m++)
+					{
+						poly[2 * m] = A->vx[2 * (size_t)A->loop_v[A->loop_first[h] + m]];
+						poly[2 * m + 1] = A->vx[2 * (size_t)A->loop_v[A->loop_first[h] + m] + 1];
+					}
+					ok = sh_wind(poly, nh2, px, py) == 0;
+					if (ok)
+						clear = fmin(clear, sh_cycle_dist(A, h, px, py));
+				}
+			if (ok && clear > best)
+			{
+				best = clear;
+				out[0] = px;
+				out[1] = py;
+				found = 1;
+			}
 		}
 	}
 	qaws_internal_free(poly);
@@ -1509,6 +1608,703 @@ qaws_status qaws_surface_shatter_get(qaws_surface const** out_piece, unsigned in
 		*out_piece = shatter->piece[index];
 	if (out_surface)
 		*out_surface = shatter->from[index];
+	if (out_inside)
+		*out_inside = shatter->inside[index];
+	return QAWS_STATUS_OK;
+}
+
+/* ---- 2D regions of curves --------------------------------------------------------------------------------------------- */
+
+typedef struct sh_curve2
+{
+	qaws_curve const* c;
+	unsigned int operand, path, index;   /* operand 0: A, 1: B */
+	unsigned int next;                    /* the curve after it in its path (SH_NONE: none, an open path's last) */
+	double t0, t1;                        /* its parameter range */
+} sh_curve2;
+
+typedef struct sh_scene2
+{
+	sh_curve2* cv;
+	unsigned int nc;
+	qaws_flat_seg* seg;
+	unsigned int ns, caps;
+	double extent, tol;
+} sh_scene2;
+
+static void sh_scene2_free(sh_scene2* S)
+{
+	qaws_internal_free(S->cv);
+	qaws_internal_free(S->seg);
+	memset(S, 0, sizeof *S);
+}
+
+static int sh_desc2_ok(qaws_region_seam_desc const* d, int need_b)
+{
+	unsigned int o, i;
+	if (!d || !d->a_count || !d->a || (need_b && !d->b_count) || (d->b_count && !d->b))
+		return 0;
+	for (o = 0; o < 2; o++)
+		for (i = 0; i < (o ? d->b_count : d->a_count); i++)
+		{
+			qaws_path_2d const* p = o ? &d->b[i] : &d->a[i];
+			unsigned int k;
+			if (!p->curve_count || !p->curves)
+				return 0;
+			for (k = 0; k < p->curve_count; k++)
+				if (!p->curves[k])
+					return 0;
+		}
+	return 1;
+}
+
+static qaws_status sh_scene2_build(sh_scene2* S, qaws_region_seam_desc const* d)
+{
+	unsigned int o, i, k, n = 0;
+	double lo[2] = { HUGE_VAL, HUGE_VAL }, hi[2] = { -HUGE_VAL, -HUGE_VAL }, flat;
+	qaws_status st;
+	memset(S, 0, sizeof *S);
+	for (o = 0; o < 2; o++)
+		for (i = 0; i < (o ? d->b_count : d->a_count); i++)
+			n += (o ? d->b[i] : d->a[i]).curve_count;
+	S->cv = (sh_curve2*)qaws_internal_zalloc((size_t)n + 1, sizeof(sh_curve2));
+	if (!S->cv)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	for (o = 0; o < 2; o++)
+		for (i = 0; i < (o ? d->b_count : d->a_count); i++)
+		{
+			qaws_path_2d const* p = o ? &d->b[i] : &d->a[i];
+			qaws_vec2 mn, mx;
+			unsigned int first = S->nc;
+			if (qaws_path_compute_bounds_2d(&mn, &mx, p) == QAWS_STATUS_OK)
+			{
+				lo[0] = fmin(lo[0], (double)mn.x); lo[1] = fmin(lo[1], (double)mn.y);
+				hi[0] = fmax(hi[0], (double)mx.x); hi[1] = fmax(hi[1], (double)mx.y);
+			}
+			for (k = 0; k < p->curve_count; k++)
+			{
+				sh_curve2* c = &S->cv[S->nc++];
+				qaws_range r = qaws_curve_get_parameter_range(p->curves[k]);
+				c->c = p->curves[k];
+				c->operand = o;
+				c->path = i;
+				c->index = k;
+				c->t0 = (double)r.min_value;
+				c->t1 = (double)r.max_value;
+				c->next = k + 1 < p->curve_count ? S->nc : p->closed ? first : SH_NONE;
+			}
+		}
+	S->extent = fmax(hi[0] - lo[0], hi[1] - lo[1]);
+	if (!(S->extent > 0))
+		S->extent = 1;
+	S->tol = d->tolerance > 0 ? (double)d->tolerance : (QAWS_SCALAR_IS_FLOAT ? 1e-6 : 1e-12) * S->extent;
+	flat = d->flatness > 0 ? (double)d->flatness : 1e-3 * S->extent;
+	for (k = 0; k < S->nc; k++)
+	{
+		st = qaws_internal_flatten_curve(&S->seg, &S->ns, &S->caps, S->cv[k].c, 2, (qaws_scalar)flat, k);
+		if (st != QAWS_STATUS_OK)
+			return st;
+	}
+	return QAWS_STATUS_OK;
+}
+
+/* the parameters where curves a and b meet, from (t1, t2), by Newton's method on Ca(t1) = Cb(t2), kept in their
+   ranges; 1 when the gap ends under tol */
+static int sh_meet2(sh_curve2 const* a, sh_curve2 const* b, double* t1, double* t2, double tol)
+{
+	int it;
+	for (it = 0; it < 40; it++)
+	{
+		qaws_scalar p[3], dp[3], q[3], dq[3];
+		double fx, fy, det, s1, s2;
+		if (qaws_internal_curve_point(p, dp, a->c, 2, (qaws_scalar)*t1, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1) != QAWS_STATUS_OK
+			|| qaws_internal_curve_point(q, dq, b->c, 2, (qaws_scalar)*t2, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1) != QAWS_STATUS_OK)
+			return 0;
+		fx = (double)p[0] - (double)q[0];
+		fy = (double)p[1] - (double)q[1];
+		if (sqrt(fx * fx + fy * fy) <= tol)
+			return 1;
+		/* [dp, -dq] (s1, s2) = -F */
+		det = (double)dp[0] * -(double)dq[1] + (double)dq[0] * (double)dp[1];
+		if (!(fabs(det) > 0))
+			return 0;
+		s1 = (-fx * -(double)dq[1] + (double)dq[0] * -fy) / det;
+		s2 = ((double)dp[0] * -fy - (double)dp[1] * -fx) / det;
+		*t1 = sh_clamp(*t1 + s1, a->t0, a->t1);
+		*t2 = sh_clamp(*t2 + s2, b->t0, b->t1);
+	}
+	return 0;
+}
+
+/* t at an end of curve c's range */
+static int sh_at_end(sh_curve2 const* c, double t)
+{
+	double e = 1e-9 * (c->t1 - c->t0);
+	return t <= c->t0 + e || t >= c->t1 - e;
+}
+
+/* ---- 2D seams ---- */
+
+typedef struct sh_x2_job
+{
+	sh_scene2 const* S;
+	unsigned int kinds;
+	qaws_region_seam_point* pt;
+	unsigned int n, cap;
+	int oom;
+} sh_x2_job;
+
+static unsigned int sh_kind2(sh_curve2 const* a, sh_curve2 const* b)
+{
+	return a->operand != b->operand ? QAWS_SEAM_A_B : a->operand ? QAWS_SEAM_B_B : QAWS_SEAM_A_A;
+}
+
+static int sh_x2_accept(void* user, unsigned int i, unsigned int j)
+{
+	sh_x2_job const* J = (sh_x2_job const*)user;
+	qaws_flat_seg const *a = &J->S->seg[i], *b = &J->S->seg[j];
+	if (!(sh_kind2(&J->S->cv[a->owner], &J->S->cv[b->owner]) & J->kinds))
+		return 0;
+	/* (a curve's own neighbouring chords meet at their shared end) */
+	return a->owner != b->owner || (a->index + 1 != b->index && b->index + 1 != a->index);
+}
+
+static qaws_status sh_x2_visit(void* user, unsigned int i, unsigned int j)
+{
+	sh_x2_job* J = (sh_x2_job*)user;
+	sh_scene2 const* S = J->S;
+	qaws_flat_seg const *a = &S->seg[i], *b = &S->seg[j];
+	sh_curve2 const *ca = &S->cv[a->owner], *cb = &S->cv[b->owner];
+	double rx = (double)a->p1[0] - (double)a->p0[0], ry = (double)a->p1[1] - (double)a->p0[1];
+	double sx = (double)b->p1[0] - (double)b->p0[0], sy = (double)b->p1[1] - (double)b->p0[1];
+	double qx = (double)b->p0[0] - (double)a->p0[0], qy = (double)b->p0[1] - (double)a->p0[1], den = rx * sy - ry * sx, s, u, t1, t2;
+	qaws_scalar p[3], dp[3];
+	qaws_region_seam_point* P;
+	if (den == 0)
+		return QAWS_STATUS_OK;
+	s = (qx * sy - qy * sx) / den;
+	u = (qx * ry - qy * rx) / den;
+	/* (a little past the chords' ends: the curve may cross just beyond its chord) */
+	if (s < -1e-6 || s > 1 + 1e-6 || u < -1e-6 || u > 1 + 1e-6)
+		return QAWS_STATUS_OK;
+	t1 = (double)a->t0 + sh_clamp(s, 0, 1) * ((double)a->t1 - (double)a->t0);
+	t2 = (double)b->t0 + sh_clamp(u, 0, 1) * ((double)b->t1 - (double)b->t0);
+	if (!sh_meet2(ca, cb, &t1, &t2, S->tol))
+		return QAWS_STATUS_OK;
+	/* (where a path's curves join: no crossing) */
+	if (sh_at_end(ca, t1) && sh_at_end(cb, t2) && (ca->next == b->owner || cb->next == a->owner))
+		return QAWS_STATUS_OK;
+	if (J->n == J->cap)
+	{
+		unsigned int nc = J->cap ? 2 * J->cap : 64;
+		qaws_region_seam_point* p2 = (qaws_region_seam_point*)qaws_internal_realloc(J->pt, qaws_internal_mul2(sizeof *p2, nc));
+		if (!p2)
+		{
+			J->oom = 1;
+			return QAWS_STATUS_ALLOCATION_FAILURE;
+		}
+		J->pt = p2;
+		J->cap = nc;
+	}
+	if (a->owner > b->owner)
+	{
+		sh_curve2 const* tc = ca;
+		double tt = t1;
+		ca = cb; cb = tc;
+		t1 = t2; t2 = tt;
+	}
+	qaws_internal_curve_point(p, dp, ca->c, 2, (qaws_scalar)t1, QAWS_EVAL_FLAG_POSITION);
+	P = &J->pt[J->n++];
+	P->position.x = p[0];
+	P->position.y = p[1];
+	P->kind = sh_kind2(ca, cb);
+	P->operand1 = ca->operand; P->path1 = ca->path; P->curve1 = ca->index; P->t1 = (qaws_scalar)t1;
+	P->operand2 = cb->operand; P->path2 = cb->path; P->curve2 = cb->index; P->t2 = (qaws_scalar)t2;
+	return QAWS_STATUS_OK;
+}
+
+static int sh_cmp_seam2(void const* p, void const* q)
+{
+	qaws_region_seam_point const *a = (qaws_region_seam_point const*)p, *b = (qaws_region_seam_point const*)q;
+	unsigned int ka[6] = { a->operand1, a->path1, a->curve1, a->operand2, a->path2, a->curve2 };
+	unsigned int kb[6] = { b->operand1, b->path1, b->curve1, b->operand2, b->path2, b->curve2 };
+	int i;
+	for (i = 0; i < 6; i++)
+		if (ka[i] != kb[i])
+			return ka[i] < kb[i] ? -1 : 1;
+	return a->t1 < b->t1 ? -1 : a->t1 > b->t1;
+}
+
+qaws_status qaws_region_seams_2d(qaws_region_seam_point* out_points, unsigned int* out_count, qaws_region_seam_desc const* desc,
+	unsigned int capacity)
+{
+	sh_scene2 S;
+	sh_x2_job J;
+	qaws_bp_box* box = NULL;
+	qaws_status st;
+	unsigned int i, k;
+	if (!out_count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_count = 0;
+	if (!sh_desc2_ok(desc, 0) || !(desc->kinds & (QAWS_SEAM_A_B | QAWS_SEAM_A_A | QAWS_SEAM_B_B)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	memset(&J, 0, sizeof J);
+	st = sh_scene2_build(&S, desc);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	box = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (size_t)S.ns + 1));
+	if (!box)
+	{
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		goto done;
+	}
+	for (i = 0; i < S.ns; i++)
+		for (k = 0; k < 3; k++)
+		{
+			box[i].lo[k] = k < 2 ? (double)S.seg[i].lo[k] - S.tol : 0;
+			box[i].hi[k] = k < 2 ? (double)S.seg[i].hi[k] + S.tol : 0;
+		}
+	J.S = &S;
+	J.kinds = desc->kinds;
+	st = qaws_internal_broadphase(NULL, box, S.ns, 2, sh_x2_accept, sh_x2_visit, &J);
+	if (J.oom)
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	/* (one crossing found by neighbouring chords of a curve is one point) */
+	qsort(J.pt, J.n, sizeof *J.pt, sh_cmp_seam2);
+	for (i = 0, k = 0; i < J.n; i++)
+	{
+		if (k)
+		{
+			qaws_region_seam_point const *a = &J.pt[k - 1], *b = &J.pt[i];
+			double dx = (double)a->position.x - (double)b->position.x, dy = (double)a->position.y - (double)b->position.y;
+			if (a->operand1 == b->operand1 && a->path1 == b->path1 && a->curve1 == b->curve1 && a->operand2 == b->operand2 && a->path2 == b->path2
+				&& a->curve2 == b->curve2 && sqrt(dx * dx + dy * dy) <= 4 * S.tol)
+				continue;
+		}
+		J.pt[k++] = J.pt[i];
+	}
+	*out_count = k;
+	if (out_points)
+		memcpy(out_points, J.pt, sizeof *J.pt * (k < capacity ? k : capacity));
+	st = out_points && k > capacity ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
+done:
+	qaws_internal_free(box);
+	qaws_internal_free(J.pt);
+	sh_scene2_free(&S);
+	return st;
+}
+
+/* ---- 2D shatter ---- */
+
+struct qaws_region_shatter
+{
+	qaws_path_2d* path;               /* every piece's paths, piece after piece */
+	unsigned int npath, cappath;
+	unsigned int* first;              /* per piece its first path, count + 1 */
+	int* inside;
+	unsigned int count, cap;
+	qaws_curve** curve;               /* every path's curves, owned */
+	unsigned int ncurve, capc;
+	qaws_curve const** list;          /* the paths' curve lists, one block (rebuilt as it grows: offsets in path) */
+	unsigned int nlist, caplist;
+};
+
+void qaws_region_shatter_destroy(qaws_region_shatter* shatter)
+{
+	unsigned int i;
+	if (!shatter)
+		return;
+	for (i = 0; i < shatter->ncurve; i++)
+		qaws_curve_destroy(shatter->curve[i]);
+	qaws_internal_free(shatter->curve);
+	qaws_internal_free(shatter->path);
+	qaws_internal_free(shatter->first);
+	qaws_internal_free(shatter->inside);
+	qaws_internal_free(shatter->list);
+	qaws_internal_free(shatter);
+}
+
+static int sh_grow(void** p, unsigned int* cap, unsigned int need, size_t size)
+{
+	unsigned int nc;
+	void* p2;
+	if (need <= *cap)
+		return 1;
+	nc = *cap ? 2 * *cap : 16;
+	while (nc < need)
+		nc *= 2;
+	p2 = qaws_internal_realloc(*p, qaws_internal_mul2(size, nc));
+	if (!p2)
+		return 0;
+	*p = p2;
+	*cap = nc;
+	return 1;
+}
+
+/* the exact piece of curve c from ta to tb (reversed when tb < ta), kept by H and listed; 0 on failure */
+static int sh_piece_curve(qaws_region_shatter* H, sh_curve2 const* c, double ta, double tb)
+{
+	qaws_curve *sub = NULL, *rev = NULL;
+	double lo = ta < tb ? ta : tb, hi = ta < tb ? tb : ta;
+	if (qaws_curve_extract(&sub, c->c, (qaws_scalar)lo, (qaws_scalar)hi) != QAWS_STATUS_OK)
+		return 0;
+	if (tb < ta)
+	{
+		qaws_status st = qaws_curve_reverse(&rev, sub);
+		qaws_curve_destroy(sub);
+		if (st != QAWS_STATUS_OK)
+			return 0;
+		sub = rev;
+	}
+	if (!sh_grow((void**)&H->curve, &H->capc, H->ncurve + 1, sizeof(qaws_curve*))
+		|| !sh_grow((void**)&H->list, &H->caplist, H->nlist + 1, sizeof(qaws_curve const*)))
+	{
+		qaws_curve_destroy(sub);
+		return 0;
+	}
+	H->curve[H->ncurve++] = sub;
+	H->list[H->nlist++] = sub;
+	return 1;
+}
+
+/* cycle loop of A as a closed path of exact curve pieces: steps of one curve with contiguous parameters run together,
+   each run's ends where it meets another curve (not at a path's joint) moved onto both by Newton's method; appended to
+   H (its curves listed from H->nlist on); 0 on failure */
+static int sh_cycle_path(qaws_region_shatter* H, sh_scene2 const* S, sh_arr const* A, unsigned int loop)
+{
+	unsigned int f = A->loop_first[loop], n = A->loop_first[loop + 1] - f, k, k0 = 0, nr = 0, r, list0 = H->nlist;
+	unsigned int* rc;
+	double* rt;
+	int ok = 1;
+	if (!n)
+		return 1;
+	rc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)n + 1));
+	rt = (double*)qaws_internal_malloc(qaws_internal_mul3(sizeof(double), 2, (size_t)n + 1));
+	if (!rc || !rt)
+	{
+		qaws_internal_free(rc);
+		qaws_internal_free(rt);
+		return 0;
+	}
+	/* (a step where the run before it ends: the walk starts there) */
+	for (k = 0; k < n; k++)
+	{
+		unsigned int p = f + (k + n - 1) % n, q = f + k;
+		sh_curve2 const* c = &S->cv[A->loop_c[q]];
+		if (A->loop_c[p] != A->loop_c[q] || fabs(A->loop_t[2 * (size_t)p + 1] - A->loop_t[2 * (size_t)q]) > 1e-12 * (c->t1 - c->t0))
+		{
+			k0 = k;
+			break;
+		}
+	}
+	for (k = 0; k < n; k++)
+	{
+		unsigned int q = f + (k0 + k) % n;
+		sh_curve2 const* c = &S->cv[A->loop_c[q]];
+		if (nr && rc[nr - 1] == A->loop_c[q] && fabs(rt[2 * (size_t)nr - 1] - A->loop_t[2 * (size_t)q]) <= 1e-12 * (c->t1 - c->t0))
+			rt[2 * (size_t)nr - 1] = A->loop_t[2 * (size_t)q + 1];
+		else
+		{
+			rc[nr] = A->loop_c[q];
+			rt[2 * (size_t)nr] = A->loop_t[2 * (size_t)q];
+			rt[2 * (size_t)nr + 1] = A->loop_t[2 * (size_t)q + 1];
+			nr++;
+		}
+	}
+	/* each run's end and the next run's start: one point on both curves (a path's own joint stays as it is) */
+	for (r = 0; r < nr; r++)
+	{
+		unsigned int s2 = (r + 1) % nr;
+		sh_curve2 const *ca = &S->cv[rc[r]], *cb = &S->cv[rc[s2]];
+		double t1 = rt[2 * (size_t)r + 1], t2 = rt[2 * (size_t)s2];
+		if (sh_at_end(ca, t1) && sh_at_end(cb, t2))
+			continue;
+		if (sh_meet2(ca, cb, &t1, &t2, S->tol))
+		{
+			rt[2 * (size_t)r + 1] = t1;
+			rt[2 * (size_t)s2] = t2;
+		}
+	}
+	for (r = 0; r < nr && ok; r++)
+	{
+		sh_curve2 const* c = &S->cv[rc[r]];
+		if (fabs(rt[2 * (size_t)r + 1] - rt[2 * (size_t)r]) <= 1e-12 * (c->t1 - c->t0))
+			continue;
+		ok = sh_piece_curve(H, c, rt[2 * (size_t)r], rt[2 * (size_t)r + 1]);
+	}
+	qaws_internal_free(rc);
+	qaws_internal_free(rt);
+	if (!ok || H->nlist == list0)
+		return ok;
+	if (!sh_grow((void**)&H->path, &H->cappath, H->npath + 1, sizeof(qaws_path_2d)))
+		return 0;
+	/* (curves points into list, fixed when the shatter is done: list may move as it grows) */
+	H->path[H->npath].curves = (qaws_curve const* const*)(size_t)list0;
+	H->path[H->npath].curve_count = H->nlist - list0;
+	H->path[H->npath].closed = 1;
+	H->npath++;
+	return 1;
+}
+
+static int sh_cmp_dbl2_u64(void const* p, void const* q);
+
+/* every face's winding numbers of A and B (wa, wb; known: 1 where reached), carried across the edges from the unbounded
+   face (index nloop, 0): a step of a curve walked forward has its face on the left one more inside that curve's operand
+   than the face on its right. A negative cycle is part of the face it is a hole of. rface (may be NULL): per cycle step
+   the face on its right (SH_NONE: none) */
+static int sh_face_windings(sh_arr const* A, sh_scene2 const* S, int* wa, int* wb, unsigned char* known, unsigned int* rface)
+{
+	unsigned int nl = A->nloop, nst = A->loop_first[nl], c, k, head = 0, tail = 0;
+	unsigned int *cyc = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nst + 1));
+	unsigned int *queue = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nl + 2));
+	unsigned int *cstart = (unsigned int*)qaws_internal_zalloc((size_t)nl + 3, sizeof(unsigned int));
+	unsigned int *clist = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)nl + 1));
+	unsigned long long* key = (unsigned long long*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned long long), 2, (size_t)nst + 1));
+	int ok = cyc && queue && cstart && clist && key;
+	if (ok)
+	{
+		/* (each cycle's face; the cycles by face) */
+		for (c = 0; c < nl; c++)
+			cstart[(A->loop_area[c] > 0 ? c : A->hole_of[c] == SH_NONE ? nl : A->hole_of[c]) + 2]++;
+		for (c = 0; c <= nl; c++)
+			cstart[c + 2] += cstart[c + 1];
+		for (c = 0; c < nl; c++)
+		{
+			unsigned int fc = A->loop_area[c] > 0 ? c : A->hole_of[c] == SH_NONE ? nl : A->hole_of[c];
+			clist[cstart[fc + 1]++] = c;
+		}
+		for (c = 0; c < nl; c++)
+			for (k = A->loop_first[c]; k < A->loop_first[c + 1]; k++)
+			{
+				unsigned long long a = A->loop_v[k], b = A->loop_v[k + 1 < A->loop_first[c + 1] ? k + 1 : A->loop_first[c]];
+				cyc[k] = c;
+				key[2 * (size_t)k] = a << 32 | b;
+				key[2 * (size_t)k + 1] = k;
+			}
+		qsort(key, nst, 2 * sizeof(unsigned long long), sh_cmp_dbl2_u64);
+		memset(known, 0, (size_t)nl + 1);
+		wa[nl] = wb[nl] = 0;
+		known[nl] = 1;
+		queue[tail++] = nl;
+		while (head < tail)
+		{
+			unsigned int F = queue[head++], q;
+			for (q = cstart[F]; q < cstart[F + 1]; q++)
+				for (k = A->loop_first[clist[q]]; k < A->loop_first[clist[q] + 1]; k++)
+				{
+					unsigned int c2 = clist[q], kn = k + 1 < A->loop_first[c2 + 1] ? k + 1 : A->loop_first[c2], lo = 0, hi = nst, F2;
+					unsigned long long tk = (unsigned long long)A->loop_v[kn] << 32 | A->loop_v[k];
+					sh_curve2 const* cv = &S->cv[A->loop_c[k]];
+					int d = A->loop_t[2 * (size_t)k + 1] > A->loop_t[2 * (size_t)k] ? 1 : -1;
+					while (lo < hi)
+					{
+						unsigned int mid = lo + (hi - lo) / 2;
+						if (key[2 * (size_t)mid] < tk)
+							lo = mid + 1;
+						else
+							hi = mid;
+					}
+					if (lo == nst || key[2 * (size_t)lo] != tk)
+						continue;
+					c2 = cyc[key[2 * (size_t)lo + 1]];
+					F2 = A->loop_area[c2] > 0 ? c2 : A->hole_of[c2] == SH_NONE ? nl : A->hole_of[c2];
+					if (known[F2])
+						continue;
+					wa[F2] = wa[F] - (cv->operand == 0 ? d : 0);
+					wb[F2] = wb[F] - (cv->operand == 1 ? d : 0);
+					known[F2] = 1;
+					queue[tail++] = F2;
+				}
+		}
+		for (c = 0; rface && c < nl; c++)
+			for (k = A->loop_first[c]; k < A->loop_first[c + 1]; k++)
+			{
+				unsigned int kn = k + 1 < A->loop_first[c + 1] ? k + 1 : A->loop_first[c], lo = 0, hi = nst, c2;
+				unsigned long long tk = (unsigned long long)A->loop_v[kn] << 32 | A->loop_v[k];
+				while (lo < hi)
+				{
+					unsigned int mid = lo + (hi - lo) / 2;
+					if (key[2 * (size_t)mid] < tk)
+						lo = mid + 1;
+					else
+						hi = mid;
+				}
+				rface[k] = SH_NONE;
+				if (lo == nst || key[2 * (size_t)lo] != tk)
+					continue;
+				c2 = cyc[key[2 * (size_t)lo + 1]];
+				rface[k] = A->loop_area[c2] > 0 ? c2 : A->hole_of[c2] == SH_NONE ? nl : A->hole_of[c2];
+			}
+	}
+	qaws_internal_free(cyc);
+	qaws_internal_free(queue);
+	qaws_internal_free(cstart);
+	qaws_internal_free(clist);
+	qaws_internal_free(key);
+	return ok;
+}
+
+static int sh_cmp_dbl2_u64(void const* p, void const* q)
+{
+	unsigned long long const *a = (unsigned long long const*)p, *b = (unsigned long long const*)q;
+	return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1];
+}
+
+qaws_status qaws_region_shatter_create_2d(qaws_region_shatter** out_shatter, qaws_region_seam_desc const* desc)
+{
+	sh_scene2 S;
+	sh_arr A;
+	qaws_region_shatter* H = NULL;
+	qaws_status st;
+	unsigned int i, h;
+	int *wa = NULL, *wb = NULL;
+	unsigned char* known = NULL;
+	unsigned int* rface = NULL;
+	if (!out_shatter)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_shatter = NULL;
+	if (!sh_desc2_ok(desc, 1))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	memset(&A, 0, sizeof A);
+	st = sh_scene2_build(&S, desc);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	H = (qaws_region_shatter*)qaws_internal_zalloc(1, sizeof *H);
+	if (!H)
+		goto done;
+	for (i = 0; i < S.ns; i++)
+		if (!sh_arr_add_from(&A, (double)S.seg[i].p0[0], (double)S.seg[i].p0[1], (double)S.seg[i].p1[0], (double)S.seg[i].p1[1], S.seg[i].owner,
+			(double)S.seg[i].t0, (double)S.seg[i].t1))
+			goto done;
+	st = sh_arr_build(&A, 1e-9 * S.extent);
+	if (st != QAWS_STATUS_OK)
+		goto done;
+	st = QAWS_STATUS_ALLOCATION_FAILURE;
+	wa = (int*)qaws_internal_malloc(sizeof(int) * ((size_t)A.nloop + 1));
+	wb = (int*)qaws_internal_malloc(sizeof(int) * ((size_t)A.nloop + 1));
+	known = (unsigned char*)qaws_internal_malloc((size_t)A.nloop + 1);
+	rface = (unsigned int*)qaws_internal_malloc(sizeof(unsigned int) * ((size_t)A.loop_first[A.nloop] + 1));
+	if (!wa || !wb || !known || !rface || !sh_face_windings(&A, &S, wa, wb, known, rface))
+		goto done;
+	{
+		/* pieces by B alone: an edge of A's with A's inside on both sides (and B's alike) dropped, B's edges all kept,
+		   and what is kept arranged again (each edge once, from its lower vertex) */
+		sh_arr A2;
+		unsigned int c, k;
+		memset(&A2, 0, sizeof A2);
+		for (c = 0; c < A.nloop; c++)
+			for (k = A.loop_first[c]; k < A.loop_first[c + 1]; k++)
+			{
+				unsigned int kn = k + 1 < A.loop_first[c + 1] ? k + 1 : A.loop_first[c], va = A.loop_v[k], vb = A.loop_v[kn];
+				unsigned int F = A.loop_area[c] > 0 ? c : A.hole_of[c] == SH_NONE ? A.nloop : A.hole_of[c], G = rface[k];
+				int inF, inG, keep;
+				if (va > vb || G == SH_NONE)
+					continue;
+				inF = known[F] && qaws_fill_rule_inside(desc->a_rule, wa[F]);
+				inG = known[G] && qaws_fill_rule_inside(desc->a_rule, wa[G]);
+				if (S.cv[A.loop_c[k]].operand == 1)
+					keep = 1;   /* (B's winding numbers are carried across all its edges) */
+				else
+					keep = inF != inG || (inF && desc->b_is_region && qaws_fill_rule_inside(desc->b_rule, wb[F]) != qaws_fill_rule_inside(desc->b_rule, wb[G]));
+				if (keep && !sh_arr_add_from(&A2, A.vx[2 * (size_t)va], A.vx[2 * (size_t)va + 1], A.vx[2 * (size_t)vb], A.vx[2 * (size_t)vb + 1],
+					A.loop_c[k], A.loop_t[2 * (size_t)k], A.loop_t[2 * (size_t)k + 1]))
+				{
+					sh_arr_free(&A2);
+					goto done;
+				}
+			}
+		sh_arr_free(&A);
+		A = A2;
+		st = sh_arr_build(&A, 1e-9 * S.extent);
+		if (st != QAWS_STATUS_OK)
+			goto done;
+		st = QAWS_STATUS_ALLOCATION_FAILURE;
+		qaws_internal_free(wa);
+		qaws_internal_free(wb);
+		qaws_internal_free(known);
+		wa = (int*)qaws_internal_malloc(sizeof(int) * ((size_t)A.nloop + 1));
+		wb = (int*)qaws_internal_malloc(sizeof(int) * ((size_t)A.nloop + 1));
+		known = (unsigned char*)qaws_internal_malloc((size_t)A.nloop + 1);
+		if (!wa || !wb || !known || !sh_face_windings(&A, &S, wa, wb, known, NULL))
+			goto done;
+	}
+	if (!sh_grow((void**)&H->first, &H->cap, 1, sizeof(unsigned int)))
+		goto done;
+	H->first[0] = 0;
+	for (i = 0; i < A.nloop; i++)
+	{
+		double pin[2];
+		qaws_vec2 pt;
+		qaws_point_location la = QAWS_POINT_OUTSIDE, lb = QAWS_POINT_OUTSIDE;
+		int inside = -1;
+		if (A.loop_area[i] <= 0 || !sh_arr_inner(&A, i, 1e-6 * S.extent, pin))
+			continue;
+		pt.x = (qaws_scalar)pin[0];
+		pt.y = (qaws_scalar)pin[1];
+		/* (inside by the windings carried across the edges; a face they did not reach, by its point) */
+		if (known[i] ? !qaws_fill_rule_inside(desc->a_rule, wa[i])
+		             : qaws_region_locate_point_2d(&la, desc->a, desc->a_count, desc->a_rule, pt, 0) != QAWS_STATUS_OK || la != QAWS_POINT_INSIDE)
+			continue;
+		if (desc->b_is_region)
+		{
+			if (known[i])
+				inside = qaws_fill_rule_inside(desc->b_rule, wb[i]);
+			else
+			{
+				qaws_region_locate_point_2d(&lb, desc->b, desc->b_count, desc->b_rule, pt, 0);
+				inside = lb == QAWS_POINT_INSIDE;
+			}
+		}
+		if (!sh_cycle_path(H, &S, &A, i))
+			goto done;
+		for (h = 0; h < A.nloop; h++)
+			if (A.hole_of[h] == i && !sh_cycle_path(H, &S, &A, h))
+				goto done;
+		if (!sh_grow((void**)&H->first, &H->cap, H->count + 2, sizeof(unsigned int)))
+			goto done;
+		{
+			int* i2 = (int*)qaws_internal_realloc(H->inside, qaws_internal_mul2(sizeof(int), (size_t)H->count + 1));
+			if (!i2)
+				goto done;
+			H->inside = i2;
+		}
+		H->inside[H->count] = inside;
+		H->first[++H->count] = H->npath;
+	}
+	/* (the paths' curve lists now that list is complete) */
+	for (i = 0; i < H->npath; i++)
+		H->path[i].curves = H->list + (size_t)H->path[i].curves;
+	*out_shatter = H;
+	H = NULL;
+	st = QAWS_STATUS_OK;
+done:
+	qaws_region_shatter_destroy(H);
+	qaws_internal_free(wa);
+	qaws_internal_free(wb);
+	qaws_internal_free(known);
+	qaws_internal_free(rface);
+	sh_arr_free(&A);
+	sh_scene2_free(&S);
+	return st;
+}
+
+unsigned int qaws_region_shatter_get_count(qaws_region_shatter const* shatter)
+{
+	return shatter ? shatter->count : 0;
+}
+
+qaws_status qaws_region_shatter_get(qaws_path_2d const** out_paths, unsigned int* out_path_count, int* out_inside,
+	qaws_region_shatter const* shatter, unsigned int index)
+{
+	if (!shatter || index >= shatter->count)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (out_paths)
+		*out_paths = shatter->path + shatter->first[index];
+	if (out_path_count)
+		*out_path_count = shatter->first[index + 1] - shatter->first[index];
 	if (out_inside)
 		*out_inside = shatter->inside[index];
 	return QAWS_STATUS_OK;
