@@ -150,4 +150,11 @@ void qaws_internal_surface_catmull_rom_blend(
 	unsigned int n_pts,
 	qaws_scalar t);
 
+/* A trimmed surface's base (NULL when the surface is not trimmed) and its trim loops: loop index's curves (2D, in the
+   base's (u, v)), their count and whether it is an outer loop (qaws_shatter.c) */
+qaws_surface const* qaws_internal_trim_base(qaws_surface const* surface);
+unsigned int qaws_internal_trim_loop_count(qaws_surface const* surface);
+struct qaws_curve;
+struct qaws_curve const* const* qaws_internal_trim_loop(unsigned int* out_count, int* out_outer, qaws_surface const* surface, unsigned int index);
+
 #endif /* QAWS_INTERNAL_SURFACE_H */

@@ -62,6 +62,7 @@ add_executable(
   82_curve_extract.c
   83_path.c
   84_interpolating_offset.c
+  85_shatter.c
 140_eval_limits.c
 141_eval_threads.c
 142_curve_view.c

@@ -273,3 +273,28 @@ qaws_status qaws_surface_trim_contains(
 	*out_inside = inside;
 	return QAWS_STATUS_OK;
 }
+
+qaws_surface const* qaws_internal_trim_base(qaws_surface const* surface)
+{
+	if (!surface || qaws_surface_get_kind(surface) != QAWS_SURFACE_KIND_TRIMMED)
+		return NULL;
+	return ((qaws_surface_trim_impl const*)surface->impl)->base;
+}
+
+unsigned int qaws_internal_trim_loop_count(qaws_surface const* surface)
+{
+	if (!qaws_internal_trim_base(surface))
+		return 0;
+	return ((qaws_surface_trim_impl const*)surface->impl)->loop_count;
+}
+
+qaws_curve const* const* qaws_internal_trim_loop(unsigned int* out_count, int* out_outer, qaws_surface const* surface, unsigned int index)
+{
+	qaws_surface_trim_impl const* impl;
+	if (index >= qaws_internal_trim_loop_count(surface))
+		return NULL;
+	impl = (qaws_surface_trim_impl const*)surface->impl;
+	*out_count = impl->loops[index].curve_count;
+	*out_outer = impl->loops[index].is_outer;
+	return impl->loops[index].curves;
+}

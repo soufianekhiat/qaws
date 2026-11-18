@@ -105,6 +105,7 @@ src/qaws/qaws_motion.c
   src/qaws/qaws_surface_gordon.c
   src/qaws/qaws_surface_offset.c
   src/qaws/qaws_surface_trim.c
+  src/qaws/qaws_shatter.c
   src/qaws/qaws_surface_tspline.c
   src/qaws/qaws_surface_subdiv.c
   src/qaws/qaws_brep.c
@@ -539,6 +540,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_surface_gordon.h
       src/qaws/qaws_surface_offset.h
       src/qaws/qaws_surface_trim.h
+      src/qaws/qaws_shatter.h
       src/qaws/qaws_surface_tspline.h
       src/qaws/qaws_surface_subdiv.h
       src/qaws/qaws_brep.h

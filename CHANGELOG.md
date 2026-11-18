@@ -6,6 +6,16 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `qaws_surface_seams_*` and `qaws_surface_shatter_*` (`qaws_shatter.h`): seams
+  and shatter of curved surfaces, as Houdini's Boolean "Seam" and "Shatter".
+  Seams: the curves where a surface of A crosses one of B (or two of one
+  operand cross, not along a border they share), found on warped grids of
+  the surfaces' domains, chained by the grid edges they cross and moved onto
+  both true surfaces by Newton's method (a parameter on its domain's border
+  held there), each point with its parameters on both surfaces; a trimmed
+  surface's seams cut at its trim. Shatter: every surface of A cut along its
+  seams with B into trimmed pieces over its base, each told inside or
+  outside B when B bounds a solid. Test 85.
 - `qaws_set_kept_memory_limit`, `qaws_release_kept_memory`: blocks of the C
   allocator from 4 KB to 1 MB that the library frees are kept (16 MB in all by
   default) and handed to the next requests of their size class, so repeated

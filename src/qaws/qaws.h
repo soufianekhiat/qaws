@@ -63,6 +63,7 @@
 #include "qaws_surface_gordon.h"
 #include "qaws_surface_offset.h"
 #include "qaws_surface_trim.h"
+#include "qaws_shatter.h"
 #include "qaws_surface_types.h"
 #include "qaws_surface_tspline.h"
 #include "qaws_surface_subdiv.h"
