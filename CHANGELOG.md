@@ -37,6 +37,15 @@ All notable changes to Qaws are documented here.
   within a tolerance, from any 2D curve; cusps become arcs, corners between
   spans lines. Test 84.
 
+### Fixed
+
+- `qaws_curve_extract` on Hermite, Catmull-Rom, trajectory and subdivision
+  curves: a cut within rounding of a span boundary (a few ulps short of it)
+  is that boundary, as the B-spline path already did. It kept a sliver of
+  the span before it as a span of its own, whose derivative at the piece's
+  start was noise (a cap's tangent pointing backwards, which made a region
+  Boolean misorder the edges round a vertex). Test 82.
+
 ### Removed (2.0.0, breaking)
 
 - **qaws is curve and surface evaluation.** Processing left the library:

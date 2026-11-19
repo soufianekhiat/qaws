@@ -525,14 +525,33 @@ static qaws_scalar ex_extent(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1
 	return (qaws_scalar)sqrt((double)e);
 }
 
+/* t within rounding of one of c's span boundaries: that boundary (a cut a few ulps short of a boundary would keep a
+   sliver of the span before it as a span of its own, whose derivative is noise) */
+static qaws_scalar ex_snap_boundary(qaws_curve const* c, qaws_scalar t)
+{
+	unsigned int i;
+	qaws_scalar tol;
+	if (!c->span_boundaries || !c->span_count)
+		return t;
+	tol = (c->span_boundaries[c->span_count] - c->span_boundaries[0]) * (qaws_scalar)EX_REL;
+	for (i = 0; i <= c->span_count; i++)
+		if (QAWS_FABS(c->span_boundaries[i] - t) <= tol)
+			return c->span_boundaries[i];
+	return t;
+}
+
 static qaws_status ex_cubic_kind(qaws_curve const* c, qaws_scalar t0, qaws_scalar t1, int fit, qaws_curve** out)
 {
 	ex_cubics q;
 	qaws_scalar u0, u1;
-	unsigned int s0 = qaws_internal_find_span(&u0, c, t0);
-	unsigned int s1 = qaws_internal_find_span(&u1, c, t1);
+	unsigned int s0, s1;
 	unsigned int s;
 	qaws_status st;
+
+	t0 = ex_snap_boundary(c, t0);
+	t1 = ex_snap_boundary(c, t1);
+	s0 = qaws_internal_find_span(&u0, c, t0);
+	s1 = qaws_internal_find_span(&u1, c, t1);
 
 	if (s1 > s0 && u1 <= QAWS_ZERO) { s1--; u1 = QAWS_ONE; }
 	memset(&q, 0, sizeof(q));

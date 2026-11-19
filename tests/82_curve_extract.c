@@ -8,7 +8,8 @@
  *       every point of the source there lies on the piece (two-way distance,
  *       found by dense sampling and a golden-section refinement);
  *     - the piece has the expected kind.
- *   Also: reverse for every kind, split inside a Hermite span, and is_closed
+ *   Also: reverse for every kind, split inside a Hermite span, a cut within
+ *   rounding of a Hermite span boundary (no sliver span), and is_closed
  *   for closed Bezier, B-spline and NURBS loops.
  */
 
@@ -458,6 +459,27 @@ static void test_hermite_split(void)
 	qaws_curve_destroy(c);
 }
 
+/* a cut a few ulps short of a Hermite span boundary is that boundary: no sliver span left before it (its derivative
+   would be noise), the piece leaving where the curve leaves */
+static void test_hermite_near_boundary(void)
+{
+	qaws_curve* c = cxt_hermite();
+	qaws_curve* piece = NULL;
+	qaws_eval_result_2d a, b;
+	qaws_scalar const t0 = (qaws_scalar)(1.0 - (QAWS_SCALAR_IS_FLOAT ? 3e-7 : 3e-14));
+	int ok = qaws_curve_extract(&piece, c, t0, (qaws_scalar)2.5) == QAWS_STATUS_OK;
+	if (ok)
+	{
+		qaws_range rg = qaws_curve_get_parameter_range(piece);
+		qaws_curve_evaluate_2d(&a, c, (qaws_scalar)1.0, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+		qaws_curve_evaluate_2d(&b, piece, rg.min_value, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+		ok = qaws_curve_get_span_count(piece) == 2 && hypot((double)(a.d1.x - b.d1.x), (double)(a.d1.y - b.d1.y)) <= 1e3 * CXT_TOL;
+	}
+	TEST_ASSERT(ok, "a Hermite cut within rounding of a span boundary starts there: two spans, the curve's derivative");
+	qaws_curve_destroy(piece);
+	qaws_curve_destroy(c);
+}
+
 static void test_closed(void)
 {
 	qaws_scalar sq[] = { 0, 0, 1, 0, 1, 1, 0, 1, 0, 0 };
@@ -492,6 +514,7 @@ int test_82_curve_extract_main(void)
 	test_extract(cs, n);
 	test_reverse(cs, n);
 	test_hermite_split();
+	test_hermite_near_boundary();
 	test_closed();
 	for (i = 0; i < n; i++)
 	{
