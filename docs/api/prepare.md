@@ -144,8 +144,8 @@ Control points of the hodographs of a Bezier curve with `degree + 1` control poi
 points `n (P[i+1] - P[i])`, `out_d2_cp` `degree - 1` points (the second derivative), `out_d3_cp` `degree - 2`
 points (the third).
 
-- Each output may be NULL to skip it. In 2D the second derivative is built from the first, so `out_d2_cp` needs
-  `out_d1_cp`, and `out_d3_cp` needs both; D2 needs degree >= 2 and D3 degree >= 3.
+- Each output may be NULL to skip it; each is computed from the control points directly (forward differences
+  times `n`, `n (n - 1)`, `n (n - 1) (n - 2)`), in 2D and 3D alike. D2 needs degree >= 2 and D3 degree >= 3.
 - The 3D version fills only `out_d1_cp`; `out_d2_cp` and `out_d3_cp` are not written.
 - Returns `QAWS_STATUS_INVALID_ARGUMENT` for null `control_points` or `degree < 1`.
 

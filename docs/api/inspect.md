@@ -232,8 +232,8 @@ Both scan 32 samples per span and bisect each bracketed root.
 - Inflections: in 2D, sign changes of `d1 x d2`; in 3D, places where `abs(d1 x d2)` crosses 1e-12.
 - Extrema: sign changes of the derivative's `axis` component (0 = x, 1 = y, 2 = z); `QAWS_STATUS_INVALID_ARGUMENT`
   for an axis not below the dimension.
-- At most `parameter_capacity` parameters are written; `*out_count` is the number found, which may exceed the
-  capacity (the call still returns `QAWS_STATUS_OK`).
+- At most `parameter_capacity` parameters are written; `*out_count` is the number found. When it exceeds the
+  capacity the call returns `QAWS_STATUS_BUFFER_TOO_SMALL` (the first `parameter_capacity` are written).
 
 ---
 
@@ -578,9 +578,10 @@ qaws_status qaws_surface_tessellate(
 A quadtree over (u, v): a quad splits (up to `max_depth`) while its center lies farther than `curvature_threshold`
 (a distance) from the average of its corners, or, when `max_edge_length > 0`, a side is longer than it. Leaves are
 fanned around their centers, picking up the vertices of finer neighbours, so the mesh has no T-junctions; vertices
-are shared by (u, v). Uses scratch memory. All buffers are required; past the capacities, vertices and triangles are
-dropped with no error and the mesh is incomplete (the counts report what was written), so size the buffers
-generously or use the adaptive version.
+are shared by (u, v). Uses scratch memory. All buffers are required. When either buffer fills, the call returns
+`QAWS_STATUS_BUFFER_TOO_SMALL` with the counts written so far, not the counts needed (shared vertices are found among
+those written, so the total is not known in advance); size the buffers generously or use the adaptive version,
+which counts first.
 
 ---
 

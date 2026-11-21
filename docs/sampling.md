@@ -147,9 +147,10 @@ allocation.
   `qaws_tessellation_desc` (`max_depth` 0: 5, `curvature_threshold` 0: 0.1,
   `max_edge_length` 0: off).
 - `qaws_surface_tessellate_adaptive`: a quadtree over (u, v) whose quads split
-  until the surface at their 3 x 3 test points is within `chord_tolerance` of
-  the bilinear patch of their corners and the normal turns by at most
-  `angle_tolerance` (`min_depth` 0: 2; `max_depth` 0: 10, at most 20). No
+  until the surface at their test points (side midpoints, center, the two
+  triangles' centroids) is within `chord_tolerance` of the quad's two
+  triangles and the normal there within half of `angle_tolerance` of the
+  center's (`min_depth` 0: 2; `max_depth` 0: 10, at most 20). No
   cracks, no allocation, deterministic: call with NULL buffers for the counts,
   then with buffers of those sizes. Triangles are counter-clockwise in
   (u, v). Vertices are written per quad, so a shared point repeats (with the

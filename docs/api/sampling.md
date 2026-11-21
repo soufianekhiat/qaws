@@ -76,7 +76,8 @@ qaws_status qaws_curve_sample_eval_3d(
   predict the adaptive count; for that, call the sampler and read `*out_count` on `QAWS_STATUS_BUFFER_TOO_SMALL`.
 - `sample_2d` / `sample_3d` write positions; `sample_eval_2d` / `sample_eval_3d` write full evaluation results
   (position and the derivatives the curve family provides, with `valid_flags`).
-- Non-adaptive: the count is `sample_count` clamped to the capacity (the excess is not written, no error).
+- Non-adaptive: the count is `sample_count`; when it exceeds the capacity, returns `QAWS_STATUS_BUFFER_TOO_SMALL`
+  with that count in `*out_count`, nothing written.
 - Adaptive: when the result exceeds the capacity, returns `QAWS_STATUS_BUFFER_TOO_SMALL` with the required count
   in the count output and nothing written.
 - Returns `QAWS_STATUS_INVALID_ARGUMENT` (a null pointer), `QAWS_STATUS_INVALID_DIMENSION`,
