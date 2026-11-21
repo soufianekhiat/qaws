@@ -172,14 +172,9 @@ qaws_status qaws_curve_batch_find_closest(
 
 /*
  * Prepared sets: the flattening (the costly part: curve evaluations) done
- * once, for curves queried again and again, e.g. fixed contour lines
- * against gradient lines that change. A set keeps pointers to its curves:
- * they must outlive it and stay unchanged.
- *
- * qaws_curve_set_find_intersections_*(set, NULL, ...) intersects a set
- * with itself, by its desc (families, flags) as the one-shot call;
- * (set, other, ...) intersects every curve of set with every curve of
- * other: curve_a indexes set, curve_b other.
+ * once, for curves queried again and again (closest points of moving
+ * points against fixed curves). A set keeps pointers to its curves: they
+ * must outlive it and stay unchanged.
  */
 typedef struct qaws_curve_set qaws_curve_set;
 

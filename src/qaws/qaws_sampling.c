@@ -793,7 +793,10 @@ qaws_status qaws_curve_sample_2d(
 
 	count = desc->sample_count;
 	if (count > position_capacity)
-		count = position_capacity;
+	{
+		*out_position_count = count;
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+	}
 
 	range_min = curve->parameter_range.min_value;
 	range_max = curve->parameter_range.max_value;
@@ -909,7 +912,10 @@ qaws_status qaws_curve_sample_3d(
 
 	count = desc->sample_count;
 	if (count > position_capacity)
-		count = position_capacity;
+	{
+		*out_position_count = count;
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+	}
 
 	range_min = curve->parameter_range.min_value;
 	range_max = curve->parameter_range.max_value;
@@ -1025,7 +1031,10 @@ qaws_status qaws_curve_sample_eval_2d(
 
 	count = desc->sample_count;
 	if (count > sample_capacity)
-		count = sample_capacity;
+	{
+		*out_sample_count = count;
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+	}
 
 	range_min = curve->parameter_range.min_value;
 	range_max = curve->parameter_range.max_value;
@@ -1140,7 +1149,10 @@ qaws_status qaws_curve_sample_eval_3d(
 
 	count = desc->sample_count;
 	if (count > sample_capacity)
-		count = sample_capacity;
+	{
+		*out_sample_count = count;
+		return QAWS_STATUS_BUFFER_TOO_SMALL;
+	}
 
 	range_min = curve->parameter_range.min_value;
 	range_max = curve->parameter_range.max_value;

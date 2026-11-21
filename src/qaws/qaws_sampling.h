@@ -17,7 +17,8 @@
 #include "qaws_types.h"
 #include "qaws_status.h"
 
-/* All sampling functions are thread-safe on immutable curves. */
+/* All sampling functions are thread-safe on immutable curves. Each writes at most its capacity: more samples than that
+   (desc->sample_count, or the adaptive count) give QAWS_STATUS_BUFFER_TOO_SMALL with the count needed. */
 
 qaws_status qaws_curve_get_sample_count(
 	unsigned int* out_sample_count,
