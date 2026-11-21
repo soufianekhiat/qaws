@@ -917,6 +917,24 @@ static qaws_status bp_par_job(void* ctx, unsigned int chunk, unsigned int begin,
 	return s;
 }
 
+/* the serial sweep's visit with stop polled every 256 pairs (the sweep runs on the calling thread) */
+typedef struct bp_stop_visit
+{
+	qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j);
+	void* visit_user;
+	int (*stop)(void* user);
+	void* stop_user;
+	unsigned int calls;
+} bp_stop_visit;
+
+static qaws_status bp_visit_stop(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	bp_stop_visit* w = (bp_stop_visit*)user;
+	if ((++w->calls & 255u) == 0 && w->stop(w->stop_user))
+		return QAWS_STATUS_CANCELLED;
+	return w->visit(w->visit_user, chunk, i, j);
+}
+
 qaws_status qaws_internal_grid_pairs(unsigned int* out_candidates, qaws_bp_grid const* grid, qaws_bp_box const* boxes, qaws_bp_accept accept,
 	void* accept_user, qaws_status (*visit)(void* user, unsigned int chunk, unsigned int i, unsigned int j), void* visit_user,
 	qaws_batch_executor const* executor)
@@ -949,7 +967,17 @@ qaws_status qaws_internal_grid_pairs_stop(unsigned int* out_candidates, qaws_bp_
 		unsigned int axis = grid->fit ? 0 : bp_axis(boxes, grid->count, grid->dim), nk = 0;
 		bp_key* keys = grid->fit ? NULL : bp_sorted(boxes, grid->count, grid->dim, axis, &nk);
 		if (keys && bp_sweep_cost(boxes, keys, nk, axis) < bp_grid_cost(grid))
-			s = bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, visit, visit_user, &P.candidates[0]);
+		{
+			bp_stop_visit w;
+			w.visit = visit;
+			w.visit_user = visit_user;
+			w.stop = stop;
+			w.stop_user = stop_user;
+			w.calls = 0;
+			s = stop && stop(stop_user) ? QAWS_STATUS_CANCELLED
+				: bp_sweep(boxes, grid->count, grid->dim, axis, keys, nk, accept, accept_user, stop ? bp_visit_stop : visit, stop ? (void*)&w : visit_user,
+					&P.candidates[0]);
+		}
 		else
 			s = qaws_internal_parallel_stop(n, 1, bp_par_job, &P, executor, stop, stop_user);
 		qaws_internal_free(keys);
