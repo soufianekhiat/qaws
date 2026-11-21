@@ -11,7 +11,7 @@ namespace Qaws
             Name = "Qaws";
             SourceRootPath = @"[project.SharpmakeCsPath]\..\..\..\src\qaws";
 
-            // Both precisions in one library (docs/parameter_convention_plan.md):
+            // Both precisions in one library:
             // every source is compiled through two wrappers generated here, one
             // per precision, never directly (MSBuild does not rebuild an object
             // whose source includes another of the project's sources when that

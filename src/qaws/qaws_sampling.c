@@ -1629,8 +1629,11 @@ qaws_status qaws_curve_sample_feature_preserving_2d(
 	inflection_count = 0;
 	status = qaws_curve_find_inflection_points(
 		inflections, &inflection_count, curve, FEATURE_MAX_INFLECTIONS);
-	if (status == QAWS_STATUS_OK)
+	if (status == QAWS_STATUS_OK || status == QAWS_STATUS_BUFFER_TOO_SMALL)
 	{
+		/* (more than the buffer holds: the ones it holds) */
+		if (inflection_count > FEATURE_MAX_INFLECTIONS)
+			inflection_count = FEATURE_MAX_INFLECTIONS;
 		for (i = 0; i < inflection_count; ++i)
 			param_count = feature_insert_unique(
 				params, param_count, inflections[i]);
@@ -1645,8 +1648,10 @@ qaws_status qaws_curve_sample_feature_preserving_2d(
 			status = qaws_curve_find_extrema(
 				extrema_buf, &extrema_count, curve,
 				FEATURE_MAX_EXTREMA_PER_AXIS, axis);
-			if (status == QAWS_STATUS_OK)
+			if (status == QAWS_STATUS_OK || status == QAWS_STATUS_BUFFER_TOO_SMALL)
 			{
+				if (extrema_count > FEATURE_MAX_EXTREMA_PER_AXIS)
+					extrema_count = FEATURE_MAX_EXTREMA_PER_AXIS;
 				for (i = 0; i < extrema_count; ++i)
 					param_count = feature_insert_unique(
 						params, param_count, extrema_buf[i]);
@@ -1741,8 +1746,11 @@ qaws_status qaws_curve_sample_feature_preserving_3d(
 	inflection_count = 0;
 	status = qaws_curve_find_inflection_points(
 		inflections, &inflection_count, curve, FEATURE_MAX_INFLECTIONS);
-	if (status == QAWS_STATUS_OK)
+	if (status == QAWS_STATUS_OK || status == QAWS_STATUS_BUFFER_TOO_SMALL)
 	{
+		/* (more than the buffer holds: the ones it holds) */
+		if (inflection_count > FEATURE_MAX_INFLECTIONS)
+			inflection_count = FEATURE_MAX_INFLECTIONS;
 		for (i = 0; i < inflection_count; ++i)
 			param_count = feature_insert_unique(
 				params, param_count, inflections[i]);
@@ -1757,8 +1765,10 @@ qaws_status qaws_curve_sample_feature_preserving_3d(
 			status = qaws_curve_find_extrema(
 				extrema_buf, &extrema_count, curve,
 				FEATURE_MAX_EXTREMA_PER_AXIS, axis);
-			if (status == QAWS_STATUS_OK)
+			if (status == QAWS_STATUS_OK || status == QAWS_STATUS_BUFFER_TOO_SMALL)
 			{
+				if (extrema_count > FEATURE_MAX_EXTREMA_PER_AXIS)
+					extrema_count = FEATURE_MAX_EXTREMA_PER_AXIS;
 				for (i = 0; i < extrema_count; ++i)
 					param_count = feature_insert_unique(
 						params, param_count, extrema_buf[i]);

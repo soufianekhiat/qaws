@@ -124,7 +124,7 @@ foreach(_qaws_test_source IN LISTS _qaws_test_sources)
   endif()
 endforeach()
 
-# The API checks (docs/parameter_convention_plan.md): every declaration in
+# The API checks: every declaration in
 # the parameter convention, less the shrinking allow-list; qaws_names.h the
 # map of the headers' precision-bearing names. The once-only headers
 # (precision-free: the status, the executor, the allocator and the memory

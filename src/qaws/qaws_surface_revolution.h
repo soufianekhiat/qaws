@@ -16,19 +16,20 @@
 
 #include "qaws_surface_types.h"
 
-/* Surface of revolution: a 2D profile curve rotated around an axis.
-   The profile curve lies in the XZ plane (x = radius, z = height).
-   u parameter is the rotation angle [0, angle_range] mapped to [0,1].
-   v parameter follows the profile curve domain.
+/* Surface of revolution: a 2D profile curve (r, h) rotated about an axis.
+   The profile's x is the distance from the axis, its y the height along it.
+   u in [0, 1] is the turn (theta = u * angle); v in [0, 1] runs over the
+   profile's parameter range.
 
-   S(u,v) = axis_origin + r(v)*cos(theta(u))*X + r(v)*sin(theta(u))*Y + h(v)*Z
-   where r(v) = profile_x(v) and h(v) = profile_y(v), theta = u * angle.
+   S(u,v) = axis_origin + r(v)*cos(theta)*X + r(v)*sin(theta)*Y + h(v)*Z
 
-   axis_origin: point on the rotation axis.
-   axis_direction: unit direction of the rotation axis (default Y-up: (0,1,0)).
-   angle: total rotation in radians (default 2*PI for full revolution).
+   Z is axis_direction normalized (INVALID_ARGUMENT when it is zero); X is
+   the coordinate axis least aligned with Z made perpendicular to it; Y is
+   Z x X.
+   angle: total rotation in radians (0: 2*PI, a full revolution).
 
-   The profile must be 2D. The surface borrows the profile curve. */
+   The profile must be 2D (INVALID_DIMENSION otherwise). The surface borrows
+   the profile curve. */
 
 typedef struct qaws_surface_revolution_desc
 {

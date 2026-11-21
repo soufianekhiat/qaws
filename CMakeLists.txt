@@ -261,7 +261,7 @@ if(QAWS_ENABLE_EXACT)
   )
 endif()
 
-# Both precisions in one library (docs/parameter_convention_plan.md): each
+# Both precisions in one library: each
 # source is compiled through two wrappers generated here, one per precision
 # (QAWS_SCALAR_IS_FLOAT 0 and 1), never directly: MSBuild does not rebuild
 # an object whose source includes another of the project's sources when
@@ -562,6 +562,8 @@ if(QAWS_INSTALL)
       src/qaws/qaws_platform.h
       src/qaws/qaws_core_types.h
       src/qaws/qaws_prepare.h
+      src/qaws/qaws_exact.h
+      src/qaws/qaws_motion.h
       src/qaws/qaws_hlsl.h
       src/qaws/qaws_glsl.h
       src/qaws/qaws_halide.h

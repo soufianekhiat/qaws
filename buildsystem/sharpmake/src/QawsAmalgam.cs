@@ -139,7 +139,7 @@ namespace Qaws
             SourceRootPath = Amalgamation.OutputRoot;
             SourceFilesExtensions.Add(".c");
 
-            // Both precisions (docs/parameter_convention_plan.md): qaws.c is
+            // Both precisions: qaws.c is
             // compiled through two wrappers beside it, one per precision, never
             // directly (as QawsLib's sources).
             if (Amalgamation.OutputRoot == null)

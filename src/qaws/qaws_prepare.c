@@ -470,12 +470,15 @@ qaws_status qaws_bezier_prepare_deriv_2d(
 	unsigned int degree)
 {
 	unsigned int i;
-	qaws_scalar n;
+	qaws_scalar n, n2, n3;
 
 	if (!control_points || degree < 1)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
+	/* (each from the control points: n dP, n (n - 1) d2P, n (n - 1) (n - 2) d3P, forward differences) */
 	n = (qaws_scalar)degree;
+	n2 = n * (qaws_scalar)(degree - 1);
+	n3 = degree >= 2 ? n2 * (qaws_scalar)(degree - 2) : (qaws_scalar)0;
 	if (out_d1_cp) {
 		for (i = 0; i < degree; i++) {
 			out_d1_cp[i].x = n * (control_points[i+1].x - control_points[i].x);
@@ -484,27 +487,16 @@ qaws_status qaws_bezier_prepare_deriv_2d(
 	}
 
 	if (out_d2_cp && degree >= 2) {
-		qaws_scalar m = (qaws_scalar)(degree - 1);
 		for (i = 0; i < degree - 1; i++) {
-			out_d2_cp[i].x = m * (out_d1_cp[i+1].x - out_d1_cp[i].x) / n;
-			out_d2_cp[i].y = m * (out_d1_cp[i+1].y - out_d1_cp[i].y) / n;
-		}
-		/* Re-scale: D2 CPs are n*(n-1) * second differences */
-		for (i = 0; i < degree - 1; i++) {
-			out_d2_cp[i].x *= n;
-			out_d2_cp[i].y *= n;
+			out_d2_cp[i].x = n2 * (control_points[i+2].x - 2 * control_points[i+1].x + control_points[i].x);
+			out_d2_cp[i].y = n2 * (control_points[i+2].y - 2 * control_points[i+1].y + control_points[i].y);
 		}
 	}
 
-	if (out_d3_cp && degree >= 3 && out_d2_cp) {
-		qaws_scalar k = (qaws_scalar)(degree - 2);
+	if (out_d3_cp && degree >= 3) {
 		for (i = 0; i < degree - 2; i++) {
-			out_d3_cp[i].x = k * (out_d2_cp[i+1].x - out_d2_cp[i].x) / (n * (qaws_scalar)(degree - 1));
-			out_d3_cp[i].y = k * (out_d2_cp[i+1].y - out_d2_cp[i].y) / (n * (qaws_scalar)(degree - 1));
-		}
-		for (i = 0; i < degree - 2; i++) {
-			out_d3_cp[i].x *= n * (qaws_scalar)(degree - 1);
-			out_d3_cp[i].y *= n * (qaws_scalar)(degree - 1);
+			out_d3_cp[i].x = n3 * (control_points[i+3].x - 3 * control_points[i+2].x + 3 * control_points[i+1].x - control_points[i].x);
+			out_d3_cp[i].y = n3 * (control_points[i+3].y - 3 * control_points[i+2].y + 3 * control_points[i+1].y - control_points[i].y);
 		}
 	}
 
@@ -519,12 +511,15 @@ qaws_status qaws_bezier_prepare_deriv_3d(
 	unsigned int degree)
 {
 	unsigned int i;
-	qaws_scalar n;
+	qaws_scalar n, n2, n3;
 
 	if (!control_points || degree < 1)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 
+	/* (each from the control points: n dP, n (n - 1) d2P, n (n - 1) (n - 2) d3P, forward differences) */
 	n = (qaws_scalar)degree;
+	n2 = n * (qaws_scalar)(degree - 1);
+	n3 = degree >= 2 ? n2 * (qaws_scalar)(degree - 2) : (qaws_scalar)0;
 	if (out_d1_cp) {
 		for (i = 0; i < degree; i++) {
 			out_d1_cp[i].x = n * (control_points[i+1].x - control_points[i].x);
@@ -533,8 +528,22 @@ qaws_status qaws_bezier_prepare_deriv_3d(
 		}
 	}
 
-	(void)out_d2_cp;
-	(void)out_d3_cp;
+	if (out_d2_cp && degree >= 2) {
+		for (i = 0; i < degree - 1; i++) {
+			out_d2_cp[i].x = n2 * (control_points[i+2].x - 2 * control_points[i+1].x + control_points[i].x);
+			out_d2_cp[i].y = n2 * (control_points[i+2].y - 2 * control_points[i+1].y + control_points[i].y);
+			out_d2_cp[i].z = n2 * (control_points[i+2].z - 2 * control_points[i+1].z + control_points[i].z);
+		}
+	}
+
+	if (out_d3_cp && degree >= 3) {
+		for (i = 0; i < degree - 2; i++) {
+			out_d3_cp[i].x = n3 * (control_points[i+3].x - 3 * control_points[i+2].x + 3 * control_points[i+1].x - control_points[i].x);
+			out_d3_cp[i].y = n3 * (control_points[i+3].y - 3 * control_points[i+2].y + 3 * control_points[i+1].y - control_points[i].y);
+			out_d3_cp[i].z = n3 * (control_points[i+3].z - 3 * control_points[i+2].z + 3 * control_points[i+1].z - control_points[i].z);
+		}
+	}
+
 	return QAWS_STATUS_OK;
 }
 

@@ -1305,7 +1305,7 @@ qaws_status qaws_curve_find_inflection_points(
 	}
 
 	*out_count = found;
-	return QAWS_STATUS_OK;
+	return found > parameter_capacity ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1507,7 +1507,7 @@ qaws_status qaws_curve_find_extrema(
 	}
 
 	*out_count = found;
-	return QAWS_STATUS_OK;
+	return found > parameter_capacity ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2754,7 +2754,8 @@ static unsigned int qaws_tess_eval_add(
 		*vertex_count = n + 1;
 		return n;
 	}
-	return n > 0 ? n - 1 : 0;
+	*out_status = QAWS_STATUS_BUFFER_TOO_SMALL;
+	return 0;
 }
 
 /* Collect all vertex indices on a horizontal edge (v = v_const,
@@ -2853,6 +2854,9 @@ qaws_status qaws_surface_tessellate(
 	if (!surface || !desc || !out_vertices || !out_vertex_count
 		|| !out_indices || !out_index_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	*out_vertex_count = 0;
+	*out_index_count = 0;
 
 	/* Apply defaults */
 	max_depth = desc->max_depth > 0 ? desc->max_depth : 5;
@@ -3083,16 +3087,16 @@ qaws_status qaws_surface_tessellate(
 	{
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, leaves[li].u0, leaves[li].v0, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, leaves[li].u1, leaves[li].v0, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, leaves[li].u0, leaves[li].v1, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, leaves[li].u1, leaves[li].v1, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 	}
 
 	/* ---- Phase 3: Triangulate each leaf with T-junction stitching ----
@@ -3164,7 +3168,7 @@ qaws_status qaws_surface_tessellate(
 		/* Add center vertex for fan */
 		i_center = qaws_tess_eval_add(surface, out_vertices, &vert_count,
 			vertex_capacity, u_mid, v_mid, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); return status; }
+		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 
 		/* Emit fan triangles: (center, perim[k], perim[k+1]) */
 		for (k = 0; k < perim_count; ++k)
@@ -3172,18 +3176,23 @@ qaws_status qaws_surface_tessellate(
 			unsigned int next = (k + 1) % perim_count;
 
 			if (idx_count + 3 > index_capacity)
+			{
+				status = QAWS_STATUS_BUFFER_TOO_SMALL;
 				break;
+			}
 			out_indices[idx_count++] = i_center;
 			out_indices[idx_count++] = perim[k];
 			out_indices[idx_count++] = perim[next];
 		}
+		if (status != QAWS_STATUS_OK)
+			break;
 	}
 
 	qaws_internal_free(leaves);
 
 	*out_vertex_count = vert_count;
 	*out_index_count = idx_count;
-	return QAWS_STATUS_OK;
+	return status;
 }
 
 /* ========================================================================== */

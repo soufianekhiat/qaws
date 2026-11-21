@@ -86,12 +86,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
       - name: Generate qaws.h + qaws.c
-        run: python buildsystem/amalgamate.py --output-dir amalgam --simd
+        run: cmake -DQAWS_OUTPUT_DIR=amalgam -DQAWS_SIMD=ON -P buildsystem/amalgamate.cmake
 
       - name: Compile and run (POSIX)
         if: runner.os != 'Windows'

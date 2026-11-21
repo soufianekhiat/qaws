@@ -670,6 +670,8 @@ qaws_status qaws_traversal_create_multi(
 	*out_traversal = NULL;
 
 	/* Validate: all curves must have same dimension */
+	if (!curves[0])
+		return QAWS_STATUS_INVALID_ARGUMENT;
 	{
 		qaws_dimension dim0 = curves[0]->dimension;
 		for (i = 1; i < curve_count; i++)

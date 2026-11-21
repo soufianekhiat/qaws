@@ -146,14 +146,17 @@ qaws_status qaws_curve_compute_rotation_minimizing_frames_3d(
 	qaws_vec3 const* initial_normal,
 	unsigned int count);
 
-/* Inflection point detection */
+/* Inflection point detection: the parameters of the curve's inflections (2D: the signed curvature changes sign; 3D:
+   |d1 x d2| dips toward 0), in order. *out_count the number found; QAWS_STATUS_BUFFER_TOO_SMALL when that passes
+   parameter_capacity (the first parameter_capacity written). */
 qaws_status qaws_curve_find_inflection_points(
 	qaws_scalar* out_parameters,
 	unsigned int* out_count,
 	qaws_curve const* curve,
 	unsigned int parameter_capacity);
 
-/* Extrema detection */
+/* Extrema detection: the parameters where the coordinate `axis` has a local extremum, in order. *out_count the number
+   found; QAWS_STATUS_BUFFER_TOO_SMALL when that passes parameter_capacity (the first parameter_capacity written). */
 qaws_status qaws_curve_find_extrema(
 	qaws_scalar* out_parameters,
 	unsigned int* out_count,
@@ -387,6 +390,10 @@ typedef struct qaws_tessellation_vertex {
 	qaws_scalar v;
 } qaws_tessellation_vertex;
 
+/* Quadtree tessellation into caller buffers, shared vertices written once (found by (u, v) among those written), the
+   triangles fanned about each leaf's center through every vertex on its sides (no T-junctions).
+   QAWS_STATUS_BUFFER_TOO_SMALL when either buffer fills: the counts are then those written so far, not those needed
+   (qaws_surface_tessellate_adaptive counts first). */
 qaws_status qaws_surface_tessellate(
 	qaws_tessellation_vertex* out_vertices,
 	unsigned int* out_vertex_count,
@@ -398,8 +405,9 @@ qaws_status qaws_surface_tessellate(
 	qaws_tessellation_desc const* desc);
 
 /* Adaptive tessellation by tolerances into caller buffers, without cracks and without allocation: a quadtree over (u, v)
-   whose quads split until the surface at their 3 x 3 test points is within the chord tolerance of the bilinear patch of
-   their corners and the normal turns by at most the angle tolerance across them. Deterministic: call with NULL buffers
+   whose quads split until the surface at their test points (side midpoints, center, the two triangles' centroids in
+   (u, v)) is within the chord tolerance of the quad's two triangles and the normal there is within half the angle
+   tolerance of the center's. Deterministic: call with NULL buffers
    for the counts, then with buffers of those sizes (BUFFER_TOO_SMALL with the counts otherwise). Triangles are
    counter-clockwise in (u, v). Vertices are written per quad: a point shared by quads repeats, with the same bits. */
 typedef struct qaws_surface_tessellation_desc
