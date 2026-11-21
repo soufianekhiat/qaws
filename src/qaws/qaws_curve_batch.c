@@ -7,6 +7,7 @@
 #include "internal/qaws_internal_flatten.h"
 #include "internal/qaws_internal_batch.h"
 #include "internal/qaws_internal_parallel.h"
+#include "internal/qaws_internal_progress.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -88,10 +89,10 @@ qaws_scalar cb_dot(qaws_scalar const* a, qaws_scalar const* b)
 }
 
 /* 1. flatten every curve; segment counts per curve for the self-intersection rule */
-qaws_status cb_flatten_all(cb_ctx* x, qaws_scalar* out_ext)
+static qaws_status cb_flatten_pg(cb_ctx* x, qaws_scalar* out_ext, qaws_pg* g)
 {
 	qaws_curve_batch_desc const* d = x->desc;
-	qaws_scalar ext;
+	qaws_scalar ext = 0;
 	unsigned int i;
 	qaws_status s = QAWS_STATUS_OK;
 	/* scene extent from a cheap sampling of every curve, to scale the defaults */
@@ -107,8 +108,15 @@ qaws_status cb_flatten_all(cb_ctx* x, qaws_scalar* out_ext)
 		unsigned int before = x->nseg;
 		s = qaws_internal_flatten_curve(&x->segs, &x->nseg, &x->capseg, d->curves[i], x->dim, x->flat, i);
 		x->seg_count[i] = x->nseg - before;
+		if (s == QAWS_STATUS_OK && g && QAWS_PG_STEP(g, i + 1))
+			s = QAWS_STATUS_CANCELLED;
 	}
 	return s;
+}
+
+qaws_status cb_flatten_all(cb_ctx* x, qaws_scalar* out_ext)
+{
+	return cb_flatten_pg(x, out_ext, NULL);
 }
 
 qaws_status cb_check(qaws_curve_batch_desc const* desc, unsigned int dim)
@@ -130,11 +138,15 @@ qaws_status cb_check(qaws_curve_batch_desc const* desc, unsigned int dim)
 /*  Prepared sets                                                      */
 /* ------------------------------------------------------------------ */
 
+static char const* const cs_stages[] = { "flatten" };
+static char const* const cp_stages[] = { "flatten", "query" };
+
 qaws_status qaws_curve_set_create(qaws_curve_set** out_set, qaws_curve_batch_desc const* desc)
 {
 	qaws_curve_set* set;
 	cb_ctx x;
-	qaws_scalar ext;
+	qaws_pg g;
+	qaws_scalar ext = 0;
 	unsigned int n, dim;
 	qaws_status s = cb_check(desc, 0);
 	if (s != QAWS_STATUS_OK)
@@ -162,10 +174,17 @@ qaws_status qaws_curve_set_create(qaws_curve_set** out_set, qaws_curve_batch_des
 	memcpy((void*)set->desc.curves, desc->curves, n * sizeof(qaws_curve*));
 	if (desc->families)
 		memcpy((void*)set->desc.families, desc->families, n * sizeof(unsigned int));
+	set->desc.progress = NULL;   /* (not kept: the queries take their own) */
 	memset(&x, 0, sizeof(x));
 	x.desc = &set->desc;
 	x.dim = dim;
-	s = cb_flatten_all(&x, &ext);
+	qaws_pg_init(&g, desc->progress, cs_stages, 1);
+	if (qaws_pg_stage(&g, 0, n))
+		s = QAWS_STATUS_CANCELLED;
+	else
+		s = cb_flatten_pg(&x, &ext, &g);
+	if (s == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
 	set->segs = x.segs;
 	set->nseg = x.nseg;
 	set->seg_count = x.seg_count;
@@ -457,7 +476,8 @@ static qaws_status cp_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 }
 
 static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaws_flat_seg const* segs, unsigned int nseg, qaws_scalar const* points,
-	unsigned int point_count, qaws_scalar max_distance, qaws_batch_executor const* executor, qaws_closest_point* out, qaws_curve_batch_stats* stats)
+	unsigned int point_count, qaws_scalar max_distance, qaws_batch_executor const* executor, qaws_closest_point* out, qaws_curve_batch_stats* stats,
+	qaws_pg* g)
 {
 	cp_job J;
 	qaws_bp_box* boxes;
@@ -498,7 +518,7 @@ static qaws_status cp_run(qaws_curve const* const* curves, unsigned int dim, qaw
 	J.max_distance = max_distance;
 	J.out = out;
 	if (s == QAWS_STATUS_OK)
-		s = qaws_internal_parallel(point_count, CP_GRAIN, cp_chunk, &J, executor);
+		s = qaws_internal_parallel_pg(point_count, CP_GRAIN, cp_chunk, &J, executor, g);
 	for (k = 0; k < nchunk; k++)
 	{
 		stats->candidate_count += J.stats[k].candidate_count;
@@ -519,6 +539,7 @@ qaws_status qaws_curve_batch_find_closest(
 	qaws_flat_seg* segs = NULL;
 	unsigned int nseg = 0, capseg = 0, i, dim;
 	qaws_scalar ext, flat;
+	qaws_pg g;
 	qaws_status s = QAWS_STATUS_OK;
 	memset(&st, 0, sizeof(st));
 	if (out_stats)
@@ -535,10 +556,21 @@ qaws_status qaws_curve_batch_find_closest(
 	dim = desc->curve_count && desc->curves[0]->dimension == QAWS_DIMENSION_3D ? 3 : 2;
 	ext = qaws_internal_flatten_extent(desc->curves, desc->curve_count, dim, NULL, 0);
 	flat = desc->flatness > 0 ? desc->flatness : ext / 1024;
+	qaws_pg_init(&g, desc->progress, cp_stages, 2);
+	if (qaws_pg_stage(&g, 0, desc->curve_count))
+		s = QAWS_STATUS_CANCELLED;
 	for (i = 0; i < desc->curve_count && s == QAWS_STATUS_OK; i++)
+	{
 		s = qaws_internal_flatten_curve(&segs, &nseg, &capseg, desc->curves[i], dim, flat, i);
+		if (s == QAWS_STATUS_OK && QAWS_PG_STEP(&g, i + 1))
+			s = QAWS_STATUS_CANCELLED;
+	}
+	if (s == QAWS_STATUS_OK && qaws_pg_stage(&g, 1, desc->point_count))
+		s = QAWS_STATUS_CANCELLED;
 	if (s == QAWS_STATUS_OK)
-		s = cp_run(desc->curves, dim, segs, nseg, desc->points, desc->point_count, desc->max_distance, desc->executor, out_points, &st);
+		s = cp_run(desc->curves, dim, segs, nseg, desc->points, desc->point_count, desc->max_distance, desc->executor, out_points, &st, &g);
+	if (s == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
 	if (out_stats)
 		*out_stats = st;
 	qaws_internal_free(segs);
@@ -553,14 +585,34 @@ qaws_status qaws_curve_set_find_closest(
 	unsigned int point_count,
 	qaws_scalar max_distance)
 {
+	return qaws_curve_set_find_closest_ex(out_points, out_stats, set, points, point_count, max_distance, NULL);
+}
+
+static char const* const csq_stages[] = { "query" };
+
+qaws_status qaws_curve_set_find_closest_ex(
+	qaws_closest_point* out_points,
+	qaws_curve_batch_stats* out_stats,
+	qaws_curve_set const* set,
+	qaws_scalar const* points,
+	unsigned int point_count,
+	qaws_scalar max_distance,
+	qaws_progress const* progress)
+{
 	qaws_curve_batch_stats st;
+	qaws_pg g;
 	qaws_status s;
 	memset(&st, 0, sizeof(st));
 	if (out_stats)
 		*out_stats = st;
 	if (!set || (point_count && (!points || !out_points)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	s = cp_run(set->desc.curves, set->dim, set->segs, set->nseg, points, point_count, max_distance, set->desc.executor, out_points, &st);
+	qaws_pg_init(&g, progress, csq_stages, 1);
+	if (qaws_pg_stage(&g, 0, point_count))
+		return QAWS_STATUS_CANCELLED;
+	s = cp_run(set->desc.curves, set->dim, set->segs, set->nseg, points, point_count, max_distance, set->desc.executor, out_points, &st, &g);
+	if (s == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
 	if (out_stats)
 		*out_stats = st;
 	return s;

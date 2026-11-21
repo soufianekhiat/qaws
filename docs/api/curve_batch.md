@@ -33,6 +33,7 @@ typedef struct qaws_curve_batch_desc {
     unsigned int flags;                    /* QAWS_CURVE_BATCH_* */
     qaws_scalar flatness;                  /* 0 = 2^-10 of the scene extent */
     qaws_batch_executor const* executor;   /* optional */
+    qaws_progress const* progress;         /* optional: cancel and progress reports */
 } qaws_curve_batch_desc;
 ```
 
@@ -98,6 +99,7 @@ typedef struct qaws_closest_desc {
     qaws_scalar max_distance;              /* 0 = no limit */
     qaws_scalar flatness;                  /* 0 = 2^-10 of the extent */
     qaws_batch_executor const* executor;   /* optional */
+    qaws_progress const* progress;         /* optional: cancel and progress reports */
 } qaws_closest_desc;
 
 typedef struct qaws_closest_point {
@@ -139,6 +141,16 @@ qaws_status qaws_curve_set_find_closest(qaws_closest_point* out_points, qaws_cur
 ```
 
 The same on a prepared set, with the set's flatness and executor.
+
+```c
+qaws_status qaws_curve_set_find_closest_ex(qaws_closest_point* out_points, qaws_curve_batch_stats* out_stats,
+    qaws_curve_set const* set, qaws_scalar const* points, unsigned int point_count, qaws_scalar max_distance,
+    qaws_progress const* progress);
+```
+
+The same with a progress ([progress.md](progress.md); may be NULL): stage `query`. A set does not keep the progress of
+its desc; `qaws_curve_batch_find_closest` reports `flatten` then `query`, `qaws_curve_set_create` `flatten`. Cancelled:
+`QAWS_STATUS_CANCELLED`, no set made, the closest points unspecified.
 
 ## Intersection and level-crossing types
 
@@ -200,6 +212,7 @@ typedef struct qaws_level_crossing_desc {
     unsigned int level_count;
     qaws_scalar flatness;                  /* 0 = 2^-10 of the extent */
     qaws_batch_executor const* executor;   /* optional */
+    qaws_progress const* progress;         /* optional: cancel and progress reports */
 } qaws_level_crossing_desc;
 
 typedef struct qaws_level_crossing {       /* sorted by (curve, parameter) */

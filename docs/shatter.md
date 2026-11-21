@@ -119,5 +119,10 @@ Points where a path's own curves join are not seams. The call counts the points 
 returns it when B has no surface or path. Region shatter ignores `kinds`.
 
 All of these functions only read their inputs, so they are safe to call from several threads on shared surfaces and
-curves. They take no executor and no cancel callback. Seams and shatter objects do not change after they are created,
-so several threads may read them at once.
+curves. Seams and shatter objects do not change after they are created, so several threads may read them at once.
+
+`executor` ([batch_executor.md](batch_executor.md)) runs the pair tests (triangle pairs, chord pairs, the
+arrangement's segment pairs) in chunks; their results are merged in the serial order, so the seams and pieces are the
+same bit for bit. `progress` ([progress.md](progress.md)): surface seams report `tessellate` then `pairs`, surface
+shatter adds `pieces`, 2D seams `flatten` then `pairs`, 2D shatter `flatten` then `arrange`. Cancelled:
+`QAWS_STATUS_CANCELLED` and no object made.

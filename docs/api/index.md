@@ -16,6 +16,7 @@ For concepts and design, start at [../index.md](../index.md).
 | [precision.md](precision.md) | `qaws_platform.h`, `qaws_precision.h`, `qaws_names.h`, `qaws_both.h` | Backend and precision selection, the `_f32` / `_f64` naming |
 | [alloc.md](alloc.md) | `qaws_alloc.h`, `qaws_allocator.h` | Allocators, settings, thread allocators, arenas |
 | [batch_executor.md](batch_executor.md) | `qaws_batch_executor.h` | Host-supplied parallel executor |
+| [progress.md](progress.md) | `qaws_progress.h` | Cancellation and progress reports of the long calls |
 | [curve.md](curve.md) | `qaws_curve.h` | Curve lifecycle |
 
 ## Curve families

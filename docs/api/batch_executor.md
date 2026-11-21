@@ -33,7 +33,7 @@ typedef struct qaws_batch_executor {
   chunk order afterwards, so the results do not depend on the executor.
 - A NULL executor, or one with a NULL `parallel_for`, runs the chunks on
   the calling thread.
-- With cancellation, the chunks go to the executor in waves (at least 32
+- With a progress (cancel), the chunks go to the executor in waves (at least 32
   chunks a wave, at most 16 waves), and the stop check runs between waves
   on the calling thread, never on the executor's threads.
 
@@ -47,7 +47,12 @@ An optional `qaws_batch_executor const* executor` member of:
 - the surface batch descriptors, [surface_batch.md](surface_batch.md);
 - the clipping descriptor, for its batched intersection,
   [clip.md](clip.md);
-- the exact kernel's batched descriptors, [exact.md](exact.md).
+- the exact kernel's batched descriptors, [exact.md](exact.md);
+- the seam descriptors (`qaws_surface_seam_desc`, `qaws_region_seam_desc`), for their pair tests,
+  [shatter.md](shatter.md).
+
+Each of these descs also has an optional `qaws_progress const* progress` beside the executor
+([progress.md](progress.md)): cancel and reports, on the calling thread, between the waves.
 
 ## Example
 

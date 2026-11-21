@@ -148,7 +148,8 @@ thread's allocator, else the default ([memory.md](memory.md)). Columns:
 | Traversal | tables at creation | yes | object | the traversal | evaluate and map: yes | yes |
 | Curve and surface batches | yes | yes | caller capacity and counts | prepared sets | executor | yes |
 
-No public function takes a cancellation callback. Prepared views publish
+The batches, the exact closest-point batches, and seams and shatter take a cancel and progress callback
+([api/progress.md](api/progress.md)). Prepared views publish
 their size (`qaws_curve_prepared_size`, `qaws_surface_prepared_size`); other
 operations publish no scratch-size bound.
 

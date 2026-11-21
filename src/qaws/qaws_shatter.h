@@ -18,6 +18,7 @@
 #include "qaws_status.h"
 #include "qaws_surface_types.h"
 #include "qaws_path.h"
+#include "qaws_batch_executor.h"
 
 /*
  * Seams and shatter of curved surfaces, as Houdini's Boolean "Seam" and
@@ -71,6 +72,8 @@ typedef struct qaws_surface_seam_desc
 	unsigned int kinds;               /* QAWS_SEAM_*: the seams wanted (shatter: A_B always) */
 	unsigned int resolution;          /* grid cells along each side of a surface's domain; 0: 64 */
 	qaws_scalar tolerance;            /* a point's gap between the two surfaces; 0: 1e-9 (f32: 1e-5) of the extent */
+	qaws_batch_executor const* executor;   /* optional: runs the pair search in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_surface_seam_desc;
 
 typedef struct qaws_seam_point
@@ -153,6 +156,8 @@ typedef struct qaws_region_seam_desc
 	unsigned int kinds;               /* QAWS_SEAM_*: the seams wanted */
 	qaws_scalar flatness;             /* the chords' deviation from the curves; 0: 1e-3 of the extent */
 	qaws_scalar tolerance;            /* a crossing's gap between its curves; 0: 1e-12 (f32: 1e-6) of the extent */
+	qaws_batch_executor const* executor;   /* optional: runs the pair search in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_region_seam_desc;
 
 typedef struct qaws_region_seam_point

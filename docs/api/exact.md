@@ -289,6 +289,7 @@ typedef struct qaws_exact_batch_desc
 	unsigned int const* families;          /* optional, one id per curve */
 	unsigned int flags;                    /* QAWS_EXACT_BATCH_* */
 	qaws_batch_executor const* executor;   /* optional: runs independent work in parallel */
+	qaws_progress const* progress;         /* optional: cancel and progress reports (stage "query") */
 } qaws_exact_batch_desc;
 
 typedef struct qaws_exact_surface_batch_desc
@@ -298,6 +299,7 @@ typedef struct qaws_exact_surface_batch_desc
 	qaws_exact_surface const* const* surfaces;
 	unsigned int surface_count;
 	qaws_batch_executor const* executor;
+	qaws_progress const* progress;
 } qaws_exact_surface_batch_desc;
 
 typedef struct qaws_exact_ssi_batch_desc
@@ -307,6 +309,7 @@ typedef struct qaws_exact_ssi_batch_desc
 	unsigned int const* families;          /* optional, one id per surface */
 	unsigned int min_depth;                /* subdivision depth before certifying */
 	qaws_batch_executor const* executor;
+	qaws_progress const* progress;         /* closest points: stage "query" */
 } qaws_exact_ssi_batch_desc;
 
 typedef struct qaws_exact_batch_stats
@@ -323,7 +326,9 @@ typedef struct qaws_exact_batch_stats
 `QAWS_EXACT_BATCH_SELF` asks an intersection batch to add each curve's
 self-intersections; `families` skips pairs with the same id.
 `qaws_exact_surface_batch_desc` describes N curves against M surfaces.
-`executor` is the one of the float batches ([batch_executor.md](batch_executor.md)).
+`executor` is the one of the float batches ([batch_executor.md](batch_executor.md)); `progress` the one of
+[progress.md](progress.md) (the closest-point batches report one stage, `query`, and return
+`QAWS_STATUS_CANCELLED` when cancelled).
 The kernel has no mutable globals, so results are identical whatever the
 executor does.
 

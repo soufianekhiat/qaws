@@ -4,6 +4,8 @@
 #include "qaws_exact_solve.h"
 #include "../internal/qaws_internal_broadphase.h"
 #include "../internal/qaws_internal_parallel.h"
+#include "../internal/qaws_internal_progress.h"
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -360,6 +362,23 @@ static qaws_status cl_query_make(double const* p, unsigned int dim, int space_ex
 
 #define CL_GRAIN 4   /* certified queries are costly: small chunks balance */
 
+static char const* const cl_query_stages[] = { "query" };
+
+/* the query stage: the chunks through the executor, polled through progress */
+static qaws_status cl_run_query(unsigned int point_count, qaws_status (*job)(void*, unsigned int, unsigned int, unsigned int), void* J,
+	qaws_batch_executor const* executor, qaws_progress const* progress)
+{
+	qaws_pg g;
+	qaws_status st;
+	qaws_pg_init(&g, progress, cl_query_stages, 1);
+	if (qaws_pg_stage(&g, 0, point_count))
+		return QAWS_STATUS_CANCELLED;
+	st = qaws_internal_parallel_pg(point_count, CL_GRAIN, job, J, executor, &g);
+	if (st == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
+	return st;
+}
+
 /* the shared state of a certified closest-point run (curves) */
 typedef struct ecl_job
 {
@@ -624,7 +643,7 @@ qaws_status qaws_exact_curve_batch_closest(qaws_exact_closest_point* out_points,
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		if (st == QAWS_STATUS_OK)
-			st = qaws_internal_parallel(point_count, CL_GRAIN, ecl_chunk, &J, desc->executor);
+			st = cl_run_query(point_count, ecl_chunk, &J, desc->executor, desc->progress);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;
@@ -1450,7 +1469,7 @@ qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* o
 		if (!J.chunk_stats)
 			st = QAWS_STATUS_ALLOCATION_FAILURE;
 		else
-			st = qaws_internal_parallel(point_count, CL_GRAIN, esc_chunk, &J, desc->executor);
+			st = cl_run_query(point_count, esc_chunk, &J, desc->executor, desc->progress);
 		for (ch = 0; J.chunk_stats && ch < nchunk; ch++)
 		{
 			stats.candidate_count += J.chunk_stats[ch].candidate_count;

@@ -517,6 +517,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_curve_batch.h
       src/qaws/qaws_view.h
       src/qaws/qaws_batch_executor.h
+      src/qaws/qaws_progress.h
       src/qaws/qaws_surface_batch.h
       src/qaws/qaws_operations.h
       src/qaws/qaws_interpolating.h

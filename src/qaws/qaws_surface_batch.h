@@ -41,6 +41,7 @@ typedef struct qaws_curve_surface_batch_desc
 	unsigned int surface_count;
 	qaws_scalar flatness;                   /* deviation bound; 0 = 2^-9 of the scene extent */
 	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_curve_surface_batch_desc;
 
 /* sorted by (curve, surface, t) */
@@ -83,6 +84,7 @@ typedef struct qaws_surface_batch_desc
 	unsigned int const* families;   /* optional, one id per surface */
 	qaws_scalar flatness;           /* deviation bound; 0 = 2^-9 of the scene extent */
 	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_surface_batch_desc;
 
 /* points[first .. first + count - 1] of the point buffer; closed when the
@@ -131,6 +133,7 @@ typedef struct qaws_surface_batch_closest_desc
 	qaws_scalar max_distance;           /* 0 = no limit */
 	qaws_scalar flatness;               /* 0 = 2^-9 of the extent */
 	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_surface_batch_closest_desc;
 
 typedef struct qaws_surface_batch_closest
@@ -166,6 +169,7 @@ typedef struct qaws_surface_ray_desc
 	qaws_scalar max_t;                  /* 0 = no limit */
 	qaws_scalar flatness;               /* 0 = 2^-9 of the extent */
 	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_surface_ray_desc;
 
 typedef struct qaws_surface_ray_hit
@@ -182,5 +186,14 @@ qaws_status qaws_surface_set_find_closest(
 	qaws_scalar const* points,
 	unsigned int point_count,
 	qaws_scalar max_distance);
+/* the same with a progress (qaws_progress.h; may be NULL): stage "query" */
+qaws_status qaws_surface_set_find_closest_ex(
+	qaws_surface_batch_closest* out_points,
+	qaws_surface_batch_stats* out_stats,
+	qaws_surface_set const* set,
+	qaws_scalar const* points,
+	unsigned int point_count,
+	qaws_scalar max_distance,
+	qaws_progress const* progress);
 
 #endif /* QAWS_SURFACE_BATCH_H */

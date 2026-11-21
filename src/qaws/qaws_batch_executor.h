@@ -11,6 +11,8 @@
  * not depend on the executor. Without one the work runs on the calling
  * thread.
  */
+#include "qaws_progress.h"   /* (the descs with an executor take a progress beside it) */
+
 typedef void (*qaws_batch_task_fn)(void* ctx, unsigned int begin, unsigned int end);
 
 typedef struct qaws_batch_executor

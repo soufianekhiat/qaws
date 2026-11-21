@@ -1,5 +1,6 @@
 #include "qaws_internal_parallel.h"
 #include "qaws_internal_memory.h"
+#include "qaws_internal_progress.h"
 #include <stdlib.h>
 
 #define PAR_MAX_CHUNKS 256
@@ -56,9 +57,10 @@ qaws_status qaws_internal_parallel(unsigned int count, unsigned int grain, qaws_
 	return qaws_internal_parallel_stop(count, grain, job, user, executor, NULL, NULL);
 }
 
-qaws_status qaws_internal_parallel_stop(unsigned int count, unsigned int grain,
+/* stop's checks; done (may be NULL): set before each to the items of the chunks finished */
+static qaws_status par_run(unsigned int count, unsigned int grain,
 	qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end), void* user, qaws_batch_executor const* executor,
-	int (*stop)(void* stop_user), void* stop_user)
+	int (*stop)(void* stop_user), void* stop_user, unsigned long long* done)
 {
 	par_wrap w;
 	unsigned int k;
@@ -90,6 +92,8 @@ qaws_status qaws_internal_parallel_stop(unsigned int count, unsigned int grain,
 		for (k = 0; k < w.chunks; k += wave)
 		{
 			unsigned int nk = w.chunks - k < wave ? w.chunks - k : wave;
+			if (done)
+				*done = (unsigned long long)w.count * k / w.chunks;
 			if (k && stop(stop_user))
 			{
 				qaws_internal_free(w.status);
@@ -104,6 +108,8 @@ qaws_status qaws_internal_parallel_stop(unsigned int count, unsigned int grain,
 	else if (stop)
 		for (k = 0; k < w.chunks; k++)
 		{
+			if (done)
+				*done = (unsigned long long)w.count * k / w.chunks;
 			if (k && stop(stop_user))
 			{
 				qaws_internal_free(w.status);
@@ -116,5 +122,44 @@ qaws_status qaws_internal_parallel_stop(unsigned int count, unsigned int grain,
 	for (k = 0; k < w.chunks && s == QAWS_STATUS_OK; k++)
 		s = w.status[k];
 	qaws_internal_free(w.status);
+	if (done && s == QAWS_STATUS_OK)
+		*done = count;
+	return s;
+}
+
+qaws_status qaws_internal_parallel_stop(unsigned int count, unsigned int grain,
+	qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end), void* user, qaws_batch_executor const* executor,
+	int (*stop)(void* stop_user), void* stop_user)
+{
+	return par_run(count, grain, job, user, executor, stop, stop_user, NULL);
+}
+
+typedef struct par_pg
+{
+	qaws_pg* g;
+	unsigned long long base, items;
+} par_pg;
+
+/* (stop for qaws_internal_parallel_pg: the items finished into the stage's done, then a poll) */
+static int par_pg_stop(void* user)
+{
+	par_pg* q = (par_pg*)user;
+	return qaws_pg_chunk(q->g, q->base + q->items);
+}
+
+qaws_status qaws_internal_parallel_pg(unsigned int count, unsigned int grain,
+	qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end), void* user, qaws_batch_executor const* executor,
+	qaws_pg* g)
+{
+	par_pg q;
+	qaws_status s;
+	if (!g || !g->p)
+		return par_run(count, grain, job, user, executor, NULL, NULL, NULL);
+	q.g = g;
+	q.base = g->done;
+	q.items = 0;
+	s = par_run(count, grain, job, user, executor, par_pg_stop, &q, &q.items);
+	if (s == QAWS_STATUS_OK && QAWS_PG_STEP(g, q.base + count))
+		s = QAWS_STATUS_CANCELLED;
 	return s;
 }

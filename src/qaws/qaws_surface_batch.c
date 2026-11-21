@@ -7,6 +7,7 @@
 #include "internal/qaws_internal_flatten.h"
 #include "internal/qaws_internal_batch.h"
 #include "internal/qaws_internal_parallel.h"
+#include "internal/qaws_internal_progress.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,8 +50,12 @@ qaws_scalar sb_dot(qaws_scalar const* a, qaws_scalar const* b)
 /*  Prepared surface sets                                              */
 /* ------------------------------------------------------------------ */
 
+static char const* const ss_stages[] = { "flatten" };
+static char const* const sc_stages[] = { "flatten", "query" };
+
 qaws_status qaws_surface_set_create(qaws_surface_set** out_set, qaws_surface_batch_desc const* desc)
 {
+	qaws_pg g;
 	qaws_surface_set* set;
 	unsigned int i, n, cap = 0;
 	qaws_status s = QAWS_STATUS_OK;
@@ -75,10 +80,20 @@ qaws_status qaws_surface_set_create(qaws_surface_set** out_set, qaws_surface_bat
 	memcpy((void*)set->desc.surfaces, desc->surfaces, n * sizeof(qaws_surface*));
 	if (desc->families)
 		memcpy((void*)set->desc.families, desc->families, n * sizeof(unsigned int));
+	set->desc.progress = NULL;   /* (not kept: the queries take their own) */
 	set->ext = qaws_internal_flatten_extent(NULL, 0, 3, desc->surfaces, n);
 	set->flat = desc->flatness > 0 ? desc->flatness : set->ext / 512;
+	qaws_pg_init(&g, desc->progress, ss_stages, 1);
+	if (qaws_pg_stage(&g, 0, n))
+		s = QAWS_STATUS_CANCELLED;
 	for (i = 0; i < n && s == QAWS_STATUS_OK; i++)
+	{
 		s = qaws_internal_flatten_surface(&set->patches, &set->npatch, &cap, desc->surfaces[i], set->flat, i);
+		if (s == QAWS_STATUS_OK && QAWS_PG_STEP(&g, i + 1))
+			s = QAWS_STATUS_CANCELLED;
+	}
+	if (s == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
 	if (s != QAWS_STATUS_OK)
 	{
 		qaws_surface_set_destroy(set);
@@ -424,7 +439,8 @@ static qaws_status sc_chunk(void* ctx, unsigned int chunk, unsigned int begin, u
 }
 
 static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch const* patches, unsigned int npatch, qaws_scalar const* points,
-	unsigned int point_count, qaws_scalar max_distance, qaws_batch_executor const* executor, qaws_surface_batch_closest* out, qaws_surface_batch_stats* stats)
+	unsigned int point_count, qaws_scalar max_distance, qaws_batch_executor const* executor, qaws_surface_batch_closest* out, qaws_surface_batch_stats* stats,
+	qaws_pg* g)
 {
 	sc_job J;
 	qaws_bp_box* boxes;
@@ -463,7 +479,7 @@ static qaws_status sc_run(qaws_surface const* const* surfaces, qaws_flat_patch c
 	J.max_distance = max_distance;
 	J.out = out;
 	if (s == QAWS_STATUS_OK)
-		s = qaws_internal_parallel(point_count, SC_GRAIN, sc_chunk, &J, executor);
+		s = qaws_internal_parallel_pg(point_count, SC_GRAIN, sc_chunk, &J, executor, g);
 	for (k = 0; k < nchunk; k++)
 	{
 		stats->candidate_count += J.stats[k].candidate_count;
@@ -484,6 +500,7 @@ qaws_status qaws_surface_batch_find_closest(
 	qaws_flat_patch* patches = NULL;
 	unsigned int npatch = 0, cap = 0, i;
 	qaws_scalar ext, flat;
+	qaws_pg g;
 	qaws_status s = QAWS_STATUS_OK;
 	memset(&st, 0, sizeof(st));
 	if (out_stats)
@@ -495,10 +512,21 @@ qaws_status qaws_surface_batch_find_closest(
 			return QAWS_STATUS_INVALID_ARGUMENT;
 	ext = qaws_internal_flatten_extent(NULL, 0, 3, desc->surfaces, desc->surface_count);
 	flat = desc->flatness > 0 ? desc->flatness : ext / 512;
+	qaws_pg_init(&g, desc->progress, sc_stages, 2);
+	if (qaws_pg_stage(&g, 0, desc->surface_count))
+		s = QAWS_STATUS_CANCELLED;
 	for (i = 0; i < desc->surface_count && s == QAWS_STATUS_OK; i++)
+	{
 		s = qaws_internal_flatten_surface(&patches, &npatch, &cap, desc->surfaces[i], flat, i);
+		if (s == QAWS_STATUS_OK && QAWS_PG_STEP(&g, i + 1))
+			s = QAWS_STATUS_CANCELLED;
+	}
+	if (s == QAWS_STATUS_OK && qaws_pg_stage(&g, 1, desc->point_count))
+		s = QAWS_STATUS_CANCELLED;
 	if (s == QAWS_STATUS_OK)
-		s = sc_run(desc->surfaces, patches, npatch, desc->points, desc->point_count, desc->max_distance, desc->executor, out_points, &st);
+		s = sc_run(desc->surfaces, patches, npatch, desc->points, desc->point_count, desc->max_distance, desc->executor, out_points, &st, &g);
+	if (s == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
 	if (out_stats)
 		*out_stats = st;
 	qaws_internal_free(patches);
@@ -513,14 +541,34 @@ qaws_status qaws_surface_set_find_closest(
 	unsigned int point_count,
 	qaws_scalar max_distance)
 {
+	return qaws_surface_set_find_closest_ex(out_points, out_stats, set, points, point_count, max_distance, NULL);
+}
+
+static char const* const ssq_stages[] = { "query" };
+
+qaws_status qaws_surface_set_find_closest_ex(
+	qaws_surface_batch_closest* out_points,
+	qaws_surface_batch_stats* out_stats,
+	qaws_surface_set const* set,
+	qaws_scalar const* points,
+	unsigned int point_count,
+	qaws_scalar max_distance,
+	qaws_progress const* progress)
+{
 	qaws_surface_batch_stats st;
+	qaws_pg g;
 	qaws_status s;
 	memset(&st, 0, sizeof(st));
 	if (out_stats)
 		*out_stats = st;
 	if (!set || (point_count && (!points || !out_points)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	s = sc_run(set->desc.surfaces, set->patches, set->npatch, points, point_count, max_distance, set->desc.executor, out_points, &st);
+	qaws_pg_init(&g, progress, ssq_stages, 1);
+	if (qaws_pg_stage(&g, 0, point_count))
+		return QAWS_STATUS_CANCELLED;
+	s = sc_run(set->desc.surfaces, set->patches, set->npatch, points, point_count, max_distance, set->desc.executor, out_points, &st, &g);
+	if (s == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
 	if (out_stats)
 		*out_stats = st;
 	return s;

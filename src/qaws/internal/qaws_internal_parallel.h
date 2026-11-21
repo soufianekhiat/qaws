@@ -2,6 +2,7 @@
 #define QAWS_INTERNAL_PARALLEL_H
 
 #include "../qaws_curve_batch.h"
+#include "qaws_internal_progress.h"
 
 /*
  * Work split into chunks the batch owns: [0, count) in chunk_count ranges of
@@ -20,5 +21,11 @@ qaws_status qaws_internal_parallel(unsigned int count, unsigned int grain, qaws_
 qaws_status qaws_internal_parallel_stop(unsigned int count, unsigned int grain,
 	qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end), void* user, qaws_batch_executor const* executor,
 	int (*stop)(void* stop_user), void* stop_user);
+
+/* The same polled through g (qaws_internal_progress.h; may be NULL), cancel checked as stop is: the stage's done raised by
+   the items of the chunks finished, from what it was (count more once all ran) */
+qaws_status qaws_internal_parallel_pg(unsigned int count, unsigned int grain,
+	qaws_status (*job)(void* user, unsigned int chunk, unsigned int begin, unsigned int end), void* user, qaws_batch_executor const* executor,
+	qaws_pg* g);
 
 #endif /* QAWS_INTERNAL_PARALLEL_H */

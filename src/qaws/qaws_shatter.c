@@ -9,6 +9,7 @@
 #include "internal/qaws_internal_broadphase.h"
 #include "internal/qaws_internal_surface.h"
 #include "internal/qaws_internal_flatten.h"
+#include "internal/qaws_internal_progress.h"
 #include "qaws_operations.h"
 #include <math.h>
 #include <stdlib.h>
@@ -38,6 +39,8 @@ typedef struct sh_scene
 	unsigned int nv, nt;
 	double extent, tol;
 	double shift;                   /* the grids' moves for the crossings (sh_scene_build) */
+	qaws_pg* pg;                    /* the call's progress (may be NULL) */
+	qaws_batch_executor const* executor;   /* the pair search's (may be NULL) */
 } sh_scene;
 
 static void sh_scene_free(sh_scene* S)
@@ -66,11 +69,13 @@ static int sh_eval(double* p, double* pu, double* pv, qaws_surface const* s, dou
 	return 1;
 }
 
-static qaws_status sh_scene_build(sh_scene* S, qaws_surface_seam_desc const* d)
+static qaws_status sh_scene_build(sh_scene* S, qaws_surface_seam_desc const* d, qaws_pg* pg)
 {
 	unsigned int k, i, j, n, t = 0;
 	double lo[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, hi[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL }, wu, wv;
 	memset(S, 0, sizeof *S);
+	S->pg = pg;
+	S->executor = d->executor;
 	S->ns = d->a_count + d->b_count;
 	S->n = n = d->resolution ? d->resolution : 64u;
 	if (n > 4096)
@@ -129,6 +134,8 @@ static qaws_status sh_scene_build(sh_scene* S, qaws_surface_seam_desc const* d)
 				S->tri[3 * (size_t)t] = a; S->tri[3 * (size_t)t + 1] = b; S->tri[3 * (size_t)t + 2] = c; S->tsurf[t++] = k;
 				S->tri[3 * (size_t)t] = a; S->tri[3 * (size_t)t + 1] = c; S->tri[3 * (size_t)t + 2] = e; S->tsurf[t++] = k;
 			}
+		if (pg && QAWS_PG_STEP(pg, k + 1))
+			return QAWS_STATUS_CANCELLED;
 	}
 	S->extent = sqrt((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
 	if (!(S->extent > 0))
@@ -259,7 +266,7 @@ static int sh_push(sh_seg_job* J, sh_event const* e)
 }
 
 /* a triangle pair's crossing: its two events, pushed one after the other (a segment); none when not exactly two */
-static qaws_status sh_visit(void* user, unsigned int i, unsigned int j)
+static qaws_status sh_visit_core(void* user, unsigned int i, unsigned int j)
 {
 	sh_seg_job* J = (sh_seg_job*)user;
 	sh_scene const* S = J->S;
@@ -325,6 +332,74 @@ static qaws_status sh_visit(void* user, unsigned int i, unsigned int j)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	return QAWS_STATUS_OK;
+}
+
+/* the serial walk's visit: the progress polled on every pair */
+static qaws_status sh_visit(void* user, unsigned int i, unsigned int j)
+{
+	sh_seg_job* J = (sh_seg_job*)user;
+	if (J->S->pg && QAWS_PG_STEP(J->S->pg, J->S->pg->done + 1))
+		return QAWS_STATUS_CANCELLED;
+	return sh_visit_core(user, i, j);
+}
+
+/* through an executor: each chunk's events in a job of its own (no poll: never on the executor's threads) */
+static qaws_status sh_visit_chunk(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	return sh_visit_core((sh_seg_job*)user + chunk, i, j);
+}
+
+/* the pairs of the broad phase's serial walk through executor, the chunks' events appended to J's in the chunks' order
+   (the serial walk's order: the same events in the same order); progress polled between the executor's waves */
+static qaws_status sh_seams_parallel(sh_seg_job* J, qaws_bp_box const* box, unsigned int n, qaws_batch_executor const* executor, qaws_pg* pg)
+{
+	qaws_bp_grid* grid = NULL;
+	sh_seg_job* Jc;
+	unsigned int nch, c, total = J->nev;
+	qaws_status st = qaws_internal_grid_create(&grid, box, n, 3);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	nch = qaws_internal_grid_pair_chunks(grid);
+	Jc = (sh_seg_job*)qaws_internal_zalloc((size_t)nch + 1, sizeof *Jc);
+	if (!Jc)
+	{
+		qaws_internal_grid_destroy(grid);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (c = 0; c < nch; c++)
+	{
+		Jc[c].S = J->S;
+		Jc[c].kinds = J->kinds;
+	}
+	st = qaws_internal_grid_pairs_stop(NULL, grid, box, sh_accept, J, sh_visit_chunk, Jc, executor, pg ? qaws_pg_stop_each : NULL, pg);
+	for (c = 0; c < nch; c++)
+	{
+		J->oom |= Jc[c].oom;
+		total += Jc[c].nev;
+	}
+	if (st == QAWS_STATUS_OK && !J->oom && total > J->cap)
+	{
+		sh_event* ne = (sh_event*)qaws_internal_realloc(J->ev, qaws_internal_mul2(sizeof(sh_event), (size_t)total));
+		if (ne)
+		{
+			J->ev = ne;
+			J->cap = total;
+		}
+		else
+			J->oom = 1;
+	}
+	for (c = 0; c < nch; c++)
+	{
+		if (st == QAWS_STATUS_OK && !J->oom && Jc[c].nev)
+		{
+			memcpy(J->ev + J->nev, Jc[c].ev, sizeof(sh_event) * Jc[c].nev);
+			J->nev += Jc[c].nev;
+		}
+		qaws_internal_free(Jc[c].ev);
+	}
+	qaws_internal_free(Jc);
+	qaws_internal_grid_destroy(grid);
+	return J->oom && st == QAWS_STATUS_OK ? QAWS_STATUS_ALLOCATION_FAILURE : st;
 }
 
 /* ---- Newton onto both surfaces ---------------------------------------------------------------------------------------- */
@@ -494,7 +569,12 @@ static qaws_status sh_seams(qaws_surface_seams** out, sh_scene* S, unsigned int 
 			box[i].lo[k] = fmin(a, fmin(b, c)) - pad;
 			box[i].hi[k] = fmax(a, fmax(b, c)) + pad;
 		}
-	st = qaws_internal_broadphase(NULL, box, S->nt, 3, sh_accept, sh_visit, &J);
+	if (S->pg && qaws_pg_stage(S->pg, 1, 0))
+		st = QAWS_STATUS_CANCELLED;
+	else if (S->executor && S->executor->parallel_for)
+		st = sh_seams_parallel(&J, box, S->nt, S->executor, S->pg);
+	else
+		st = qaws_internal_broadphase(NULL, box, S->nt, 3, sh_accept, sh_visit, &J);
 	if (J.oom)
 		goto oom;
 	if (st != QAWS_STATUS_OK)
@@ -717,8 +797,12 @@ static int sh_desc_ok(qaws_surface_seam_desc const* d)
 	return 1;
 }
 
+static char const* const sh_seam_stages[] = { "tessellate", "pairs" };
+static char const* const sh_shatter_stages[] = { "tessellate", "pairs", "pieces" };
+
 qaws_status qaws_surface_seams_create(qaws_surface_seams** out_seams, qaws_surface_seam_desc const* desc)
 {
+	qaws_pg g;
 	sh_scene S;
 	qaws_status st;
 	if (!out_seams)
@@ -726,9 +810,13 @@ qaws_status qaws_surface_seams_create(qaws_surface_seams** out_seams, qaws_surfa
 	*out_seams = NULL;
 	if (!sh_desc_ok(desc) || !(desc->kinds & (QAWS_SEAM_A_B | QAWS_SEAM_A_A | QAWS_SEAM_B_B)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = sh_scene_build(&S, desc);
+	memset(&S, 0, sizeof S);   /* (freed whatever the stage) */
+	qaws_pg_init(&g, desc->progress, sh_seam_stages, 2);
+	st = qaws_pg_stage(&g, 0, desc->a_count + desc->b_count) ? QAWS_STATUS_CANCELLED : sh_scene_build(&S, desc, &g);
 	if (st == QAWS_STATUS_OK)
 		st = sh_seams(out_seams, &S, desc->kinds);
+	if (st == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
 	sh_scene_free(&S);
 	return st;
 }
@@ -868,6 +956,7 @@ typedef struct sh_cut_job
 	unsigned int nc, cap;
 	int oom;
 	double eps;
+	qaws_pg* pg;                    /* the call's progress (may be NULL) */
 } sh_cut_job;
 
 static int sh_cut_push(sh_cut_job* J, unsigned int s, double t)
@@ -887,7 +976,7 @@ static int sh_cut_push(sh_cut_job* J, unsigned int s, double t)
 	return 1;
 }
 
-static qaws_status sh_cut_visit(void* user, unsigned int i, unsigned int j)
+static qaws_status sh_cut_visit_core(void* user, unsigned int i, unsigned int j)
 {
 	sh_cut_job* J = (sh_cut_job*)user;
 	double const *a = J->A->seg + 4 * (size_t)i, *b = J->A->seg + 4 * (size_t)j;
@@ -921,6 +1010,72 @@ static qaws_status sh_cut_visit(void* user, unsigned int i, unsigned int j)
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	return QAWS_STATUS_OK;
+}
+
+/* the serial walk's visit: cancel polled (the progress's done is the stage's own) */
+static qaws_status sh_cut_visit(void* user, unsigned int i, unsigned int j)
+{
+	sh_cut_job* J = (sh_cut_job*)user;
+	if (J->pg && qaws_pg_stop(J->pg))
+		return QAWS_STATUS_CANCELLED;
+	return sh_cut_visit_core(user, i, j);
+}
+
+static qaws_status sh_cut_visit_chunk(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	return sh_cut_visit_core((sh_cut_job*)user + chunk, i, j);
+}
+
+/* as sh_seams_parallel, for the arrangement's cuts */
+static qaws_status sh_cut_parallel(sh_cut_job* J, qaws_bp_box const* box, unsigned int n, qaws_batch_executor const* executor)
+{
+	qaws_bp_grid* grid = NULL;
+	sh_cut_job* Jc;
+	unsigned int nch, c, total = J->nc;
+	qaws_status st = qaws_internal_grid_create(&grid, box, n, 2);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	nch = qaws_internal_grid_pair_chunks(grid);
+	Jc = (sh_cut_job*)qaws_internal_zalloc((size_t)nch + 1, sizeof *Jc);
+	if (!Jc)
+	{
+		qaws_internal_grid_destroy(grid);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (c = 0; c < nch; c++)
+	{
+		Jc[c].A = J->A;
+		Jc[c].eps = J->eps;
+	}
+	st = qaws_internal_grid_pairs_stop(NULL, grid, box, NULL, NULL, sh_cut_visit_chunk, Jc, executor, J->pg ? qaws_pg_stop_each : NULL, J->pg);
+	for (c = 0; c < nch; c++)
+	{
+		J->oom |= Jc[c].oom;
+		total += Jc[c].nc;
+	}
+	if (st == QAWS_STATUS_OK && !J->oom && total > J->cap)
+	{
+		double* nc2 = (double*)qaws_internal_realloc(J->cut, qaws_internal_mul3(sizeof(double), 2, (size_t)total));
+		if (nc2)
+		{
+			J->cut = nc2;
+			J->cap = total;
+		}
+		else
+			J->oom = 1;
+	}
+	for (c = 0; c < nch; c++)
+	{
+		if (st == QAWS_STATUS_OK && !J->oom && Jc[c].nc)
+		{
+			memcpy(J->cut + 2 * (size_t)J->nc, Jc[c].cut, sizeof(double) * 2 * Jc[c].nc);
+			J->nc += Jc[c].nc;
+		}
+		qaws_internal_free(Jc[c].cut);
+	}
+	qaws_internal_free(Jc);
+	qaws_internal_grid_destroy(grid);
+	return J->oom && st == QAWS_STATUS_OK ? QAWS_STATUS_ALLOCATION_FAILURE : st;
 }
 
 typedef struct sh_pt
@@ -1013,7 +1168,7 @@ static int sh_wind(double const* p, unsigned int n, double x, double y)
 /* the segments split where they cross, their ends within eps one vertex, edges with a free end pruned, and the cycles
    traced with their face on the left: positive ones bound faces, each negative one is the hole of the smallest face
    around it (or of none) */
-static qaws_status sh_arr_build(sh_arr* A, double eps)
+static qaws_status sh_arr_build(sh_arr* A, double eps, qaws_pg* pg, qaws_batch_executor const* executor)
 {
 	sh_cut_job J;
 	qaws_bp_box* box = NULL;
@@ -1027,6 +1182,7 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 	memset(&J, 0, sizeof J);
 	J.A = A;
 	J.eps = eps;
+	J.pg = pg;
 	box = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (size_t)A->ns + 1));
 	if (!box)
 		goto done;
@@ -1037,7 +1193,7 @@ static qaws_status sh_arr_build(sh_arr* A, double eps)
 		box[i].lo[1] = fmin(s[1], s[3]) - eps; box[i].hi[1] = fmax(s[1], s[3]) + eps;
 		box[i].lo[2] = box[i].hi[2] = 0;
 	}
-	st = qaws_internal_broadphase(NULL, box, A->ns, 2, NULL, sh_cut_visit, &J);
+	st = executor && executor->parallel_for ? sh_cut_parallel(&J, box, A->ns, executor) : qaws_internal_broadphase(NULL, box, A->ns, 2, NULL, sh_cut_visit, &J);
 	if (J.oom || st != QAWS_STATUS_OK)
 	{
 		st = J.oom ? QAWS_STATUS_ALLOCATION_FAILURE : st;
@@ -1564,7 +1720,7 @@ static qaws_status sh_shatter_surface(qaws_surface_shatter* H, sh_scene const* S
 				goto done;
 		}
 	}
-	st = sh_arr_build(&A, eps);
+	st = sh_arr_build(&A, eps, S->pg, S->executor);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	/* each face inside the domain: a piece */
@@ -1666,6 +1822,7 @@ done:
 
 qaws_status qaws_surface_shatter_create(qaws_surface_shatter** out_shatter, qaws_surface_seam_desc const* desc, int b_is_solid)
 {
+	qaws_pg g;
 	sh_scene S;
 	qaws_surface_seams* R = NULL;
 	qaws_surface_shatter* H = NULL;
@@ -1676,15 +1833,24 @@ qaws_status qaws_surface_shatter_create(qaws_surface_shatter** out_shatter, qaws
 	*out_shatter = NULL;
 	if (!sh_desc_ok(desc) || !desc->a_count || !desc->b_count)
 		return QAWS_STATUS_INVALID_ARGUMENT;
-	st = sh_scene_build(&S, desc);
+	memset(&S, 0, sizeof S);   /* (freed whatever the stage) */
+	qaws_pg_init(&g, desc->progress, sh_shatter_stages, 3);
+	st = qaws_pg_stage(&g, 0, desc->a_count + desc->b_count) ? QAWS_STATUS_CANCELLED : sh_scene_build(&S, desc, &g);
 	if (st == QAWS_STATUS_OK)
 		st = sh_seams(&R, &S, QAWS_SEAM_A_B);
 	if (st == QAWS_STATUS_OK && !(H = (qaws_surface_shatter*)qaws_internal_zalloc(1, sizeof *H)))
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
+	if (st == QAWS_STATUS_OK && qaws_pg_stage(&g, 2, desc->a_count))
+		st = QAWS_STATUS_CANCELLED;
 	for (k = 0; st == QAWS_STATUS_OK && k < desc->a_count; k++)
+	{
 		st = sh_shatter_surface(H, &S, R, k, b_is_solid);
+		if (st == QAWS_STATUS_OK && QAWS_PG_STEP(&g, k + 1))
+			st = QAWS_STATUS_CANCELLED;
+	}
 	if (st == QAWS_STATUS_OK)
 	{
+		qaws_pg_end(&g);
 		*out_shatter = H;
 		H = NULL;
 	}
@@ -1730,6 +1896,8 @@ typedef struct sh_scene2
 	qaws_flat_seg* seg;
 	unsigned int ns, caps;
 	double extent, tol;
+	qaws_pg* pg;                    /* the call's progress (may be NULL) */
+	qaws_batch_executor const* executor;   /* the pair search's (may be NULL) */
 } sh_scene2;
 
 static void sh_scene2_free(sh_scene2* S)
@@ -1955,7 +2123,7 @@ static int sh_x2_accept(void* user, unsigned int i, unsigned int j)
 	return a->owner != b->owner || (a->index + 1 != b->index && b->index + 1 != a->index);
 }
 
-static qaws_status sh_x2_visit(void* user, unsigned int i, unsigned int j)
+static qaws_status sh_x2_visit_core(void* user, unsigned int i, unsigned int j)
 {
 	sh_x2_job* J = (sh_x2_job*)user;
 	sh_scene2 const* S = J->S;
@@ -2011,6 +2179,72 @@ static qaws_status sh_x2_visit(void* user, unsigned int i, unsigned int j)
 	return QAWS_STATUS_OK;
 }
 
+/* the serial walk's visit: the progress polled on every pair */
+static qaws_status sh_x2_visit(void* user, unsigned int i, unsigned int j)
+{
+	sh_x2_job* J = (sh_x2_job*)user;
+	if (J->S->pg && QAWS_PG_STEP(J->S->pg, J->S->pg->done + 1))
+		return QAWS_STATUS_CANCELLED;
+	return sh_x2_visit_core(user, i, j);
+}
+
+static qaws_status sh_x2_visit_chunk(void* user, unsigned int chunk, unsigned int i, unsigned int j)
+{
+	return sh_x2_visit_core((sh_x2_job*)user + chunk, i, j);
+}
+
+/* as sh_seams_parallel, for the 2D crossings */
+static qaws_status sh_x2_parallel(sh_x2_job* J, qaws_bp_box const* box, unsigned int n, qaws_batch_executor const* executor, qaws_pg* pg)
+{
+	qaws_bp_grid* grid = NULL;
+	sh_x2_job* Jc;
+	unsigned int nch, c, total = J->n;
+	qaws_status st = qaws_internal_grid_create(&grid, box, n, 2);
+	if (st != QAWS_STATUS_OK)
+		return st;
+	nch = qaws_internal_grid_pair_chunks(grid);
+	Jc = (sh_x2_job*)qaws_internal_zalloc((size_t)nch + 1, sizeof *Jc);
+	if (!Jc)
+	{
+		qaws_internal_grid_destroy(grid);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (c = 0; c < nch; c++)
+	{
+		Jc[c].S = J->S;
+		Jc[c].kinds = J->kinds;
+	}
+	st = qaws_internal_grid_pairs_stop(NULL, grid, box, sh_x2_accept, J, sh_x2_visit_chunk, Jc, executor, pg ? qaws_pg_stop_each : NULL, pg);
+	for (c = 0; c < nch; c++)
+	{
+		J->oom |= Jc[c].oom;
+		total += Jc[c].n;
+	}
+	if (st == QAWS_STATUS_OK && !J->oom && total > J->cap)
+	{
+		qaws_region_seam_point* np = (qaws_region_seam_point*)qaws_internal_realloc(J->pt, qaws_internal_mul2(sizeof *np, (size_t)total));
+		if (np)
+		{
+			J->pt = np;
+			J->cap = total;
+		}
+		else
+			J->oom = 1;
+	}
+	for (c = 0; c < nch; c++)
+	{
+		if (st == QAWS_STATUS_OK && !J->oom && Jc[c].n)
+		{
+			memcpy(J->pt + J->n, Jc[c].pt, sizeof *J->pt * Jc[c].n);
+			J->n += Jc[c].n;
+		}
+		qaws_internal_free(Jc[c].pt);
+	}
+	qaws_internal_free(Jc);
+	qaws_internal_grid_destroy(grid);
+	return J->oom && st == QAWS_STATUS_OK ? QAWS_STATUS_ALLOCATION_FAILURE : st;
+}
+
 static int sh_cmp_seam2(void const* p, void const* q)
 {
 	qaws_region_seam_point const *a = (qaws_region_seam_point const*)p, *b = (qaws_region_seam_point const*)q;
@@ -2026,9 +2260,13 @@ static int sh_cmp_seam2(void const* p, void const* q)
 	return a->position.y < b->position.y ? -1 : a->position.y > b->position.y;
 }
 
+static char const* const sh_seam2_stages[] = { "flatten", "pairs" };
+static char const* const sh_shatter2_stages[] = { "flatten", "arrange" };
+
 qaws_status qaws_region_seams_2d(qaws_region_seam_point* out_points, unsigned int* out_count, qaws_region_seam_desc const* desc,
 	unsigned int capacity)
 {
+	qaws_pg g;
 	sh_scene2 S;
 	sh_x2_job J;
 	qaws_bp_box* box = NULL;
@@ -2040,7 +2278,11 @@ qaws_status qaws_region_seams_2d(qaws_region_seam_point* out_points, unsigned in
 	if (!sh_desc2_ok(desc, 0) || !(desc->kinds & (QAWS_SEAM_A_B | QAWS_SEAM_A_A | QAWS_SEAM_B_B)))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&J, 0, sizeof J);
-	st = sh_scene2_build(&S, desc);
+	memset(&S, 0, sizeof S);   /* (freed whatever the stage) */
+	qaws_pg_init(&g, desc->progress, sh_seam2_stages, 2);
+	st = qaws_pg_stage(&g, 0, 0) ? QAWS_STATUS_CANCELLED : sh_scene2_build(&S, desc);
+	S.pg = &g;
+	S.executor = desc->executor;
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	box = (qaws_bp_box*)qaws_internal_malloc(qaws_internal_mul2(sizeof(qaws_bp_box), (size_t)S.ns + 1));
@@ -2057,7 +2299,12 @@ qaws_status qaws_region_seams_2d(qaws_region_seam_point* out_points, unsigned in
 		}
 	J.S = &S;
 	J.kinds = desc->kinds;
-	st = qaws_internal_broadphase(NULL, box, S.ns, 2, sh_x2_accept, sh_x2_visit, &J);
+	if (qaws_pg_stage(&g, 1, 0))
+		st = QAWS_STATUS_CANCELLED;
+	else if (S.executor && S.executor->parallel_for)
+		st = sh_x2_parallel(&J, box, S.ns, S.executor, &g);
+	else
+		st = qaws_internal_broadphase(NULL, box, S.ns, 2, sh_x2_accept, sh_x2_visit, &J);
 	if (J.oom)
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
 	if (st != QAWS_STATUS_OK)
@@ -2084,6 +2331,7 @@ qaws_status qaws_region_seams_2d(qaws_region_seam_point* out_points, unsigned in
 	if (out_points)
 		memcpy(out_points, J.pt, sizeof *J.pt * (k < capacity ? k : capacity));
 	st = out_points && k > capacity ? QAWS_STATUS_BUFFER_TOO_SMALL : QAWS_STATUS_OK;
+	qaws_pg_end(&g);
 done:
 	qaws_internal_free(box);
 	qaws_internal_free(J.pt);
@@ -2347,6 +2595,7 @@ static int sh_cmp_dbl2_u64(void const* p, void const* q)
 
 qaws_status qaws_region_shatter_create_2d(qaws_region_shatter** out_shatter, qaws_region_seam_desc const* desc)
 {
+	qaws_pg g;
 	sh_scene2 S;
 	sh_arr A;
 	qaws_region_shatter* H = NULL;
@@ -2361,7 +2610,9 @@ qaws_status qaws_region_shatter_create_2d(qaws_region_shatter** out_shatter, qaw
 	if (!sh_desc2_ok(desc, 1))
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	memset(&A, 0, sizeof A);
-	st = sh_scene2_build(&S, desc);
+	memset(&S, 0, sizeof S);   /* (freed whatever the stage) */
+	qaws_pg_init(&g, desc->progress, sh_shatter2_stages, 2);
+	st = qaws_pg_stage(&g, 0, 0) ? QAWS_STATUS_CANCELLED : sh_scene2_build(&S, desc);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -2373,7 +2624,7 @@ qaws_status qaws_region_shatter_create_2d(qaws_region_shatter** out_shatter, qaw
 			(double)S.seg[i].t0, (double)S.seg[i].t1, S.cv[S.seg[i].owner].operand == 0, S.cv[S.seg[i].owner].operand == 1,
 			1u << S.cv[S.seg[i].owner].operand))
 			goto done;
-	st = sh_arr_build(&A, 1e-9 * S.extent);
+	st = qaws_pg_stage(&g, 1, 0) ? QAWS_STATUS_CANCELLED : sh_arr_build(&A, 1e-9 * S.extent, &g, desc->executor);
 	if (st != QAWS_STATUS_OK)
 		goto done;
 	st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -2412,7 +2663,7 @@ qaws_status qaws_region_shatter_create_2d(qaws_region_shatter** out_shatter, qaw
 			}
 		sh_arr_free(&A);
 		A = A2;
-		st = sh_arr_build(&A, 1e-9 * S.extent);
+		st = sh_arr_build(&A, 1e-9 * S.extent, &g, desc->executor);
 		if (st != QAWS_STATUS_OK)
 			goto done;
 		st = QAWS_STATUS_ALLOCATION_FAILURE;
@@ -2471,6 +2722,7 @@ qaws_status qaws_region_shatter_create_2d(qaws_region_shatter** out_shatter, qaw
 	/* (the paths' curve lists now that list is complete) */
 	for (i = 0; i < H->npath; i++)
 		H->path[i].curves = H->list + (size_t)H->path[i].curves;
+	qaws_pg_end(&g);
 	*out_shatter = H;
 	H = NULL;
 	st = QAWS_STATUS_OK;

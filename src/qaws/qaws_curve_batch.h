@@ -46,6 +46,7 @@ typedef struct qaws_curve_batch_desc
 	unsigned int flags;             /* QAWS_CURVE_BATCH_* */
 	qaws_scalar flatness;           /* chord deviation bound; 0 = 2^-10 of the scene extent */
 	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_curve_batch_desc;
 
 /* Hit kinds. A CROSSING passes from one side to the other (transversal, or
@@ -122,6 +123,7 @@ typedef struct qaws_level_crossing_desc
 	unsigned int level_count;
 	qaws_scalar flatness;               /* geometric, as for the batch; 0 = 2^-10 of the extent */
 	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_level_crossing_desc;
 
 /* sorted by (curve, parameter) */
@@ -153,6 +155,7 @@ typedef struct qaws_closest_desc
 	qaws_scalar max_distance;           /* 0 = no limit */
 	qaws_scalar flatness;               /* 0 = 2^-10 of the extent */
 	qaws_batch_executor const* executor;   /* optional: runs the work in parallel */
+	qaws_progress const* progress;          /* optional: cancel and progress reports (qaws_progress.h) */
 } qaws_closest_desc;
 
 typedef struct qaws_closest_point
@@ -190,5 +193,14 @@ qaws_status qaws_curve_set_find_closest(
 	qaws_scalar const* points,
 	unsigned int point_count,
 	qaws_scalar max_distance);
+/* the same with a progress (qaws_progress.h; may be NULL): stage "query" */
+qaws_status qaws_curve_set_find_closest_ex(
+	qaws_closest_point* out_points,
+	qaws_curve_batch_stats* out_stats,
+	qaws_curve_set const* set,
+	qaws_scalar const* points,
+	unsigned int point_count,
+	qaws_scalar max_distance,
+	qaws_progress const* progress);
 
 #endif /* QAWS_CURVE_BATCH_H */

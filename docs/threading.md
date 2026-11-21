@@ -71,16 +71,17 @@ nothing else from it.
 
 ## Cancellation and progress
 
-The public float API takes no cancel or progress callbacks. Long calls run to completion.
+The long calls take an optional `qaws_progress` ([api/progress.md](api/progress.md)): a cancel callback and a
+throttled report, both called on the calling thread, never on an executor's threads. They are the batches and their
+prepared sets, the exact closest-point batches, and the seams and shatters. Cancelled, a call returns
+`QAWS_STATUS_CANCELLED`, frees what it allocated and makes no object. The other calls run to completion.
 
 - **Bounding the work.** To limit how long a call takes, size the work: use coarser flatness or resolution, use fewer
   query points per call, or split one batch into several calls.
 - **Streaming sampling.** `qaws_curve_sample_streaming_*` calls back for each sample. A return value of 0 stops early,
   and stopping early is not an error.
-- **`QAWS_STATUS_CANCELLED`.** This status exists in `qaws_status` for operations that are stopped by a host's cancel
-  callback. Its outputs are as that operation documents. The library's internal parallel helper supports such a stop:
-  it checks between chunks or waves, on the calling thread, never on the executor's threads. This lets libraries built
-  on qaws report a cancellation with the shared status.
+- **Where the checks run.** Serially, between chunks of work; through an executor, between its waves (at least 32
+  chunks a wave, at most 16 waves). The host's callbacks therefore need no locking.
 
 ## Practical rules
 

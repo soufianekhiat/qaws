@@ -29,7 +29,7 @@ precision-free). Check it before using any output.
 | `QAWS_STATUS_CERTIFICATION_FAILED` | Exact kernel: a sign could not be certified |
 | `QAWS_STATUS_NOT_CONVERGED` | A result defined at convergence asked for before it |
 | `QAWS_STATUS_INVALID_TOPOLOGY` | A mesh edit refused by its validity checks (the mesh unchanged); no public function documents it |
-| `QAWS_STATUS_CANCELLED` | Stopped by a cancel callback; no public function takes one |
+| `QAWS_STATUS_CANCELLED` | Stopped by the cancel callback of a `qaws_progress` ([api/progress.md](api/progress.md)) |
 
 What a given function returns, and when, is stated in its header and in its
 API page ([api/status.md](api/status.md), [api/index.md](api/index.md)).
