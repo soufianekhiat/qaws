@@ -38,7 +38,7 @@ the library.
 | Sources | wrappers for every `.c` under `src/qaws/`, `src/qaws/internal/` and `src/qaws/exact/` | add `src/qaws/batch/*.c` for the SIMD kernels |
 | Header search path | `src/qaws` | headers include each other relatively |
 | Language standard | C11 | |
-| Exact kernel | define `QAWS_ENABLE_EXACT=1` | as CMake does; some 2D region code uses it when defined |
+| Exact kernel | define `QAWS_ENABLE_EXACT=1` | as the Sharpmake and CMake builds do; the 2D path code then decides orientations exactly |
 | Recommended flag | `-fno-strict-aliasing` | GCC and Clang; CMake sets it by default |
 | Link | `m` | POSIX only; nothing on Apple or Windows |
 

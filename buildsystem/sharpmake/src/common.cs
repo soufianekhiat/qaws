@@ -98,6 +98,9 @@ namespace Qaws
             conf.Defines.Add("WIN32");
             conf.Defines.Add("_CRT_SECURE_NO_WARNINGS");
 
+            // The exact kernel (src/qaws/exact, always compiled): the reference for CMake's QAWS_ENABLE_EXACT option
+            conf.Defines.Add("QAWS_ENABLE_EXACT=1");
+
             // Add scalar type define
             if (target.Scalar == ScalarType.Float)
             {

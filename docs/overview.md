@@ -76,8 +76,8 @@ use the unsuffixed names (see [precision.md](precision.md)).
 - **Batches** (`qaws_curve_batch.h`, `qaws_surface_batch.h`, the exact kernel)
   take many inputs at once and an optional executor; results do not depend on
   the executor.
-- The **exact kernel** is C only and built with `QAWS_ENABLE_EXACT` (CMake,
-  default ON); its predicates decide signs exactly on double inputs.
+- The **exact kernel** is C only and built with `QAWS_ENABLE_EXACT` (always in
+  the Sharpmake build; the CMake option, default ON, mirrors it); its predicates decide signs exactly on double inputs.
 
 ## Quick start
 

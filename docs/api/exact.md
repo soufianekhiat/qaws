@@ -2,8 +2,9 @@
 
 Certified predicates on doubles, exact rational curves and surfaces prepared
 from the float objects, certified winding numbers and certified closest
-points. C only; compiled when `QAWS_ENABLE_EXACT` is on (the CMake option,
-default ON, also defines `QAWS_ENABLE_EXACT=1` for users). The model, the
+points. C only; compiled with `QAWS_ENABLE_EXACT=1`, which the Sharpmake build
+always defines (the CMake option of the same name, default ON, mirrors it and
+defines it for users too). The model, the
 guarantees and the statuses are explained in
 [the exact kernel concept page](../exact_kernel.md).
 
