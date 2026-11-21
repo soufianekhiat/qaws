@@ -27,6 +27,14 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* a step or bound by precision: f32 differences need wider steps (a step under the rounding of t is lost) and looser
+   bounds (its rounding, about 1e-7, over the step) */
+#if QAWS_SCALAR_IS_FLOAT
+#define MT_PREC(f64, f32) (f32)
+#else
+#define MT_PREC(f64, f32) (f64)
+#endif
+
 static qaws_vec3 mt_v(double x, double y, double z)
 {
 	qaws_vec3 v;
@@ -121,14 +129,14 @@ static void test_poses(void)
 			{
 				/* the second derivatives by central differences at the ends (one-sided past them: the polynomials go on) */
 				qaws_motion_state a, b;
-				double h = 1e-4, wa[3], wb[3];
+				double h = MT_PREC(1e-4, 1e-2), wa[3], wb[3];
 				qaws_motion_evaluate(&a, m, (qaws_scalar)(k - h));
 				qaws_motion_evaluate(&b, m, (qaws_scalar)(k + h));
 				acc = fmax(acc, fabs(((double)b.velocity.x - a.velocity.x) / (2 * h) - p->acceleration.x));
 				acc = fmax(acc, fabs(((double)b.velocity.y - a.velocity.y) / (2 * h) - p->acceleration.y));
 				acc = fmax(acc, fabs(((double)b.velocity.z - a.velocity.z) / (2 * h) - p->acceleration.z));
-				mt_fd_omega(m, k - h, 1e-6, wa);
-				mt_fd_omega(m, k + h, 1e-6, wb);
+				mt_fd_omega(m, k - h, MT_PREC(1e-6, 1e-3), wa);
+				mt_fd_omega(m, k + h, MT_PREC(1e-6, 1e-3), wb);
 				acc = fmax(acc, fabs((wb[0] - wa[0]) / (2 * h) - p->angular_acceleration.x));
 				acc = fmax(acc, fabs((wb[1] - wa[1]) / (2 * h) - p->angular_acceleration.y));
 				acc = fmax(acc, fabs((wb[2] - wa[2]) / (2 * h) - p->angular_acceleration.z));
@@ -137,7 +145,7 @@ static void test_poses(void)
 		for (k = 1; k < 10; k++)
 		{
 			qaws_motion_state q, a, b;
-			double t = k / 10.0, w[3], h = 1e-6;
+			double t = k / 10.0, w[3], h = MT_PREC(1e-6, 1e-3);
 			qaws_motion_evaluate(&q, m, (qaws_scalar)t);
 			for (i = 0; i < 3; i++)
 				for (j = 0; j < 3; j++)
@@ -159,7 +167,8 @@ static void test_poses(void)
 	sprintf(msg, "two poses, cubic and quintic: ends off the poses by %.1e, R(t) off orthonormal %.1e, the angular velocity off R's finite differences %.1e, the velocity %.1e; quintic accelerations off %.1e",
 		ends, orth, fdw, fdv, acc);
 	printf("  %s\n", msg);
-	TEST_ASSERT(st == QAWS_STATUS_OK && ends < 1e-14 && orth < 1e-14 && fdw < 1e-8 && fdv < 1e-8 && acc < 1e-5, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && ends < MT_PREC(1e-14, 1e-6) && orth < MT_PREC(1e-14, 1e-6) && fdw < MT_PREC(1e-8, 2e-3) &&
+		fdv < MT_PREC(1e-8, 2e-3) && acc < MT_PREC(1e-5, 5e-2), msg);
 }
 
 /* a cubic path p(t) = (t^3 - t, 2 t^2 - 1, 0.5 t^3 + t) from its ends' values and derivatives: exact at every t; and a
@@ -276,7 +285,7 @@ static void test_frames(void)
 		}
 		for (k = 0; k <= 16; k++)
 		{
-			double t = k / 16.0, R[9], b[3], q[3], w[3], tu[3], l, h = 1e-5;
+			double t = k / 16.0, R[9], b[3], q[3], w[3], tu[3], l, h = MT_PREC(1e-5, 1e-3);
 			qaws_motion_state s;
 			qaws_motion_evaluate(&s, m, (qaws_scalar)t);
 			qaws_curve_evaluate_3d(&r, cv, (qaws_scalar)t, QAWS_EVAL_FLAG_D1);
@@ -314,7 +323,8 @@ static void test_frames(void)
 	sprintf(msg, "rotation-minimizing frames: the start off its rotation by %.1e, orthonormal to %.1e, tangents carried to %.1e, angular velocity off "
 		"the finite differences' by %.1e, along the tangent %.1e, the planar curve off z by %.1e", start, orth, tang, wfd, twist, planar);
 	printf("  %s\n", msg);
-	TEST_ASSERT(st == QAWS_STATUS_OK && start < 1e-14 && orth < 1e-13 && tang < 1e-12 && wfd < 1e-6 && twist < 1e-6 && planar < 1e-14, msg);
+	TEST_ASSERT(st == QAWS_STATUS_OK && start < MT_PREC(1e-14, 1e-6) && orth < MT_PREC(1e-13, 1e-6) && tang < MT_PREC(1e-12, 1e-6) &&
+		wfd < MT_PREC(1e-6, 2e-3) && twist < MT_PREC(1e-6, 2e-3) && planar < MT_PREC(1e-14, 1e-6), msg);
 }
 
 static void test_turns(void)

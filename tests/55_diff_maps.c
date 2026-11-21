@@ -688,7 +688,9 @@ static void check_offset_surface_map(void)
 	qaws_diff_views* outs[1];
 	qaws_diff_views* bars[4];
 	qaws_diff_views const* outs_c[1];
-	double h = DIFF_FD_STEP, lhs, fd, adj;
+	/* (the offset projects onto the surface by an iteration: differences on steps under about 1e-3 see its tolerance,
+	   so this map's are taken on 1e-3 at least, and matched to 1e-6) */
+	double h = DIFF_FD_STEP < 1e-3 ? 1e-3 : DIFF_FD_STEP, lhs, fd, adj;
 	unsigned int i, j, n;
 
 	diff_seed(830);
@@ -771,7 +773,7 @@ static void check_offset_surface_map(void)
 	adj = diff_dot(bar_cp, dcp, OFF_CP * 3) + bar_d * dd + diff_dot(bar_sp, dsp, 48);
 
 	printf("    offset surface normal: tangent %.8f fd %.8f adjoint %.8f\n", lhs, fd, adj);
-	TEST_ASSERT(diff_close(lhs, fd, DIFF_TOL * 50), "surface-normal offset map tangent matches finite differences");
+	TEST_ASSERT(diff_close(lhs, fd, DIFF_TOL * 50 > 1e-6 ? DIFF_TOL * 50 : 1e-6), "surface-normal offset map tangent matches finite differences");
 	TEST_ASSERT(diff_close(lhs, adj, DIFF_TOL), "surface-normal offset map adjoint identity");
 	qaws_diff_map_destroy(map);
 	qaws_curve_destroy(o);
