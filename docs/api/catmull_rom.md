@@ -1,8 +1,7 @@
-# API Reference: qaws_catmull_rom.h
+# qaws_catmull_rom.h: Catmull-Rom splines
 
-Catmull-Rom spline creation.
-
----
+A cubic interpolating spline through control points, with uniform, chordal or centripetal knot spacing. Each name
+exists as `name_f32` and `name_f64` ([precision.md](precision.md)).
 
 ## qaws_catmull_rom_desc
 
@@ -16,15 +15,13 @@ typedef struct qaws_catmull_rom_desc {
 } qaws_catmull_rom_desc;
 ```
 
-| Field | Description |
+| Member | Meaning |
 |---|---|
 | `dimension` | `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D` |
-| `control_points` | Array of `qaws_vec2` or `qaws_vec3` |
-| `control_point_count` | Number of control points. Must be >= 4 for open curves. |
-| `parameterization` | `UNIFORM`, `CHORDAL`, or `CENTRIPETAL` |
-| `closed` | 0 for open, 1 for closed |
-
----
+| `control_points` | `dimension` scalars per point, packed |
+| `control_point_count` | at least 4 open, at least 3 closed |
+| `parameterization` | `UNIFORM` (alpha 0), `CHORDAL` (alpha 1), `CENTRIPETAL` (alpha 0.5); `DEFAULT` is centripetal |
+| `closed` | non-zero: the last point joins the first |
 
 ## qaws_curve_create_catmull_rom
 
@@ -34,17 +31,22 @@ qaws_status qaws_curve_create_catmull_rom(
     qaws_catmull_rom_desc const* desc);
 ```
 
-Creates a Catmull-Rom interpolating spline.
+Creates the curve. Degree 3, C1 at span joins.
 
-**Parameters:**
-- `desc` -- Curve descriptor
-- `out_curve` -- Receives the created curve
+- Open: the first and last points only shape the end tangents; the curve runs from point 1 to point N-2 in N-3 spans.
+- Closed: every point is interpolated, N spans.
+- Span i is on [i, i + 1]; parameter range [0, span_count] whatever the parameterization (the knot spacing shapes
+  each span, it does not change the parameter domain).
 
-**Returns:** `QAWS_STATUS_OK` on success.
+Inputs are copied. Destroy the result with `qaws_curve_destroy` ([curve.md](curve.md)).
 
-**Notes:**
-- For an open curve, the first and last points are ghost points that define tangent directions. The curve interpolates the interior points (index 1 to N-2).
-- For a closed curve, all points are interpolated.
-- `CENTRIPETAL` parameterization is recommended for general use.
-- Degree is always 3 (cubic).
-- Continuity: C1 at span boundaries.
+| Status | When |
+|---|---|
+| `QAWS_STATUS_OK` | created |
+| `QAWS_STATUS_INVALID_ARGUMENT` | `desc`, `out_curve` or `control_points` NULL |
+| `QAWS_STATUS_INVALID_DIMENSION` | dimension not 2D or 3D |
+| `QAWS_STATUS_INVALID_CONTROL_POINT_COUNT` | too few points (see above) or a count too large to index |
+| `QAWS_STATUS_ALLOCATION_FAILURE` | allocation failed |
+
+`*out_curve` is set to NULL first. The allocator-taking form `qaws_curve_create_catmull_rom_ex` is declared in
+`qaws_alloc.h` ([alloc.md](alloc.md)).

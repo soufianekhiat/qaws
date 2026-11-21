@@ -1,6 +1,6 @@
 # Evaluation
 
-Qaws provides a unified evaluation model for all curve families. Every curve can be evaluated for position and up to three orders of derivatives.
+Qaws provides a unified evaluation model for all curve families. Every curve can be evaluated for position and up to three orders of derivatives; every surface for position, first and second partials and the unit normal. Names below are the unsuffixed forms ([precision.md](precision.md)). All evaluation functions are thread-safe on immutable curves and surfaces and do not allocate (loft and Gordon surfaces past 32 sections take scratch from their allocator).
 
 ## Evaluation flags
 
@@ -72,7 +72,9 @@ qaws_curve_evaluate_3d(&result, curve,
 | `D2` | Second derivative d2P/dt2 | Curvature computation, acceleration |
 | `D3` | Third derivative d3P/dt3 | Jerk, torsion in 3D |
 
-Note: derivatives are with respect to the curve parameter, not arc length. For speed-independent derivatives, use traversal with arc-length mode.
+Note: derivatives are with respect to the curve parameter, not arc length. For derivatives with respect to arc length, evaluate the wrapper made by `qaws_curve_reparameterize_arc_length` (its D1 has unit length; [operations.md](operations.md)), or use the helpers in [inspection.md](inspection.md) (tangent, curvature, torsion, frames). A traversal maps distance or time to a parameter and returns the curve's derivatives at that parameter.
+
+Evaluating a 2D curve with a `_3d` function (or the reverse) returns `QAWS_STATUS_INVALID_DIMENSION`.
 
 ## Computing derived quantities from derivatives
 
@@ -100,7 +102,7 @@ float speed = sqrtf(d1.x*d1.x + d1.y*d1.y);
 
 ## Batch evaluation
 
-When you need to evaluate a curve at many parameters (e.g. for rendering, sampling, or LUT construction), batch evaluation amortises per-call overhead and enables SIMD acceleration where available.
+When you need to evaluate a curve at many parameters (e.g. for rendering, sampling, or LUT construction), batch evaluation evaluates them in one call.
 
 ```c
 // Evaluate 256 points along a 2D curve in one call
@@ -145,9 +147,11 @@ Surfaces are evaluated over a (u, v) parameter domain. The single-point and batc
 qaws_surface_eval_result result;
 qaws_status s = qaws_surface_evaluate(
     &result, surface, 0.5f,
-    0.25f, QAWS_EVAL_FLAG_POSITION);
-// result.position.x, .y, .z
+    0.25f, QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_NORMAL);
+// result.position, result.normal; result.valid_flags says what was filled
 ```
+
+Surface flags are `QAWS_SURFACE_EVAL_*` (position, du, dv, normal, duu, duv, dvv; [surfaces.md](surfaces.md)).
 
 **Batch:**
 
@@ -157,7 +161,7 @@ qaws_surface_eval_result results[64];
 // ... fill u_params, v_params ...
 qaws_status s = qaws_surface_evaluate_batch(
     results, surface, u_params, v_params,
-    64, QAWS_EVAL_FLAG_POSITION);
+    64, QAWS_SURFACE_EVAL_POSITION);
 ```
 
 `qaws_surface_evaluate_batch` takes parallel arrays of `u` and `v` parameters plus a count, just like the curve batch functions.
@@ -169,31 +173,47 @@ qaws_vec3 normal;
 qaws_surface_get_normal(&normal, surface, u, v);
 ```
 
+## Prepared and borrowed evaluation
+
+`qaws_view.h` evaluates B-spline, NURBS and Bezier curves and surfaces (and
+Hermite, Catmull-Rom, polynomial, arc, trajectory, Yuksel and subdivision
+curves) straight from host arrays: a prepared object
+(`qaws_curve_prepare`, `qaws_curve_prepare_into` into caller memory)
+evaluates one parameter (`qaws_curve_prepared_evaluate_2d/3d`) or a range
+into strided f32 or f64 outputs (`qaws_curve_prepared_evaluate_range`),
+without allocating; disjoint ranges may run on several threads. See
+[views_and_batches.md](views_and_batches.md).
+
 ## Core eval headers (multi-backend architecture)
 
-The `src/qaws/core/` directory contains **header-only inline functions** that perform the mathematical evaluation kernels. These headers use only scalar math and fixed-size arrays, with no dependency on the `qaws_curve` runtime, `malloc`, or any C standard library calls. This makes them directly usable from:
-
-- **C / C++** — included as normal headers
-- **HLSL / GLSL** — the `QAWS_INLINE`, `QAWS_TYPE_DEF`, and scalar typedefs can be redefined to match shader semantics
-- **Halide** — same mechanism, compiles into Halide pipelines
-
-Available core headers:
+The `src/qaws/core/` directory contains **header-only inline functions** that perform the evaluation kernels. They use scalar math and fixed-size arrays (degree at most `QAWS_CORE_MAX_DEGREE`, 16; the record cores read any number of points and knots from buffers), with no dependency on the `qaws_curve` runtime or on allocation, and compile on every backend through the macros of `qaws_platform.h` ([backends.md](backends.md)). Results use the light `qaws_eval_2d` / `qaws_eval_3d` structs of `qaws_core_types.h` (position, d1, d2).
 
 | Header | Purpose |
 |---|---|
 | `qaws_horner_core.h` | Horner-form polynomial evaluation with derivatives |
-| `qaws_cubic_poly_core.h` | Cubic polynomial P(t) = at^3 + bt^2 + ct + d |
-| `qaws_decasteljau_core.h` | De Casteljau Bezier evaluation |
-| `qaws_rational_bezier_core.h` | Rational Bezier (weighted/homogeneous) |
-| `qaws_arc_core.h` | Circular/elliptical arc evaluation |
-| `qaws_bspline_basis_core.h` | B-spline basis function computation |
+| `qaws_cubic_poly_core.h` | Cubic polynomial P(t) = a t^3 + b t^2 + c t + d (Hermite, Catmull-Rom, trajectory spans) |
+| `qaws_decasteljau_core.h` | De Casteljau Bezier evaluation, cubic shortcut, derivative points |
+| `qaws_rational_bezier_core.h` | Rational Bezier (homogeneous points) |
+| `qaws_arc_core.h` | Circular and elliptical arc evaluation |
+| `qaws_bspline_basis_core.h` | Knot span search and B-spline basis (with derivatives) |
 | `qaws_bspline_eval_core.h` | B-spline curve evaluation |
-| `qaws_nurbs_eval_core.h` | NURBS evaluation |
-| `qaws_surface_core.h` | Tensor-product surface evaluation |
+| `qaws_nurbs_eval_core.h` | NURBS curve evaluation |
+| `qaws_surface_core.h` | Bezier and B-spline tensor-product surface evaluation |
+| `qaws_curve_record_core.h` | B-spline and NURBS curves read from buffers, any length |
+| `qaws_surface_record_core.h` | B-spline and NURBS surfaces read from buffers, any size |
+| `qaws_frame_core.h` | Rotation-minimizing frame step (double reflection) |
+| `qaws_dual_core.h` | Dual numbers and adjoint helpers (differentiation) |
+| `qaws_bspline_diff_core.h` | B-spline tangents and adjoints with respect to control points |
+| `qaws_bspline_sampling_core.h` | Inverse-CDF sampling of a B-spline curve and its derivatives |
+| `qaws_bspline_surface_sampling_core.h` | Inverse-CDF sampling of a B-spline surface by area |
 
-Example — evaluate a cubic polynomial directly without a `qaws_curve`:
+The C runtime uses some of them itself (de Casteljau for Bezier curves, Horner for polynomials, the arc core, the cubic core for Hermite, Catmull-Rom and trajectory spans, the frame core for rotation-minimizing frames and pipes). Which run where, and which tests compare them with the runtime: [capabilities.md](capabilities.md).
+
+Example: evaluate a cubic polynomial directly without a `qaws_curve`:
 
 ```c
+#include "qaws.h"
+#include "qaws_core_types.h"
 #include "core/qaws_cubic_poly_core.h"
 
 qaws_vec2 a = {1, 0}, b = {0, 1}, c = {2, 3}, d = {0, 0};
@@ -203,7 +223,7 @@ qaws_eval_2d r = qaws_cubic_eval_2d(a, b, c, d, 0.5f,
 
 ## Prepare + eval architecture
 
-The **prepare** functions (`qaws_prepare.h`) bridge high-level curve descriptions and the low-level core eval headers. They pre-compute flat coefficient arrays from user-facing descriptors (control points, tangents, knots, weights, etc.) so that core headers can evaluate from those arrays with no further interpretation.
+The **prepare** functions (`qaws_prepare.h`, C backend only; the caller owns the outputs) bridge high-level curve descriptions and the low-level core eval headers. They pre-compute flat coefficient arrays from user-facing descriptors (control points, tangents, knots, weights, etc.) so that core headers can evaluate from those arrays with no further interpretation.
 
 This is the mechanism that enables non-C backends: on the CPU, `qaws_prepare_*` runs once to produce the coefficient arrays, which are then uploaded to a GPU buffer or passed to a Halide pipeline where the core eval kernels consume them.
 
@@ -224,7 +244,7 @@ This is the mechanism that enables non-C backends: on the CPU, `qaws_prepare_*` 
 | `qaws_rational_bezier_prepare_2d/3d` | homogeneous weighted CPs |
 | `qaws_arc_prepare_2d/3d` | axis vectors + theta range |
 
-**Example — Hermite curve on GPU:**
+**Example: Hermite curve on GPU:**
 
 ```c
 // CPU side: prepare coefficients
@@ -239,7 +259,7 @@ qaws_hermite_prepare_3d(a, b, c,
 
 ## Inline curves (stack-allocated evaluation)
 
-For cases where you want full `qaws_curve` API compatibility but cannot use heap allocation (e.g. embedded systems, hot loops, shader-adjacent code), **inline curves** provide stack-allocated initialization.
+For cases where you want full `qaws_curve` API compatibility without heap allocation (embedded systems, hot loops), **inline curves** live in a caller-owned `qaws_curve_inline` (a 512-byte union, `QAWS_INLINE_STORAGE_BYTES`).
 
 ```c
 #include "qaws_inline.h"
@@ -249,9 +269,8 @@ qaws_vec3 pts[] = {{0,0,0}, {1,2,3}, {4,5,6}, {7,8,9}};
 qaws_bezier_desc desc = { QAWS_DIMENSION_3D, 3, pts, 4 };
 qaws_curve_init_bezier_inline(&ic, &desc);
 
-// Use via &ic.curve — works with all evaluation functions
 qaws_eval_result_3d result;
-qaws_curve_evaluate_3d(&result, &ic.curve,
+qaws_curve_evaluate_3d(&result, qaws_curve_inline_get_curve(&ic),
     0.5f, QAWS_EVAL_FLAG_POSITION);
 ```
 
@@ -266,4 +285,5 @@ Constraints:
 - Single span only.
 - Maximum degree 7 (8 control points).
 - 2D or 3D.
-- The `qaws_curve_inline` struct is self-contained and can be copied with `memcpy`. Do **not** call `qaws_curve_destroy` on it.
+- The curve points into its own storage. A copy (`memcpy` or assignment) is used through `qaws_curve_inline_get_curve(&copy)`, which re-points the copy at itself: call it once after copying, before other threads use the copy. A pointer taken from the original keeps reading the original.
+- Do **not** call `qaws_curve_destroy` on it.

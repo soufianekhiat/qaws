@@ -1,192 +1,187 @@
 # Building Qaws
 
-Qaws has two build systems: CMake (cross-platform) and Sharpmake (Visual Studio).
+Sharpmake is the primary build system (Visual Studio 2022, Windows). CMake
+mirrors the public API for other platforms, installs, packaging and CI. For
+builds without either, see [integration.md](integration.md).
+
+## Both precisions in one library
+
+The library holds every precision-bearing function and type twice, as
+`name_f32` and `name_f64` ([precision.md](precision.md)). Both build systems
+compile each `.c` file through two generated wrappers, one per precision,
+never directly:
+
+```c
+/* generated: <source> as f32 */
+#undef QAWS_SCALAR_IS_FLOAT
+#define QAWS_SCALAR_IS_FLOAT 1
+#include "<absolute path to the source>"
+```
+
+The precision-free sources (the status strings, the memory module with the
+default, thread and scratch allocators and the arena) define their symbols in
+the f64 pass only, so the allocator state is one for both precisions.
+Wrappers go to `<build>/qaws_precision/` (CMake) or `tmp/qaws_precision/`
+(Sharpmake).
+
+`QAWS_SCALAR_IS_FLOAT` (default 1) then only selects what a caller's
+unsuffixed names, `qaws_scalar` and the scalar macros mean. A translation unit
+that wants both sets side by side includes `qaws_both.h`.
+
+After adding or renaming a public declaration, regenerate
+`src/qaws/qaws_names.h` with `tools/qaws_api_tool` (see CONTRIBUTING.md);
+the CTest test `qaws_api_names` fails while it is stale.
+
+## Sharpmake (primary)
+
+### Prerequisites
+
+- Visual Studio 2022
+- .NET SDK 6.0 or later
+- Git submodules initialized (`extern/Sharpmake`)
+
+### Bootstrap
+
+```bat
+git submodule update --init --recursive
+buildsystem\bootstrap.bat
+```
+
+`bootstrap.bat` builds Sharpmake from `extern/Sharpmake`, copies its binaries
+to `buildsystem/sharpmake/` and runs `generate_projects.bat`, which writes
+`Qaws_vs2022_win64.sln` at the repository root. Regenerate after adding or
+removing sources:
+
+```bat
+buildsystem\generate_projects.bat
+```
+
+The project sources are `buildsystem/sharpmake/src/` (`main.cs`, `common.cs`,
+`QawsLib.cs`, `QawsTests.cs`, `QawsAmalgam.cs`).
+
+### Projects
+
+| Project | Output | Contents |
+|---|---|---|
+| `Qaws` | static library | every `.c` under `src/qaws/` (subdirectories included), through the per-precision wrappers |
+| `QawsTests` | console executable in `working_dir/` | every `.c` under `tests/` except `debug_*.c` |
+| `QawsAmalgam` | static library | the generated `qaws.c`, when `cmake` is on PATH (see [integration.md](integration.md)) |
+
+### Configurations
+
+Projects are generated for every combination of optimization (Debug,
+Release), scalar (Float, Double) and SIMD (Off, On), named
+`{Optimization}_{f32|f64}[_simd]`, for example `Debug_f32`,
+`Release_f64_simd`. The solution lists `Debug_f32`, `Debug_f64`,
+`Release_f32`, `Release_f64`.
+
+- The scalar only sets `QAWS_SCALAR_IS_FLOAT` for callers (the tests): the
+  library holds both precisions in every configuration.
+- f32 executables get the suffix `_f32`, so both precisions share
+  `working_dir/` without overwriting each other.
+- Every configuration compiles as C (`/TC /std:c11`) with `/W4 /WX` and
+  `/fp:precise`.
+- SIMD On defines `QAWS_SIMD_AVX2=1`, adds `/arch:AVX2` and compiles
+  `src/qaws/batch/`; SIMD Off excludes `batch/`.
+- Intermediates go to `tmp/<project>/<configuration>/`, libraries to
+  `tmp/lib/`.
 
 ## CMake
 
 ### Basic build
 
 ```bash
-cd qaws
-mkdir build && cd build
-cmake ..
-cmake --build .
+cmake -B build
+cmake --build build --config Release
+ctest --test-dir build --build-config Release --output-on-failure
 ```
 
-### Configuration options
+CMake 3.20 or later. The project version is 3.0.0 (`QAWS_VERSION_STRING`
+in `qaws.h`).
+
+### Options
 
 | Option | Default | Description |
 |---|---|---|
-| `QAWS_SCALAR_IS_FLOAT` | `ON` | Which precision callers' unsuffixed names mean: `ON` f32, `OFF` f64. The library holds both (`name_f32`, `name_f64`). |
-| `QAWS_ENABLE_WARNINGS` | `ON` | Enable compiler warnings |
-| `QAWS_WARNINGS_AS_ERRORS` | `ON` (f64) / `OFF` (f32) | Treat warnings as errors |
-| `QAWS_DISABLE_STRICT_ALIASING` | `ON` | Pass `-fno-strict-aliasing` on GCC/Clang |
-| `QAWS_ENABLE_SIMD` | `OFF` | Enable SIMD batch evaluation. Auto-detects the best available ISA at configure time (AVX2, SSE2, or NEON). When enabled, the `batch/` source files are compiled into the library. |
-| `QAWS_DEBUG_POSTFIX` | `"d"` | String appended to the library name in Debug builds (e.g. `qawsd`). Set to `""` to disable. |
-| `QAWS_DEBUG_PREFIX` | `""` | String prepended to the library name in Debug builds (e.g. `dbg_qaws`). |
-| `QAWS_INSTALL` | `ON` | Enable install rules |
-| `QAWS_INSTALL_PKGCONFIG` | `ON` | Install the `qaws.pc` pkg-config file |
-| `BUILD_TESTING` | `ON` | Build test suite |
-| `QAWS_UNITY_BUILD` | `OFF` | Compile the library as one translation unit per precision |
-| `QAWS_AMALGAMATION` | `OFF` | Generate and build the `qaws.h` + `qaws.c` amalgamation (with `cmake -P`) |
-| `QAWS_TEST_AMALGAMATION` | `OFF` | Run the test suite against the amalgamated library. Implies `QAWS_AMALGAMATION` |
-| `QAWS_AMALGAMATION_DIR` | `<build>/amalgam` | Where the generated `qaws.h`/`qaws.c` are written |
+| `QAWS_SCALAR_IS_FLOAT` | `ON` | What callers' unsuffixed names mean: `ON` f32, `OFF` f64 (an interface definition of the target). The library holds both. |
+| `QAWS_ENABLE_WARNINGS` | `ON` | `/W4` or `-Wall -Wextra -Wpedantic` |
+| `QAWS_WARNINGS_AS_ERRORS` | `ON` with f64, `OFF` with f32 | `/WX` or `-Werror` |
+| `QAWS_DISABLE_STRICT_ALIASING` | `ON` | `-fno-strict-aliasing` on GCC and Clang |
+| `QAWS_ENABLE_SIMD` | `OFF` | Probe AVX2, SSE2, NEON (in that order), define the first found (`QAWS_SIMD_AVX2`, `_SSE2`, `_NEON`) and compile `batch/` |
+| `QAWS_ENABLE_EXACT` | `ON` | Compile the exact kernel (`src/qaws/exact/`) and define `QAWS_ENABLE_EXACT=1` publicly |
+| `QAWS_UNITY_BUILD` | `OFF` | One translation unit per precision |
+| `QAWS_AMALGAMATION` | `OFF` | Generate and build the `qaws.h` + `qaws.c` amalgamation |
+| `QAWS_TEST_AMALGAMATION` | `OFF` | Link the tests against the amalgamation (implies `QAWS_AMALGAMATION`) |
+| `QAWS_AMALGAMATION_DIR` | `<build>/amalgam` | Where the generated pair is written |
+| `QAWS_BUILD_EXAMPLES` | `OFF` | Build the C showcases in `examples/` into `working_dir/` |
+| `QAWS_DEBUG_POSTFIX` | `d` | Appended to the library name in Debug (`qawsd`) |
+| `QAWS_DEBUG_PREFIX` | empty | Prepended to the library name in Debug |
+| `QAWS_INSTALL` | `ON` | Install rules |
+| `QAWS_INSTALL_PKGCONFIG` | `ON` | Install `qaws.pc` |
+| `BUILD_TESTING` | `ON` | Build `qaws_tests` and register the CTest tests |
 
-See [integration.md](integration.md) for the single-file and no-build-system
-paths, including the `amalgamate` target and the Xcode/iOS notes.
+The library target is `qaws` (alias `Qaws::qaws`), C11 without extensions,
+position-independent; it links `m` on non-Windows platforms. With
+`BUILD_SHARED_LIBS` on Windows every symbol is exported.
 
-### Both precisions
-
-The library holds every scalar-bearing function and type twice, as
-`name_f32` and `name_f64`: each source is compiled through two wrappers the
-build generates (`<build>/qaws_precision/<name>_f32.c` and `_f64.c`; Sharpmake:
-`tmp/qaws_precision/`), never directly. The precision-free sources (the status
-strings and the memory module: the default, thread and scratch allocators and
-the arena) are compiled once, so the allocator state is one for both.
-
-`QAWS_SCALAR_IS_FLOAT` only selects what a caller's unsuffixed names,
-`qaws_scalar` and the scalar macros mean:
+### Tests
 
 ```bash
-# unsuffixed names are the f32 forms (default)
-cmake .. -DQAWS_SCALAR_IS_FLOAT=ON
-
-# unsuffixed names are the f64 forms
-cmake .. -DQAWS_SCALAR_IS_FLOAT=OFF
+cmake --build build --target check   # build qaws_tests, then ctest --output-on-failure
+ctest --test-dir build -R "^14"      # suites whose name starts with 14
+ctest --test-dir build -j 4          # several suites at once
 ```
 
-A translation unit wanting both side by side includes `qaws_both.h`.
-After adding or renaming a declaration, regenerate `src/qaws/qaws_names.h`
-(CONTRIBUTING.md, "Both precisions"); CTest `qaws_api_names` fails while it
-is stale.
+CTest registers one test per suite, named after its file (`85_shatter`,
+`142_curve_view`, ...), plus `qaws_api_convention` and `qaws_api_names`
+(the naming tool's checks). `qaws_tests` is written to `working_dir/` and
+runs from there; run by hand it runs every suite in turn and reports each
+one's time. Environment variables:
 
-### SIMD build
+| Variable | Effect |
+|---|---|
+| `QAWS_TEST=text` | Run only the suites whose name contains `text` |
+| `QAWS_TEST==name` | Run only the suite named `name` |
+| `QAWS_TEST_HEAVY=1` | Also run the slow checks (large meshes, robustness sweeps, the smallest tolerances) |
+| `QAWS_TEST_SCRATCH=1` | Give the main thread's scratch an arena that must be empty between suites |
 
-```bash
-cmake .. -DQAWS_ENABLE_SIMD=ON
-```
-
-When `QAWS_ENABLE_SIMD` is `ON`, CMake probes the compiler for AVX2, SSE2, and
-NEON support (in that order) and enables the first one it finds. The
-corresponding define (`QAWS_SIMD_AVX2`, `QAWS_SIMD_SSE2`, or `QAWS_SIMD_NEON`)
-is set automatically and the appropriate compiler flags are added (e.g.
-`/arch:AVX2` on MSVC, `-mavx2 -mfma` on GCC/Clang).
-
-### Running tests
-
-```bash
-cmake --build . --target check
-# or
-ctest --output-on-failure
-# or run directly
-./tests/Debug/qaws_tests      # Windows
-./tests/qaws_tests             # Linux/macOS
-```
-
-Tests produce SVG files in `working_dir/tests_output/` for visual verification of curve shapes.
-
-CTest runs each suite as its own test, named as its file: `ctest -R "^10[6-9]"` picks a few, `ctest -j 4` runs several at once.
-`QAWS_TEST==108_shell_trimmed` (or a substring) does the same for `qaws_tests` run by hand, and every suite reports its
-time (`[PASS] Test suite '...' passed (2.31 s)`).
-
-The default tier is the iteration loop: the whole run takes about 6 minutes serially (Release, f64) and 95 s with
-`ctest -j 4`, bounded by the slowest suite (98, about 70 s). `QAWS_TEST_HEAVY=1` adds the slow checks: the oracles on every sample, the full solve and offset sizes, the
-timings on large meshes and the robustness sweeps (about 13 minutes). Run it before a release or after touching what a
-heavy check covers.
+Suites write SVG and OBJ files to `working_dir/tests_output/` for visual
+checks.
 
 ### Installing
 
 ```bash
-cmake --install . --prefix /usr/local
+cmake --install build --prefix /usr/local
 ```
 
-Installs:
-- Library: `lib/libqaws.a` (or `.so` / `.dll`)
-- Public headers: `include/qaws*.h` (all public API headers)
-- Core algorithm headers: `include/core/qaws_*_core.h` (backend-agnostic evaluation kernels)
-- Bootstrap headers: `include/qaws_hlsl.h`, `include/qaws_glsl.h`, `include/qaws_halide.h`
-- CMake config: `lib/cmake/Qaws/`
-- pkg-config: `lib/pkgconfig/qaws.pc` (when `QAWS_INSTALL_PKGCONFIG` is `ON`)
+Installs the library, the public headers (`include/qaws*.h`, including
+`qaws_names.h`, `qaws_both.h`, `qaws_precision.h` and the bootstrap headers
+`qaws_hlsl.h`, `qaws_glsl.h`, `qaws_halide.h`), the core headers
+(`include/core/`), the CMake package (`lib/cmake/Qaws/`, version
+compatibility SameMajorVersion) and `lib/pkgconfig/qaws.pc`.
 
-### Using from another CMake project
+The install list does not contain `qaws_exact.h` and `qaws_motion.h`, which
+`qaws.h` includes, nor the core headers `qaws_frame_core.h`,
+`qaws_curve_record_core.h` and `qaws_surface_record_core.h`. Use the source
+tree's `src/qaws` as include path when you need them.
 
 ```cmake
 find_package(Qaws REQUIRED)
 target_link_libraries(myapp PRIVATE Qaws::qaws)
 ```
 
-## Multi-backend note
+## Shader and Halide backends
 
-Qaws is a multi-backend library. The C build (CMake or Sharpmake) produces the
-runtime library used by C/C++ callers. The evaluation algorithms live in
-backend-agnostic `core/*.h` headers that contain pure arithmetic with no
-platform dependencies. HLSL, GLSL, and Halide users do **not** link the C
-library -- they include the corresponding bootstrap header (`qaws_hlsl.h`,
-`qaws_glsl.h`, or `qaws_halide.h`) which pulls in the core headers directly.
-The backend is therefore selected at include time, not at build time.
+The C build produces the runtime library for C and C++ callers. HLSL, GLSL
+and Halide users do not link it: they include a bootstrap header and the
+`core/` headers they need. The backend is chosen at include time
+([backends.md](backends.md)).
 
-## Sharpmake (Visual Studio)
+## Compilers
 
-### Prerequisites
-
-- Visual Studio 2022
-- .NET SDK 6.0 or later
-- Git submodules initialized
-
-### Bootstrap
-
-```bash
-git submodule update --init --recursive
-cd buildsystem
-bootstrap.bat
-```
-
-This will:
-1. Build Sharpmake from source
-2. Copy Sharpmake binaries to `buildsystem/sharpmake/`
-3. Generate Visual Studio solution
-
-### Opening the solution
-
-After bootstrap, open `Qaws_vs2022_win64.sln` in the repo root.
-
-### Configuration names
-
-Sharpmake generates configurations for every combination of `Optimization`,
-`ScalarType` (Float / Double), and `SimdMode` (On / Off). The resulting
-configuration names follow the pattern:
-
-```
-{Optimization}_{scalar}[_simd]
-```
-
-For example: `Debug_f32`, `Release_f64`, `Debug_f32_simd`, `Release_f64_simd`.
-
-When `SimdMode` is `On`, the build defines `QAWS_SIMD_AVX2=1`, adds `/arch:AVX2`,
-and compiles the `batch/` source files. When `SimdMode` is `Off`, the `batch/`
-sources are excluded via a build regex filter.
-
-### Regenerating projects
-
-```bash
-cd buildsystem
-generate_projects.bat
-```
-
-### Amalgamation project
-
-Generation also adds a `QawsAmalgam` static library built from the generated
-single-file `qaws.c`. It produces the SIMD and non-SIMD variants up front,
-compiles whichever matches each configuration's `SimdMode`, and regenerates
-before every build with `cmake -P buildsystem/amalgamate.cmake`. It is skipped
-with a warning if `cmake` is not on PATH. See [integration.md](integration.md).
-
-## Compiler compatibility
-
-| Compiler | Status |
+| Compiler | Notes |
 |---|---|
-| MSVC 2022 (cl) | Tested, /W4 clean |
-| GCC 11+ | Supported |
-| Clang 13+ | Supported |
+| MSVC 2022 | Sharpmake and CMake; `/W4 /WX` |
+| GCC, Clang | CMake; CI builds Linux and macOS |
 
-The library requires C11 (`_Static_assert`, anonymous structs, etc.).
+The library requires C11.

@@ -1,26 +1,15 @@
-# API Reference: qaws_subdivision.h
+# qaws_subdivision.h: subdivision curves
 
-Subdivision curve creation.
-
----
+A curve made by refining a control polygon a number of times with a corner-cutting scheme, then evaluated as cubic
+spans through the refined points. Each name exists as `name_f32` and `name_f64` ([precision.md](precision.md)).
 
 ## qaws_subdivision_scheme
 
-```c
-typedef enum qaws_subdivision_scheme {
-    QAWS_SUBDIVISION_CHAIKIN = 0,
-    QAWS_SUBDIVISION_LANE_RIESENFELD_3,
-    QAWS_SUBDIVISION_LANE_RIESENFELD_4
-} qaws_subdivision_scheme;
-```
-
-| Value | Description |
-|---|---|
-| `QAWS_SUBDIVISION_CHAIKIN` | Chaikin's algorithm. Quadratic B-spline limit (C1). |
-| `QAWS_SUBDIVISION_LANE_RIESENFELD_3` | Lane-Riesenfeld degree 3. Cubic B-spline limit (C2). |
-| `QAWS_SUBDIVISION_LANE_RIESENFELD_4` | Lane-Riesenfeld degree 4. Quartic B-spline limit (C3). |
-
----
+| Value | Scheme | Limit curve (reported by `qaws_curve_get_continuity`) |
+|---|---|---|
+| `QAWS_SUBDIVISION_CHAIKIN` (0) | Chaikin corner cutting | quadratic B-spline, C1 |
+| `QAWS_SUBDIVISION_LANE_RIESENFELD_3` | Lane-Riesenfeld, degree 3 | cubic B-spline, C2 |
+| `QAWS_SUBDIVISION_LANE_RIESENFELD_4` | Lane-Riesenfeld, degree 4 | quartic B-spline, C3 |
 
 ## qaws_subdivision_desc
 
@@ -28,23 +17,21 @@ typedef enum qaws_subdivision_scheme {
 typedef struct qaws_subdivision_desc {
     qaws_dimension dimension;
     qaws_subdivision_scheme scheme;
-    void const* control_points;
-    unsigned int control_point_count;
-    int closed;
-    unsigned int refinement_levels;
+    void const* control_points;          /* initial control polygon */
+    unsigned int control_point_count;    /* >= 3 */
+    int closed;                          /* 1 for closed polygon */
+    unsigned int refinement_levels;      /* number of subdivision iterations (default 6) */
 } qaws_subdivision_desc;
 ```
 
-| Field | Description |
+| Member | Meaning |
 |---|---|
 | `dimension` | `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D` |
-| `scheme` | Subdivision scheme (see `qaws_subdivision_scheme`) |
-| `control_points` | Initial control polygon (`qaws_vec2*` or `qaws_vec3*`) |
-| `control_point_count` | Number of control points (>= 3) |
-| `closed` | 1 for a closed polygon, 0 for open |
-| `refinement_levels` | Number of subdivision iterations (default 6) |
-
----
+| `scheme` | see above |
+| `control_points` | the initial polygon, `dimension` scalars per point, packed |
+| `control_point_count` | at least 3 |
+| `closed` | non-zero: a closed polygon |
+| `refinement_levels` | refinement steps; 0 means 6. Each step about doubles the point count |
 
 ## qaws_curve_create_subdivision
 
@@ -54,15 +41,17 @@ qaws_status qaws_curve_create_subdivision(
     qaws_subdivision_desc const* desc);
 ```
 
-Creates a subdivision curve by iteratively refining a control polygon.
+Refines the polygon and creates the curve through the refined points: R - 1 spans open, R spans closed (R refined
+points), parameter range [0, span_count]. More levels give a closer approximation of the limit curve and more spans.
+The input points are copied. Destroy the result with `qaws_curve_destroy` ([curve.md](curve.md)).
 
-**Parameters:**
-- `desc` -- Subdivision descriptor. Must not be NULL.
-- `out_curve` -- Receives the created curve. Set to NULL on error.
+| Status | When |
+|---|---|
+| `QAWS_STATUS_OK` | created |
+| `QAWS_STATUS_INVALID_ARGUMENT` | `desc`, `out_curve` or `control_points` NULL; unknown scheme |
+| `QAWS_STATUS_INVALID_DIMENSION` | dimension not 2D or 3D |
+| `QAWS_STATUS_INVALID_CONTROL_POINT_COUNT` | fewer than 3 points, a count too large to index, or too few refined points (under 4 open, 3 closed) |
+| `QAWS_STATUS_ALLOCATION_FAILURE` | allocation failed, or the refined count would overflow |
 
-**Returns:** `QAWS_STATUS_OK` on success.
-
-**Notes:**
-- The descriptor data is copied. The caller may free `control_points` after creation.
-- Higher `refinement_levels` produce smoother curves at the cost of more internal points.
-- The limit curve's continuity depends on the chosen scheme (C1, C2, or C3).
+`*out_curve` is set to NULL first. The allocator-taking form `qaws_curve_create_subdivision_ex` is declared in
+`qaws_alloc.h` ([alloc.md](alloc.md)).

@@ -1,6 +1,30 @@
 # Curve Families
 
-Qaws supports thirteen curve families. Each is created through a descriptor struct and a `qaws_curve_create_*` function. After creation, all families share the same evaluation, sampling, traversal, and inspection APIs.
+Qaws has thirteen curve families (`qaws_curve_kind`: Bezier, Hermite,
+Catmull-Rom, B-spline, NURBS, trajectory, Yuksel, rational Bezier,
+composite, arc, polynomial, clothoid, subdivision). Each is created from a
+descriptor by a `qaws_curve_create_*` function; afterwards every family shares
+the same evaluation, sampling, traversal and inspection calls. Names below are
+the unsuffixed forms ([precision.md](precision.md)).
+
+Common rules:
+
+- The descriptor and the arrays it points to are read during the call and
+  copied; the curve owns its data (composite curves own their segments).
+- Control points are passed as `void const*`: `dimension` scalars per point
+  (`qaws_vec2` or `qaws_vec3` arrays fit).
+- Every creator has an `_ex` form taking a `qaws_allocator`
+  (`qaws_alloc.h`; B-spline and NURBS also declare theirs in their own
+  header). Destroy with `qaws_curve_destroy` ([memory.md](memory.md)).
+- Two more kinds come from other constructors: `QAWS_CURVE_KIND_REPARAMETERIZED`
+  (arc-length and length-matched wrappers, [operations.md](operations.md))
+  and `QAWS_CURVE_KIND_VIEW` (borrowed host arrays,
+  [views_and_batches.md](views_and_batches.md)).
+- Single-span Bezier and polynomial curves can also live in stack storage
+  (`qaws_inline.h`, [evaluation.md](evaluation.md#inline-curves-stack-allocated-evaluation)).
+- 2D helpers in `qaws_path.h` build polylines (`qaws_curve_create_polyline_2d`,
+  a degree-1 B-spline) and exact ellipses (`qaws_curve_create_ellipse_2d`, a
+  rational quadratic NURBS) ([regions_2d.md](regions_2d.md)).
 
 ---
 
@@ -209,16 +233,16 @@ Based on Cem Yuksel's "A Class of C2 Interpolating Splines" (2020). These curves
 - **Spans:** control_point_count - 1 (open), or control_point_count (closed)
 - **Continuity:** C2 (achieved through cos^2/sin^2 blending)
 - **Closed:** yes (optional)
-- **Dimension:** 2D and 3D (Bezier mode); 2D only (Circular/Elliptical/Hybrid)
+- **Dimension:** 2D, 3D (in 3D the circular and elliptical sub-curves are fitted in each triplet's osculating plane)
 
 ### Interpolation modes
 
-| Mode | Description | Dimension |
-|---|---|---|
-| `BEZIER` | Quadratic Bezier sub-curves through point triplets | 2D, 3D |
-| `CIRCULAR` | Circular arcs through point triplets | 2D only |
-| `ELLIPTICAL` | Elliptical arcs with iterative fitting | 2D only |
-| `HYBRID` | Circular when arc angle is small, elliptical otherwise | 2D only |
+| Mode | Description |
+|---|---|
+| `QAWS_YUKSEL_MODE_BEZIER` | Quadratic Bezier sub-curves through point triplets |
+| `QAWS_YUKSEL_MODE_CIRCULAR` | Circular arcs through point triplets |
+| `QAWS_YUKSEL_MODE_ELLIPTICAL` | Elliptical arcs through point triplets |
+| `QAWS_YUKSEL_MODE_HYBRID` | Circular where the arc spans at most a quarter turn each way, elliptical otherwise |
 
 ### How it works
 
@@ -389,7 +413,7 @@ qaws_curve_create_clothoid(&c, &desc);
 
 **Header:** `qaws_subdivision.h`
 
-Limit curves produced by iterative subdivision of an initial control polygon. The subdivision scheme determines the continuity and character of the resulting curve. After a configurable number of refinement levels, the subdivided polyline is used as the curve representation.
+Limit curves produced by iterative subdivision of an initial control polygon. The subdivision scheme determines the continuity and character of the resulting curve. After `refinement_levels` steps (0: 6), the refined polygon is interpolated by uniform Catmull-Rom cubic spans, one unit span per refined edge.
 
 - **Degree:** depends on scheme (see below)
 - **Spans:** determined by refinement
@@ -427,7 +451,7 @@ qaws_curve_create_subdivision(&c, &desc);
 
 **Header:** `qaws_composite.h`
 
-Multi-segment compound curves that chain multiple heterogeneous `qaws_curve` objects end-to-end into a single curve. Each segment occupies one unit in the composite parameter space: segment *i* maps to `[i, i+1]`, giving a total parameter range of `[0, segment_count]`. The composite takes ownership of all segment curve pointers.
+Multi-segment compound curves that chain multiple heterogeneous `qaws_curve` objects end-to-end into a single curve. Each segment occupies one unit in the composite parameter space: segment *i* maps to `[i, i+1]`, giving a total parameter range of `[0, segment_count]`. On success the composite takes ownership of all segment curve pointers; on failure the caller keeps them.
 
 - **Degree:** varies per segment
 - **Spans:** segment_count
@@ -480,8 +504,16 @@ qaws_curve* c = NULL;
 qaws_curve_create_interpolating_spline(&c, &desc);
 ```
 
+Consecutive duplicate points are dropped first. An open curve of two
+distinct points is the straight segment for every method; a closed curve
+needs at least 3 distinct points. Returns `QAWS_STATUS_INVALID_ARGUMENT` for a
+NULL or non-finite input or an unknown method, `QAWS_STATUS_DEGENERATE_CURVE`
+when too few distinct points remain, `QAWS_STATUS_NUMERICAL_FAILURE` when the
+solve gives no finite result.
+
 ---
 
 ## Surfaces
 
-Surface types (Bezier patches, B-spline surfaces, NURBS surfaces, swept surfaces, and ruled surfaces) are documented in [Surfaces](surfaces.md).
+Surface types are documented in [Surfaces](surfaces.md). API details of each
+family: [api/index.md](api/index.md).

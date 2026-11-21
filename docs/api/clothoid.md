@@ -1,8 +1,7 @@
-# API Reference: qaws_clothoid.h
+# qaws_clothoid.h: clothoids
 
-Clothoid (Euler spiral / Cornu spiral) curve creation.
-
----
+A 2D clothoid (Euler or Cornu spiral): curvature varies linearly with arc length. Each name exists as `name_f32` and
+`name_f64` ([precision.md](precision.md)).
 
 ## qaws_clothoid_desc
 
@@ -10,38 +9,29 @@ Clothoid (Euler spiral / Cornu spiral) curve creation.
 typedef struct qaws_clothoid_desc {
     qaws_scalar origin_x;
     qaws_scalar origin_y;
-    qaws_scalar start_angle;
-    qaws_scalar start_curvature;
-    qaws_scalar end_curvature;
-    qaws_scalar length;
+    qaws_scalar start_angle;        /* radians */
+    qaws_scalar start_curvature;    /* kappa_0 */
+    qaws_scalar end_curvature;      /* kappa_1 */
+    qaws_scalar length;             /* arc length L > 0 */
 } qaws_clothoid_desc;
 ```
 
-| Field | Description |
+| Member | Meaning |
 |---|---|
-| `origin_x` | Starting point x-coordinate |
-| `origin_y` | Starting point y-coordinate |
-| `start_angle` | Initial heading in radians |
-| `start_curvature` | Curvature at s=0 (kappa_0) |
-| `end_curvature` | Curvature at s=L (kappa_1) |
-| `length` | Total arc length L. Must be > 0. |
+| `origin_x`, `origin_y` | the start point |
+| `start_angle` | the initial heading, radians |
+| `start_curvature` | curvature at s = 0 (kappa_0) |
+| `end_curvature` | curvature at s = L (kappa_1) |
+| `length` | total arc length L, > 0 |
 
-The curvature varies linearly with arc length:
+The curve:
 
 ```
 kappa(s) = kappa_0 + (kappa_1 - kappa_0) * s / L
+theta(s) = start_angle + kappa_0 * s + (kappa_1 - kappa_0) * s^2 / (2 * L)
+x(s)     = origin_x + integral_0^s cos(theta(u)) du
+y(s)     = origin_y + integral_0^s sin(theta(u)) du
 ```
-
-Position is computed by integrating:
-
-```
-x(s) = origin_x + integral_0^s cos(theta(u)) du
-y(s) = origin_y + integral_0^s sin(theta(u)) du
-```
-
-where `theta(s) = start_angle + kappa_0*s + (kappa_1 - kappa_0)*s^2 / (2*L)`.
-
----
 
 ## qaws_curve_create_clothoid
 
@@ -51,14 +41,14 @@ qaws_status qaws_curve_create_clothoid(
     qaws_clothoid_desc const* desc);
 ```
 
-Creates a clothoid (Euler spiral) curve.
+Creates the curve: always 2D, one span, parameter = arc length, range [0, L]. The degree reported is 3. The descriptor
+is copied. Destroy the result with `qaws_curve_destroy` ([curve.md](curve.md)).
 
-**Parameters:**
-- `desc` -- Clothoid descriptor. Must not be NULL.
-- `out_curve` -- Receives the created curve. Set to NULL on error.
+| Status | When |
+|---|---|
+| `QAWS_STATUS_OK` | created |
+| `QAWS_STATUS_INVALID_ARGUMENT` | `desc` or `out_curve` NULL; `length <= 0` |
+| `QAWS_STATUS_ALLOCATION_FAILURE` | allocation failed |
 
-**Returns:** `QAWS_STATUS_OK` on success.
-
-**Notes:**
-- 2D only. 3D clothoids are not supported.
-- The descriptor data is copied. The caller may free it after creation.
+`*out_curve` is set to NULL first. The allocator-taking form `qaws_curve_create_clothoid_ex` is declared in
+`qaws_alloc.h` ([alloc.md](alloc.md)).

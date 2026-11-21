@@ -1,103 +1,89 @@
 # Qaws Overview
 
-**Qaws** (Arabic: قوس, "arc") is a dependency-free C11 library for curve and surface evaluation, traversal, and inspection in 2D and 3D.
+**Qaws** (Arabic for arc) is a dependency-free C11 library for parametric
+geometry in 2D and 3D: curves and surfaces, their evaluation, sampling,
+traversal and inspection, operations on them, 2D regions and Booleans,
+surface seams and shatter, a B-rep shell, an exact (certified) kernel,
+differentiation with respect to the geometry's data, and motions.
 
-## What Qaws does
+Every precision-bearing name exists as `name_f32` and `name_f64`; these pages
+use the unsuffixed names (see [precision.md](precision.md)).
 
-Qaws lets you:
+## What the library models
 
-- **Define** curves from control points, knots, weights, or keyframes
-- **Evaluate** position and derivatives at any parameter -- on CPU, GPU, or DSP
-- **Sample** curves into point buffers for rendering or export
-- **Traverse** curves with constant-speed, acceleration, or time-based motion
-- **Inspect** curve properties: tangent, curvature, torsion, arc length, bounds, closest point, and more
-- **Operate** on curves: split, join, offset, reparameterize, reverse
-- **Convert** between curve families and export to SVG, polyline, or B-spline fits
-- **Evaluate surfaces**: Bezier, B-spline, NURBS, swept, and ruled patches
+| Area | Headers | Concept page |
+|---|---|---|
+| Curves: 13 families created from descriptors (Bezier, rational Bezier, Hermite, Catmull-Rom, B-spline, NURBS, trajectory, Yuksel, arc, polynomial, clothoid, subdivision, composite), interpolating splines, polylines | `qaws_bezier.h` ... `qaws_composite.h`, `qaws_interpolating.h`, `qaws_path.h` | [curve_families.md](curve_families.md) |
+| Surfaces: Bezier, B-spline, NURBS, bilinear, biquadratic, swept, ruled, Coons, extrusion, revolution, pipe, loft, Gordon, offset, trimmed, T-spline, subdivision | `qaws_surface_*.h` | [surfaces.md](surfaces.md) |
+| Evaluation: position and derivatives at a parameter, per span, in batches; portable cores | `qaws_eval.h`, `qaws_prepare.h`, `qaws_inline.h`, `core/*.h` | [evaluation.md](evaluation.md) |
+| Sampling and tessellation | `qaws_sampling.h`, `qaws_inspect.h` | [sampling.md](sampling.md) |
+| Traversal: motion along a curve by distance or time | `qaws_traversal.h` | [traversal.md](traversal.md) |
+| Inspection: arc length, bounds, closest points (certified), frames, curvature, enclosures | `qaws_inspect.h` | [inspection.md](inspection.md) |
+| Operations: split, extract, join, offsets, fillets, conversion, export and import | `qaws_operations.h`, `qaws_convert.h`, `qaws_export.h`, `qaws_import.h` | [operations.md](operations.md) |
+| Borrowed views and batches: host-owned arrays evaluated in place; many curves or surfaces at once | `qaws_view.h`, `qaws_curve_batch.h`, `qaws_surface_batch.h`, `qaws_batch_executor.h` | [views_and_batches.md](views_and_batches.md) |
+| 2D paths, regions, clipping and Booleans on curves | `qaws_path.h`, `qaws_clip.h`, `qaws_boolean_2d.h` | [regions_2d.md](regions_2d.md) |
+| Seams and shatter of curved surfaces | `qaws_shatter.h` | [shatter.md](shatter.md) |
+| B-rep shell: faces, edges, vertices over borrowed surfaces | `qaws_brep.h` | [brep.md](brep.md) |
+| Exact kernel: certified predicates, exact curves and surfaces | `qaws_exact.h` | [exact_kernel.md](exact_kernel.md) |
+| Differentiation with respect to control points, knots, weights and parameters | `qaws_diff*.h` | [differentiation.md](differentiation.md) |
+| Motions over t in [0, 1]: rigid (poses, along a curve) and per vertex | `qaws_motion.h` | [api/motion.md](api/motion.md) |
+| Memory: allocators, thread and scratch allocators, arena | `qaws_alloc.h`, `qaws_allocator.h` | [memory.md](memory.md) |
 
-All curve families share one evaluation interface. A Bezier curve and a NURBS curve are evaluated the same way.
+`qaws.h` includes every public header. The function-by-function reference is
+[api/index.md](api/index.md).
 
 ## Design principles
 
-1. **C first** -- plain structs, enums, typedefs, explicit memory ownership, opaque handles
-2. **Geometry and motion are separate** -- curves define shape; traversal objects define motion
-3. **One evaluation model** -- position + D1/D2/D3 derivatives, uniform across all families
-4. **Piecewise is normal** -- multi-span curves are first-class, not a special case
-5. **Multi-backend** -- core evaluation math is isolated in portable headers reusable from C, HLSL, GLSL, and Halide
-6. **Public API is stable** -- internal caches, solvers, and basis math are hidden
+1. **C first.** Plain structs, enums and typedefs, opaque handles
+   (`qaws_curve*`, `qaws_surface*`, ...), explicit ownership: a descriptor is
+   read during the call, an object is destroyed by its own `_destroy`.
+2. **Status codes.** Every fallible function returns `qaws_status`
+   ([error_handling.md](error_handling.md)).
+3. **One evaluation model.** Position and D1 to D3 for every curve family;
+   position, partials to second order and the normal for every surface.
+   Piecewise curves are the normal case.
+4. **Geometry and motion are separate.** A curve is shape; a traversal or a
+   motion says how something moves along it.
+5. **Immutable objects.** Curves and surfaces do not change after creation:
+   any number of threads may read one at once. The library has no threads of
+   its own; batched work can be fanned out through a caller's
+   `qaws_batch_executor` ([threading.md](threading.md)).
+6. **Both precisions in one library.** f32 and f64 forms of every
+   precision-bearing function and type; `QAWS_SCALAR_IS_FLOAT` (default 1)
+   only picks what the unsuffixed names mean ([precision.md](precision.md)).
+7. **Caller-controlled memory.** `_ex` constructors take a `qaws_allocator`;
+   otherwise the thread's allocator, else the default. Many queries write into
+   caller buffers and report counts ([memory.md](memory.md)).
+8. **Portable cores.** The evaluation kernels in `src/qaws/core/` are
+   header-only and compile as C, HLSL, GLSL and Halide
+   ([backends.md](backends.md)).
+9. **Features, not implementations, in names.** Internals (caches, solvers,
+   basis code, the mesh machinery) stay behind the opaque handles.
 
-## Supported curve families
+## How the parts fit
 
-| Family | Header | Continuity | Interpolating | Closed | 3D |
-|---|---|---|---|---|---|
-| Bezier | `qaws_bezier.h` | C0 | endpoints only | no | yes |
-| Rational Bezier | `qaws_rational_bezier.h` | C0 | endpoints only | no | yes |
-| Hermite | `qaws_hermite.h` | C1 | yes | no | yes |
-| Catmull-Rom | `qaws_catmull_rom.h` | C1 | yes | yes | yes |
-| B-Spline | `qaws_bspline.h` | up to C(p-1) | no | yes | yes |
-| NURBS | `qaws_nurbs.h` | up to C(p-1) | no | yes | yes |
-| Trajectory | `qaws_trajectory.h` | C1 | yes | yes | yes |
-| Yuksel | `qaws_yuksel.h` | C2 | yes | yes | yes |
-| Arc | `qaws_arc.h` | C2 | endpoints | no | yes |
-| Polynomial | `qaws_polynomial.h` | C-inf | no | no | yes |
-| Clothoid | `qaws_clothoid.h` | C2 | no | no | yes |
-| Subdivision | `qaws_subdivision.h` | varies | varies | yes | yes |
-| Composite | `qaws_composite.h` | user-defined | varies | yes | yes |
-| Inline variants | `qaws_inline.h` | (matches family) | (matches family) | (matches family) | yes |
-
-Inline curves (`qaws_inline.h`) are stack-allocated versions of the above families -- no heap, no handle, no destroy call.
-
-## Surfaces
-
-| Surface type | Header |
-|---|---|
-| Bezier patch | `qaws_surface_bezier.h` |
-| B-spline patch | `qaws_surface_bspline.h` |
-| NURBS patch | `qaws_surface_nurbs.h` |
-| Swept surface | `qaws_surface_swept.h` |
-| Ruled surface | `qaws_surface_ruled.h` |
-
-Surfaces share a common evaluation model (`qaws_surface.h`) with position and partial derivatives at any (u, v) parameter.
-
-## Multi-backend support
-
-Qaws separates portable evaluation math from the C runtime API:
-
-- **C runtime** (`src/qaws/*.c`) -- full API with memory management, traversal, inspection, and operations
-- **Core eval headers** (`src/qaws/core/`) -- standalone, dependency-free headers containing the raw math (de Casteljau, Horner, B-spline basis, NURBS, arc, surface evaluation). These can be included directly from HLSL, GLSL, Halide, or any C-like language.
-- **Bootstrap headers** -- `qaws_hlsl.h`, `qaws_glsl.h`, `qaws_halide.h` provide type and macro scaffolding so core headers compile in each target language
-- **SIMD batch evaluation** (`src/qaws/simd/`, `src/qaws/batch/`) -- AVX2, SSE2, and NEON backends for evaluating many parameters in one call
-
-Example GPU shaders and Halide generators live in `examples/`.
-
-## Operations, conversion, and inspection
-
-**Operations** (`qaws_operations.h`): split, join, offset, reparameterize, reverse.
-
-**Conversion** (`qaws_convert.h`): Hermite-to-Bezier, Catmull-Rom-to-Bezier, Bezier-to-B-spline, B-spline-to-NURBS, degree elevation, degree reduction.
-
-**Export** (`qaws_export.h`): SVG path string, polyline sampling, B-spline fitting.
-
-**Import** (`qaws_import.h`): polyline to Catmull-Rom or Trajectory.
-
-**Inspection** (`qaws_inspect.h`): tangent, curvature, torsion, speed, normal, Frenet frame, inflection points, extrema, curvature comb, winding number, intersection, self-intersection, arc length, bounds, closest point.
-
-**Prepare** (`qaws_prepare.h`): pre-compute coefficients and lookup tables for repeated evaluation -- avoids redundant basis/knot work in hot loops.
-
-## Custom allocators
-
-All `_create` functions have `_ex` variants that accept a `qaws_allocator` for custom memory management. The default path uses `malloc`/`free`.
-
-## Configurable scalar type
-
-Qaws supports `float` (f32) or `double` (f64) via the `QAWS_SCALAR_IS_FLOAT` compile option. Default is `float`.
+- A **descriptor** goes into `qaws_curve_create_*` or `qaws_surface_create_*`
+  and an owned object comes out. A **view** (`qaws_view.h`) instead wraps
+  host arrays without copying them; a borrowed curve or surface works with the
+  same evaluation, sampling and inspection calls.
+- **Evaluation** is the base every other module uses: sampling, traversal,
+  inspection, operations, Booleans and differentiation all evaluate through
+  `qaws_curve_evaluate_*` / `qaws_surface_evaluate` or the same span code.
+- **Composite objects borrow or own their inputs** as each header states:
+  a composite curve owns its segments; swept, ruled, Coons, loft, Gordon,
+  offset, trimmed surfaces and B-rep shells borrow theirs; traversals borrow
+  their curves.
+- **Batches** (`qaws_curve_batch.h`, `qaws_surface_batch.h`, the exact kernel)
+  take many inputs at once and an optional executor; results do not depend on
+  the executor.
+- The **exact kernel** is C only and built with `QAWS_ENABLE_EXACT` (CMake,
+  default ON); its predicates decide signs exactly on double inputs.
 
 ## Quick start
 
 ```c
 #include "qaws.h"
 
-// Create a cubic Bezier
 qaws_vec2 points[] = { {0,0}, {0,1}, {1,1}, {1,0} };
 qaws_bezier_desc desc = {
     .dimension = QAWS_DIMENSION_2D,
@@ -107,57 +93,50 @@ qaws_bezier_desc desc = {
 };
 
 qaws_curve* curve = NULL;
-qaws_curve_create_bezier(&curve, &desc);
-
-// Evaluate at midpoint
-qaws_eval_result_2d result;
-qaws_curve_evaluate_2d(&result, curve,
-    0.5f, QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
-
-// result.position = {0.5, 0.75}
-// result.d1       = first derivative at t=0.5
-
-qaws_curve_destroy(curve);
+if (qaws_curve_create_bezier(&curve, &desc) == QAWS_STATUS_OK) {
+    qaws_eval_result_2d r;
+    qaws_curve_evaluate_2d(&r, curve, (qaws_scalar)0.5,
+        QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1);
+    /* r.position = (0.5, 0.75), r.d1 = first derivative at t = 0.5 */
+    qaws_curve_destroy(curve);
+}
 ```
-
-## Three workflows
-
-**A. Geometry-first** -- create a curve, evaluate it directly.
-
-**B. Motion-on-top** -- wrap a curve with a traversal for constant-speed or accelerated motion.
-
-**C. Tooling and inspection** -- query properties, convert between families, export for rendering.
 
 ## Building
 
-### Sharpmake (primary)
+Sharpmake is the primary build (Visual Studio solution); CMake mirrors the
+public API for other platforms, installs and packaging; the library can also
+be dropped into any project or used as a two-file amalgamation. See
+[building.md](building.md) and [integration.md](integration.md).
 
-```bash
-cd buildsystem
-bootstrap.bat
-```
-
-Generates Visual Studio solutions. This is the primary build system.
-
-### CMake (backup)
-
-```bash
-mkdir build && cd build
-cmake ..
-cmake --build .
-```
-
-## Repository structure
+## Repository layout
 
 ```
-src/qaws/            Public headers and implementations
-src/qaws/core/       Portable eval headers (usable from C, HLSL, GLSL, Halide)
-src/qaws/simd/       SIMD abstraction (AVX2, SSE2, NEON, scalar fallback)
-src/qaws/batch/      Batch evaluation using SIMD backends
-src/qaws/internal/   Internal numerical machinery
-tests/               Test suite with SVG visual output
-docs/                This documentation
-docs/api/            Per-header API reference
-examples/            GPU compute shaders (HLSL, GLSL) and Halide generators
-buildsystem/         Sharpmake project generation
+src/qaws/            public headers (qaws_*.h, qaws.h) and the C implementation
+src/qaws/core/       portable header-only evaluation kernels (C, HLSL, GLSL, Halide)
+src/qaws/exact/      exact kernel implementation (internal headers)
+src/qaws/internal/   internal numerical machinery (not public)
+src/qaws/simd/       SIMD abstraction (AVX2, SSE2, NEON, scalar)
+src/qaws/batch/      SIMD evaluation kernels (built with SIMD on)
+tests/               test suites (one per numbered file) and shader checks
+examples/            C showcases, HLSL/GLSL shaders, Halide generators
+bench/               benchmarks
+tools/               API naming tool (qaws_names.h generator and checks)
+buildsystem/         Sharpmake sources, bootstrap scripts, amalgamate.cmake, CMake templates
+docs/                concept pages (this directory)
+docs/api/            API reference, one page per header area
+working_dir/         test and example output
 ```
+
+## Other concept pages
+
+[building.md](building.md), [integration.md](integration.md),
+[curve_families.md](curve_families.md), [surfaces.md](surfaces.md),
+[evaluation.md](evaluation.md), [sampling.md](sampling.md),
+[traversal.md](traversal.md), [inspection.md](inspection.md),
+[operations.md](operations.md), [views_and_batches.md](views_and_batches.md),
+[regions_2d.md](regions_2d.md), [shatter.md](shatter.md), [brep.md](brep.md),
+[exact_kernel.md](exact_kernel.md), [differentiation.md](differentiation.md),
+[precision.md](precision.md), [memory.md](memory.md),
+[threading.md](threading.md), [error_handling.md](error_handling.md),
+[backends.md](backends.md), [capabilities.md](capabilities.md).

@@ -1,203 +1,123 @@
-# API Reference: qaws_types.h
+# qaws_types.h: core types
 
-Core types, enums, and structs used throughout the Qaws library.
+The vector types, enums, descriptor structs and opaque handles shared by the curve API, plus the fixed-size inline
+curve. `qaws_scalar` and `QAWS_SCALAR_IS_FLOAT` come from `qaws_platform.h`; every type here exists once per precision
+(see [precision.md](precision.md)). The allocator types this header pulls in (`qaws_allocator.h`) are documented in
+[alloc.md](alloc.md).
 
----
+## Thread safety
 
-## Scalar type
+- `qaws_curve` objects are immutable after creation: any number of threads may evaluate, sample, inspect or traverse
+  the same curve without synchronization.
+- `qaws_traversal` objects are safe for concurrent reads (evaluate, map queries); `qaws_traversal_advance_*` and
+  `qaws_traversal_reset` mutate state and need external synchronization.
+- Creation and destruction are not thread-safe on the same object: do not destroy a curve another thread is using.
 
-```c
-#if QAWS_SCALAR_IS_FLOAT
-typedef float qaws_scalar;
-#else
-typedef double qaws_scalar;
-#endif
-```
-
-Controlled by the `QAWS_SCALAR_IS_FLOAT` compile definition.
-
----
-
-## Vector types
-
-### qaws_vec2
+## Vectors
 
 ```c
-typedef struct qaws_vec2 {
-    qaws_scalar x;
-    qaws_scalar y;
-} qaws_vec2;
+typedef struct qaws_vec2 { qaws_scalar x; qaws_scalar y; } qaws_vec2;
+typedef struct qaws_vec3 { qaws_scalar x; qaws_scalar y; qaws_scalar z; } qaws_vec3;
 ```
 
-### qaws_vec3
-
-```c
-typedef struct qaws_vec3 {
-    qaws_scalar x;
-    qaws_scalar y;
-    qaws_scalar z;
-} qaws_vec3;
-```
-
----
+Descriptors that take `void const*` point arrays expect `dimension` scalars per point, packed: an array of `qaws_vec2`
+or `qaws_vec3` has that layout.
 
 ## Enums
 
 ### qaws_dimension
 
 ```c
-typedef enum qaws_dimension {
-    QAWS_DIMENSION_2D = 2,
-    QAWS_DIMENSION_3D = 3
-} qaws_dimension;
+typedef enum qaws_dimension { QAWS_DIMENSION_2D = 2, QAWS_DIMENSION_3D = 3 } qaws_dimension;
 ```
 
 ### qaws_curve_kind
 
-```c
-typedef enum qaws_curve_kind {
-    QAWS_CURVE_KIND_INVALID = 0,
-    QAWS_CURVE_KIND_BEZIER,
-    QAWS_CURVE_KIND_HERMITE,
-    QAWS_CURVE_KIND_CATMULL_ROM,
-    QAWS_CURVE_KIND_BSPLINE,
-    QAWS_CURVE_KIND_NURBS,
-    QAWS_CURVE_KIND_TRAJECTORY,
-    QAWS_CURVE_KIND_YUKSEL,
-    QAWS_CURVE_KIND_RATIONAL_BEZIER,
-    QAWS_CURVE_KIND_COMPOSITE,
-    QAWS_CURVE_KIND_ARC,
-    QAWS_CURVE_KIND_POLYNOMIAL,
-    QAWS_CURVE_KIND_CLOTHOID,
-    QAWS_CURVE_KIND_SUBDIVISION,
-    QAWS_CURVE_KIND_REPARAMETERIZED
-} qaws_curve_kind;
-```
+What `qaws_curve_get_kind` reports ([inspect.md](inspect.md)).
+
+| Value | Created by |
+|---|---|
+| `QAWS_CURVE_KIND_INVALID` (0) | - |
+| `QAWS_CURVE_KIND_BEZIER` | [bezier.md](bezier.md) |
+| `QAWS_CURVE_KIND_HERMITE` | [hermite.md](hermite.md) |
+| `QAWS_CURVE_KIND_CATMULL_ROM` | [catmull_rom.md](catmull_rom.md) |
+| `QAWS_CURVE_KIND_BSPLINE` | [bspline.md](bspline.md) |
+| `QAWS_CURVE_KIND_NURBS` | [nurbs.md](nurbs.md) |
+| `QAWS_CURVE_KIND_TRAJECTORY` | [trajectory.md](trajectory.md) |
+| `QAWS_CURVE_KIND_YUKSEL` | [yuksel.md](yuksel.md) |
+| `QAWS_CURVE_KIND_RATIONAL_BEZIER` | [rational_bezier.md](rational_bezier.md) |
+| `QAWS_CURVE_KIND_COMPOSITE` | [composite.md](composite.md), [interpolating.md](interpolating.md) |
+| `QAWS_CURVE_KIND_ARC` | [arc.md](arc.md) |
+| `QAWS_CURVE_KIND_POLYNOMIAL` | [polynomial.md](polynomial.md) |
+| `QAWS_CURVE_KIND_CLOTHOID` | [clothoid.md](clothoid.md) |
+| `QAWS_CURVE_KIND_SUBDIVISION` | [subdivision.md](subdivision.md) |
+| `QAWS_CURVE_KIND_REPARAMETERIZED` | a curve with a remapped parameter |
+| `QAWS_CURVE_KIND_VIEW` | a borrowed curve evaluated from host arrays it does not own ([view.md](view.md)) |
 
 ### qaws_parameterization
 
-```c
-typedef enum qaws_parameterization {
-    QAWS_PARAMETERIZATION_DEFAULT = 0,
-    QAWS_PARAMETERIZATION_UNIFORM,
-    QAWS_PARAMETERIZATION_CHORDAL,
-    QAWS_PARAMETERIZATION_CENTRIPETAL
-} qaws_parameterization;
-```
-
-Used by Catmull-Rom curves to select knot spacing strategy.
+`QAWS_PARAMETERIZATION_DEFAULT` (0), `QAWS_PARAMETERIZATION_UNIFORM`, `QAWS_PARAMETERIZATION_CHORDAL`,
+`QAWS_PARAMETERIZATION_CENTRIPETAL`. Knot spacing for point-interpolating curves (Catmull-Rom: `DEFAULT` is
+centripetal).
 
 ### qaws_continuity
 
-```c
-typedef enum qaws_continuity {
-    QAWS_CONTINUITY_NONE = 0,
-    QAWS_CONTINUITY_C0,
-    QAWS_CONTINUITY_C1,
-    QAWS_CONTINUITY_C2,
-    QAWS_CONTINUITY_C3
-} qaws_continuity;
-```
+`QAWS_CONTINUITY_NONE` (0), `QAWS_CONTINUITY_C0`, `QAWS_CONTINUITY_C1`, `QAWS_CONTINUITY_C2`, `QAWS_CONTINUITY_C3`.
 
 ### qaws_traversal_mode
 
-```c
-typedef enum qaws_traversal_mode {
-    QAWS_TRAVERSAL_MODE_PARAMETER = 0,
-    QAWS_TRAVERSAL_MODE_ARC_LENGTH,
-    QAWS_TRAVERSAL_MODE_TIME
-} qaws_traversal_mode;
-```
+`QAWS_TRAVERSAL_MODE_PARAMETER` (0), `QAWS_TRAVERSAL_MODE_ARC_LENGTH`, `QAWS_TRAVERSAL_MODE_TIME`. How an input value
+is read: as a curve parameter, a distance along the curve, or a time.
 
 ### qaws_motion_profile
 
-```c
-typedef enum qaws_motion_profile {
-    QAWS_MOTION_PROFILE_NONE = 0,
-    QAWS_MOTION_PROFILE_CONSTANT_SPEED,
-    QAWS_MOTION_PROFILE_CONSTANT_ACCELERATION,
-    QAWS_MOTION_PROFILE_TRAPEZOIDAL_SPEED,
-    QAWS_MOTION_PROFILE_S_CURVE,
-    QAWS_MOTION_PROFILE_CUSTOM
-} qaws_motion_profile;
-```
-
-| Value | Description |
+| Value | Meaning |
 |---|---|
-| `NONE` | No speed control |
-| `CONSTANT_SPEED` | Uniform speed along the curve |
-| `CONSTANT_ACCELERATION` | Linearly increasing speed |
-| `TRAPEZOIDAL_SPEED` | Accelerate, cruise, decelerate |
-| `S_CURVE` | Smooth jerk-limited speed ramp |
-| `CUSTOM` | User-provided speed callback via `qaws_speed_fn` |
+| `QAWS_MOTION_PROFILE_NONE` (0) | no speed control |
+| `QAWS_MOTION_PROFILE_CONSTANT_SPEED` | uniform speed |
+| `QAWS_MOTION_PROFILE_CONSTANT_ACCELERATION` | constant acceleration |
+| `QAWS_MOTION_PROFILE_TRAPEZOIDAL_SPEED` | accelerate, cruise, decelerate |
+| `QAWS_MOTION_PROFILE_S_CURVE` | jerk-limited ramps |
+| `QAWS_MOTION_PROFILE_CUSTOM` | speed from a `qaws_speed_fn` |
 
 ### qaws_easing
 
-```c
-typedef enum qaws_easing {
-    QAWS_EASING_LINEAR = 0,
-    QAWS_EASING_QUAD_IN,
-    QAWS_EASING_QUAD_OUT,
-    QAWS_EASING_QUAD_IN_OUT,
-    QAWS_EASING_CUBIC_IN,
-    QAWS_EASING_CUBIC_OUT,
-    QAWS_EASING_CUBIC_IN_OUT,
-    QAWS_EASING_SINE_IN,
-    QAWS_EASING_SINE_OUT,
-    QAWS_EASING_SINE_IN_OUT
-} qaws_easing;
-```
-
-Easing functions applied to traversal input values.
+`QAWS_EASING_LINEAR` (0), `QAWS_EASING_QUAD_IN`, `QAWS_EASING_QUAD_OUT`, `QAWS_EASING_QUAD_IN_OUT`,
+`QAWS_EASING_CUBIC_IN`, `QAWS_EASING_CUBIC_OUT`, `QAWS_EASING_CUBIC_IN_OUT`, `QAWS_EASING_SINE_IN`,
+`QAWS_EASING_SINE_OUT`, `QAWS_EASING_SINE_IN_OUT`. Applied to traversal input values.
 
 ### qaws_wrap_mode
 
-```c
-typedef enum qaws_wrap_mode {
-    QAWS_WRAP_CLAMP = 0,
-    QAWS_WRAP_LOOP,
-    QAWS_WRAP_PING_PONG
-} qaws_wrap_mode;
-```
-
-Controls behavior when traversal input exceeds the curve domain.
-
-| Value | Description |
+| Value | Meaning |
 |---|---|
-| `CLAMP` | Clamp to domain boundaries |
-| `LOOP` | Wrap around to the start |
-| `PING_PONG` | Reverse direction at boundaries |
+| `QAWS_WRAP_CLAMP` (0) | clamp to the domain |
+| `QAWS_WRAP_LOOP` | wrap around to the start |
+| `QAWS_WRAP_PING_PONG` | reverse direction at the ends |
 
 ### qaws_eval_flags
 
+Bitmask, combine with `|`: `QAWS_EVAL_FLAG_NONE` = 0, `QAWS_EVAL_FLAG_POSITION` = 1 << 0, `QAWS_EVAL_FLAG_D1` = 1 << 1,
+`QAWS_EVAL_FLAG_D2` = 1 << 2, `QAWS_EVAL_FLAG_D3` = 1 << 3.
+
+## Callback
+
 ```c
-typedef enum qaws_eval_flags {
-    QAWS_EVAL_FLAG_NONE     = 0,
-    QAWS_EVAL_FLAG_POSITION = 1 << 0,
-    QAWS_EVAL_FLAG_D1       = 1 << 1,
-    QAWS_EVAL_FLAG_D2       = 1 << 2,
-    QAWS_EVAL_FLAG_D3       = 1 << 3
-} qaws_eval_flags;
+typedef qaws_scalar (*qaws_speed_fn)(qaws_scalar distance, void* user_data);
 ```
 
-Bitmask. Combine with `|`.
-
----
+Returns the speed at a distance along the curve; used with `QAWS_MOTION_PROFILE_CUSTOM`.
 
 ## Structs
 
 ### qaws_range
 
 ```c
-typedef struct qaws_range {
-    qaws_scalar min_value;
-    qaws_scalar max_value;
-} qaws_range;
+typedef struct qaws_range { qaws_scalar min_value; qaws_scalar max_value; } qaws_range;
 ```
 
-Represents a parameter interval.
+A parameter interval.
 
-### qaws_eval_result_2d
+### qaws_eval_result_2d, qaws_eval_result_3d
 
 ```c
 typedef struct qaws_eval_result_2d {
@@ -205,39 +125,24 @@ typedef struct qaws_eval_result_2d {
     qaws_vec2 d1;
     qaws_vec2 d2;
     qaws_vec2 d3;
-    unsigned int valid_flags;
+    unsigned int valid_flags;   /* QAWS_EVAL_FLAG_* bits of the fields written */
 } qaws_eval_result_2d;
 ```
 
-| Field | Description |
-|---|---|
-| `position` | Curve position at parameter |
-| `d1` | First derivative (tangent) |
-| `d2` | Second derivative |
-| `d3` | Third derivative |
-| `valid_flags` | Bitmask of `QAWS_EVAL_FLAG_*` indicating which fields are valid |
-
-### qaws_eval_result_3d
-
-Same layout as 2D but with `qaws_vec3` fields.
+`qaws_eval_result_3d` has the same members, each a `qaws_vec3`. Filled by the evaluation calls ([eval.md](eval.md)).
 
 ### qaws_sampling_desc
 
 ```c
 typedef struct qaws_sampling_desc {
-    qaws_traversal_mode traversal_mode;
+    qaws_traversal_mode traversal_mode;   /* parameter or arc-length spacing */
     unsigned int sample_count;
-    qaws_scalar error_tolerance;
-    int use_adaptive_sampling;
+    qaws_scalar error_tolerance;          /* for adaptive sampling */
+    int use_adaptive_sampling;            /* 0: uniform, non-zero: adaptive */
 } qaws_sampling_desc;
 ```
 
-| Field | Description |
-|---|---|
-| `traversal_mode` | How to distribute samples (parameter or arc-length) |
-| `sample_count` | Number of samples to generate |
-| `error_tolerance` | Tolerance for adaptive sampling |
-| `use_adaptive_sampling` | 0 = uniform, 1 = adaptive |
+See [sampling.md](sampling.md).
 
 ### qaws_traversal_desc
 
@@ -253,198 +158,41 @@ typedef struct qaws_traversal_desc {
     int clamp_to_domain;
     qaws_easing easing;
     qaws_wrap_mode wrap_mode;
-    qaws_scalar jerk;
-    qaws_speed_fn custom_speed_fn;
-    void* custom_speed_fn_user_data;
+    qaws_scalar jerk;                    /* max jerk for the S-curve profile */
+    qaws_speed_fn custom_speed_fn;       /* for QAWS_MOTION_PROFILE_CUSTOM */
+    void* custom_speed_fn_user_data;     /* passed to custom_speed_fn */
 } qaws_traversal_desc;
 ```
 
-| Field | Description |
-|---|---|
-| `traversal_mode` | Input interpretation (parameter, arc-length, time) |
-| `motion_profile` | How speed varies along the curve |
-| `speed` | Speed for constant-speed profiles |
-| `acceleration` | Acceleration for acceleration-based profiles |
-| `max_speed` | Speed cap for trapezoidal profiles |
-| `start_time` | Start time for time-based traversal |
-| `end_time` | End time for time-based traversal |
-| `clamp_to_domain` | 1 = clamp input to valid range, 0 = out-of-range returns error |
-| `easing` | Easing function applied to input values |
-| `wrap_mode` | Behavior when input exceeds domain |
-| `jerk` | Maximum jerk for S-curve motion profile |
-| `custom_speed_fn` | User-provided speed callback for `QAWS_MOTION_PROFILE_CUSTOM` |
-| `custom_speed_fn_user_data` | Opaque pointer passed to the custom speed callback |
-
-### qaws_speed_fn
-
-```c
-typedef qaws_scalar (*qaws_speed_fn)(qaws_scalar distance, void* user_data);
-```
-
-Custom speed function callback. Returns the desired speed given the distance along the curve. Used with `QAWS_MOTION_PROFILE_CUSTOM`.
-
-### qaws_allocator
-
-```c
-typedef struct qaws_allocator {
-    void* (*alloc)(unsigned long size, void* user_data);
-    void  (*dealloc)(void* ptr, void* user_data);
-    void* user_data;
-} qaws_allocator;
-```
-
-Custom allocator. Pass to `_ex` creation functions to override malloc/free. If `alloc` returns NULL, creation fails with `QAWS_STATUS_ALLOCATION_FAILURE`.
-
----
-
-## Inline curve
-
-### qaws_curve_inline
-
-```c
-#define QAWS_INLINE_STORAGE_BYTES 512
-
-typedef struct qaws_curve_inline {
-    char storage[QAWS_INLINE_STORAGE_BYTES];
-} qaws_curve_inline;
-```
-
-Stack-allocated curve for single-span curves (up to degree 7, 3D). No heap allocation. Use `qaws_curve_init_*_inline()` creation functions.
-
-### qaws_curve_inline_get_curve
-
-```c
-qaws_curve* qaws_curve_inline_get_curve(qaws_curve_inline* ic);
-```
-
-Returns the usable `qaws_curve` pointer from an initialized inline curve. Do **not** call `qaws_curve_destroy()` on inline curves.
-
----
-
-## Intersection types
-
-### qaws_intersection_2d
-
-```c
-typedef struct qaws_intersection_2d {
-    qaws_scalar parameter_a;
-    qaws_scalar parameter_b;
-    qaws_vec2 position;
-} qaws_intersection_2d;
-```
-
-Result of a 2D curve-curve or self-intersection query. `parameter_a` and `parameter_b` are the parameter values on the respective curves (or both on the same curve for self-intersections).
-
-### qaws_intersection_3d
-
-```c
-typedef struct qaws_intersection_3d {
-    qaws_scalar parameter_a;
-    qaws_scalar parameter_b;
-    qaws_vec3 position;
-} qaws_intersection_3d;
-```
-
-Same layout as `qaws_intersection_2d` but with `qaws_vec3` position.
-
----
-
-## Curvature comb types
-
-### qaws_curvature_sample_2d
-
-```c
-typedef struct qaws_curvature_sample_2d {
-    qaws_vec2 position;
-    qaws_scalar curvature;
-    qaws_vec2 normal;
-} qaws_curvature_sample_2d;
-```
-
-A single sample of the curvature comb for a 2D curve. Contains the curve position, the scalar curvature at that point, and the unit normal.
-
-### qaws_curvature_sample_3d
-
-```c
-typedef struct qaws_curvature_sample_3d {
-    qaws_vec3 position;
-    qaws_scalar curvature;
-    qaws_vec3 normal;
-} qaws_curvature_sample_3d;
-```
-
-Same layout as `qaws_curvature_sample_2d` but with `qaws_vec3` fields.
-
----
-
-## Surface types
-
-Defined in `qaws_surface_types.h`.
-
-### qaws_surface_kind
-
-```c
-typedef enum qaws_surface_kind {
-    QAWS_SURFACE_KIND_INVALID = 0,
-    QAWS_SURFACE_KIND_BEZIER,
-    QAWS_SURFACE_KIND_BSPLINE,
-    QAWS_SURFACE_KIND_NURBS,
-    QAWS_SURFACE_KIND_SWEPT,
-    QAWS_SURFACE_KIND_RULED
-} qaws_surface_kind;
-```
-
-### qaws_surface_eval_flags
-
-```c
-typedef enum qaws_surface_eval_flags {
-    QAWS_SURFACE_EVAL_NONE     = 0,
-    QAWS_SURFACE_EVAL_POSITION = 1 << 0,
-    QAWS_SURFACE_EVAL_DU       = 1 << 1,
-    QAWS_SURFACE_EVAL_DV       = 1 << 2,
-    QAWS_SURFACE_EVAL_NORMAL   = 1 << 3,
-    QAWS_SURFACE_EVAL_DUU      = 1 << 4,
-    QAWS_SURFACE_EVAL_DUV      = 1 << 5,
-    QAWS_SURFACE_EVAL_DVV      = 1 << 6
-} qaws_surface_eval_flags;
-```
-
-Bitmask. Combine with `|`. Controls which surface derivatives to compute.
-
-### qaws_surface_eval_result
-
-```c
-typedef struct qaws_surface_eval_result {
-    qaws_vec3 position;
-    qaws_vec3 du;
-    qaws_vec3 dv;
-    qaws_vec3 normal;
-    qaws_vec3 duu;
-    qaws_vec3 duv;
-    qaws_vec3 dvv;
-    unsigned int valid_flags;
-} qaws_surface_eval_result;
-```
-
-| Field | Description |
-|---|---|
-| `position` | Surface position at (u, v) |
-| `du` | Partial derivative dS/du |
-| `dv` | Partial derivative dS/dv |
-| `normal` | Unit surface normal (du x dv, normalized) |
-| `duu` | Second partial d^2S/du^2 |
-| `duv` | Mixed partial d^2S/dudv |
-| `dvv` | Second partial d^2S/dv^2 |
-| `valid_flags` | Bitmask of `QAWS_SURFACE_EVAL_*` indicating which fields are valid |
-
----
+See [traversal.md](traversal.md) for how each member is used.
 
 ## Opaque handles
 
 ```c
 typedef struct qaws_curve qaws_curve;
 typedef struct qaws_traversal qaws_traversal;
-typedef struct qaws_surface qaws_surface;
 ```
 
-Internal layout is hidden. Interact through the public API only.
+Created and destroyed through the API only ([curve.md](curve.md), [traversal.md](traversal.md)).
+
+## Inline curve
+
+```c
+#define QAWS_INLINE_STORAGE_BYTES 512
+
+typedef union qaws_curve_inline {
+    char storage[QAWS_INLINE_STORAGE_BYTES];   /* opaque: laid out by the init functions */
+    double align_double;
+    void* align_pointer;
+} qaws_curve_inline;
+
+qaws_curve* qaws_curve_inline_get_curve(qaws_curve_inline* ic);
+```
+
+A curve held in caller storage with no heap allocation, for single-span curves up to degree 7 in 3D (8 control
+points x 3 scalars, plus the curve's own fields, within 512 bytes). Initialize it with the `qaws_curve_init_*_inline`
+functions ([inline.md](inline.md)); never call `qaws_curve_destroy` on it.
+
+`qaws_curve_inline_get_curve` returns the usable curve pointer. The curve points into its own storage, so after a copy
+(memcpy or assignment) call it on the copy once, before other threads use the copy: it re-points the copy at itself.
+A pointer taken from the original keeps reading the original.

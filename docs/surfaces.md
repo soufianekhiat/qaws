@@ -1,6 +1,36 @@
 # Surface Types
 
-Qaws supports five surface types. Each is created through a descriptor struct and a `qaws_surface_create_*` function. After creation, all types share the same evaluation, sampling, normal-query, and destruction APIs.
+Each surface type is created from a descriptor by a `qaws_surface_create_*`
+function. After creation every type shares the same evaluation, sampling,
+normal, inspection and destruction calls. Names below are the unsuffixed
+forms ([precision.md](precision.md)).
+
+| Kind (`QAWS_SURFACE_KIND_*`) | Header | Constructor | Inputs |
+|---|---|---|---|
+| `BEZIER` | `qaws_surface_bezier.h` | `qaws_surface_create_bezier` | control grid (copied) |
+| `BSPLINE` | `qaws_surface_bspline.h` | `qaws_surface_create_bspline` | control grid, knots (copied) |
+| `NURBS` | `qaws_surface_nurbs.h` | `qaws_surface_create_nurbs` | control grid, weights, knots (copied) |
+| `BILINEAR` | `qaws_surface_bilinear.h` | `qaws_surface_create_bilinear` | four corners |
+| `BIQUADRATIC` | `qaws_surface_biquadratic.h` | `qaws_surface_create_biquadratic` | 3 x 3 control points |
+| `SWEPT` | `qaws_surface_swept.h` | `qaws_surface_create_swept` | path and profile curves (borrowed) |
+| `RULED` | `qaws_surface_ruled.h` | `qaws_surface_create_ruled` | two curves (borrowed) |
+| `COONS` | `qaws_surface_coons.h` | `qaws_surface_create_coons` | four boundary curves (borrowed) |
+| `EXTRUSION` | `qaws_surface_extrusion.h` | `qaws_surface_create_extrusion` | profile curve (borrowed), direction |
+| `REVOLUTION` | `qaws_surface_revolution.h` | `qaws_surface_create_revolution` | 2D profile (borrowed), axis, angle |
+| `PIPE` | `qaws_surface_pipe.h` | `qaws_surface_create_pipe` | path curve (borrowed), radii |
+| `LOFT` | `qaws_surface_loft.h` | `qaws_surface_create_loft` | section curves (borrowed) |
+| `GORDON` | `qaws_surface_gordon.h` | `qaws_surface_create_gordon` | curve network (borrowed) |
+| `OFFSET` | `qaws_surface_offset.h` | `qaws_surface_create_offset` | base surface (borrowed), distance |
+| `TRIMMED` | `qaws_surface_trim.h` | `qaws_surface_create_trimmed` | base surface and trim curves (borrowed) |
+| `TSPLINE` | `qaws_surface_tspline.h` | `qaws_surface_create_tspline` | control points with local knot vectors |
+| `SUBDIV` | `qaws_surface_subdiv.h` | `qaws_surface_create_subdiv` | control mesh (copied) |
+| `VIEW` | `qaws_view.h` | `qaws_surface_create_borrowed` | host arrays (borrowed), see [views_and_batches.md](views_and_batches.md) |
+
+`QAWS_SURFACE_KIND_FILLET` is declared but no public constructor makes it.
+Every constructor except the borrowed one has an `_ex` form taking a
+`qaws_allocator` (`qaws_alloc.h`, [memory.md](memory.md)). A surface that
+borrows curves or another surface needs them alive, unchanged, until it is
+destroyed.
 
 ---
 
@@ -55,6 +85,14 @@ unsigned int count;
 qaws_surface_sample(positions, &count, surface,
     u_count, v_count, 32 * 32);
 ```
+
+### Batch evaluation
+
+`qaws_surface_evaluate_batch` (`qaws_eval.h`) takes parallel arrays of `u`
+and `v`; see [evaluation.md](evaluation.md). Bounds, area, curvatures,
+closest points, enclosures, tessellation and curve projection are in
+`qaws_inspect.h` ([inspection.md](inspection.md),
+[sampling.md](sampling.md)).
 
 ### Inspection
 
@@ -318,3 +356,122 @@ qaws_surface* s = NULL;
 qaws_surface_create_ruled(&s, &desc);
 /* bottom_curve and top_curve must remain valid while s is in use. */
 ```
+
+---
+
+## Bilinear and biquadratic
+
+**Headers:** `qaws_surface_bilinear.h`, `qaws_surface_biquadratic.h`
+
+- Bilinear: `S(u,v) = (1-u)(1-v) P00 + u(1-v) P10 + (1-u)v P01 + uv P11`
+  from the corners `p00`, `p10`, `p01`, `p11` (u left to right, v bottom to
+  top).
+- Biquadratic: degree (2, 2) Bernstein patch from `control_points[9]`, row
+  major: `cp[0..2]` the v = 0 row, `cp[3..5]` v = 1/2, `cp[6..8]` v = 1; u
+  increases within a row.
+
+---
+
+## Coons
+
+**Header:** `qaws_surface_coons.h`
+
+Bilinearly blended patch from four 3D boundary curves:
+`S = Lc + Ld - B`, `Lc` ruled between `c0(u)` (v = 0) and `c1(u)` (v = 1),
+`Ld` ruled between `d0(v)` (u = 0) and `d1(v)` (u = 1), `B` the bilinear
+patch of the corners. The corners must agree: `c0(0) = d0(0)`,
+`c0(1) = d1(0)`, `c1(0) = d0(1)`, `c1(1) = d1(1)`. Curves are borrowed.
+
+---
+
+## Extrusion and revolution
+
+**Headers:** `qaws_surface_extrusion.h`, `qaws_surface_revolution.h`
+
+- Extrusion: `S(u,v) = profile(u) + v * direction`, u the profile's domain, v
+  from 0 to `length` (0: `|direction|` as unit). A 2D profile is lifted to
+  z = 0.
+- Revolution: a 2D profile (x the radius, y the height) turned about
+  `axis_origin` and `axis_direction` (normalized) by `angle` radians (0: a
+  full turn); u in [0, 1] maps to the angle, v follows the profile.
+
+Both borrow the profile curve.
+
+---
+
+## Pipe
+
+**Header:** `qaws_surface_pipe.h`
+
+`S(u,v) = path(u) + radius_x cos(2 pi v) N(u) + radius_y sin(2 pi v) B(u)`,
+u in [0, 1] along the 3D path, v in [0, 1] around the section; `N`, `B` a
+rotation-minimizing frame by double reflection. `radius_y` 0 means
+`radius_x` (a circular pipe). The path is borrowed.
+
+---
+
+## Loft and Gordon
+
+**Headers:** `qaws_surface_loft.h`, `qaws_surface_gordon.h`
+
+- Loft: `section_count` (at least 2) 3D section curves; at
+  `v = v_parameters[i]` (NULL: uniform) the surface passes through section
+  `i`; between sections cubic B-spline blending, u along each section.
+- Gordon: a network of `u_curve_count` u-curves sitting at `v_params` and
+  `v_curve_count` v-curves sitting at `u_params` (at least 2 each);
+  `S = L_u + L_v - T` (two lofts less their tensor product through the
+  intersection points). Compatibility: `u_curve[i](v_params[j])` must equal
+  `v_curve[j](u_params[i])`.
+
+Curves are borrowed. Evaluation keeps per-section scratch on the stack up to
+32 sections, beyond that from the surface's allocator.
+
+---
+
+## Offset
+
+**Header:** `qaws_surface_offset.h`
+
+`S_off(u,v) = S_base(u,v) + distance * N_base(u,v)`; positive distance along
+the base normal. The base surface is borrowed.
+
+---
+
+## Trimmed
+
+**Header:** `qaws_surface_trim.h`
+
+A base surface restricted by trim loops in (u, v): each `qaws_trim_loop` is a
+closed chain of 2D curves with `is_outer` 1 (kept region) or 0 (hole).
+Without an outer loop the whole [0,1] x [0,1] domain is the outer boundary.
+`qaws_surface_trim_contains(&inside, trimmed, u, v)` tells whether (u, v) is
+kept. The base surface and the trim curves are borrowed. Trimmed pieces are
+also what [shatter](shatter.md) produces.
+
+---
+
+## T-spline
+
+**Header:** `qaws_surface_tspline.h`
+
+Locally refinable surface: each `qaws_tspline_control_point` has a position,
+a weight (1 for non-rational) and its own local knot vectors of length
+`2 * u_degree + 2` and `2 * v_degree + 2`. The basis of point i is the product
+of the two univariate B-spline bases of its local knots;
+`S = sum w_i P_i B_i / sum w_i B_i` over the given `u_range` x `v_range`.
+The local knot vectors are given explicitly, not inferred from a T-mesh.
+
+---
+
+## Subdivision
+
+**Header:** `qaws_surface_subdiv.h`
+
+Limit surface of a control mesh (`vertices`, `face_indices`, `face_sizes` of
+3 or 4), by `QAWS_SUBDIV_CATMULL_CLARK` (quads; mixed meshes use it, triangles
+as degenerate quads) or `QAWS_SUBDIV_LOOP` (triangles). The mesh is copied,
+subdivided `subdivision_level` times (0: 3) and stored on a regular grid;
+evaluation over [0,1] x [0,1] interpolates it bilinearly.
+`qaws_surface_subdiv_get_mesh` returns the subdivided triangle mesh (CCW
+triangles, smooth per-vertex normals) as pointers into the surface, valid
+until it is destroyed.

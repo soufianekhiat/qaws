@@ -1,26 +1,39 @@
-# API Reference: qaws_alloc.h
+# API Reference: qaws_alloc.h, qaws_allocator.h
 
 Where the library's memory comes from, and how hosts give it their own.
 
+- `qaws_allocator.h` is precision-free, declared once and defined once in
+  the library: the allocator descriptor, the process default, thread
+  allocators, scratch allocators, kept memory and arenas are the same for
+  the f32 and the f64 functions.
+- `qaws_alloc.h` declares the allocator-aware `_ex` creation functions of
+  every curve and surface family and includes `qaws_allocator.h`. These
+  names exist as `name_f32` and `name_f64`; this page uses the unsuffixed
+  names (see [precision.md](precision.md)).
+
+See [memory.md](../memory.md) for the memory model.
+
 ---
 
-## Overview
+## Where memory comes from
 
-Every allocation of the library goes through one place: `src/qaws/internal/qaws_internal_memory.c` is the only caller of the C allocator. Memory comes from, in order:
+Without an explicit allocator (a NULL argument to the `_ex` functions, and
+all internal scratch and results), memory comes from, in order:
 
-1. the allocator passed to an `_ex` function;
-2. the calling thread's allocator, `qaws_set_thread_allocator`;
-3. the process default, `qaws_set_default_allocator`;
-4. the C allocator, aligned to `QAWS_MEMORY_ALIGNMENT` (`_aligned_malloc` on MSVC).
+1. the calling thread's allocator (`qaws_set_thread_allocator`), if set;
+2. the process default (`qaws_set_default_allocator`), if set;
+3. the C allocator, aligned to `QAWS_MEMORY_ALIGNMENT`.
 
-This covers objects, results and all internal scratch: operations, sampling, traversal, inspection, clipping, meshing, batches and repulsive solvers.
+An allocator passed to an `_ex` function takes precedence over all three
+for that object. When an allocation returns NULL, the call fails with
+`QAWS_STATUS_ALLOCATION_FAILURE`.
 
 ## The descriptor
 
 ```c
 typedef struct qaws_allocator {
-    void* (*alloc)(unsigned long size, void* user_data);              /* legacy, or qaws_allocator_extended */
-    void  (*dealloc)(void* ptr, void* user_data);                      /* legacy */
+    void* (*alloc)(unsigned long size, void* user_data);
+    void  (*dealloc)(void* ptr, void* user_data);
     void* user_data;
     void* (*alloc_sized)(size_t size, size_t alignment, void* user_data);
     void  (*dealloc_sized)(void* ptr, size_t size, size_t alignment, void* user_data);
@@ -28,25 +41,34 @@ typedef struct qaws_allocator {
 } qaws_allocator;
 
 #define QAWS_MEMORY_ALIGNMENT 16
-void* qaws_allocator_extended(unsigned long size, void* user_data);   /* the marker */
+
+void* qaws_allocator_extended(unsigned long size, void* user_data);
 ```
 
-The library recognizes two kinds of descriptor:
+Two interfaces:
 
-- **Legacy.** Existing code sets `alloc`, `dealloc` and `user_data`. The other members are never read, so descriptors filled field by field on the stack keep working, and so do binaries built against the old three-member layout. Sizes are `unsigned long`, which is 32 bits on Windows. A larger request fails without calling `alloc`; it is never truncated.
-- **Extended.** Set `alloc = qaws_allocator_extended` (a marker that never allocates) and the sized members. Sizes are `size_t`, with the alignment passed. `dealloc_sized` receives the size and alignment it was allocated with. `resize`, if set, grows or shrinks a block in place and returns non-zero, or returns 0 to let the library allocate, copy and free.
+- **Legacy.** Set `alloc`, `dealloc` and `user_data` only; the other
+  members are never read. Sizes are `unsigned long` (32 bits on Windows):
+  a larger request fails without calling `alloc`.
+- **Extended.** Set `alloc = qaws_allocator_extended` (a marker that never
+  allocates when called) and the sized members. `alloc_sized` receives the
+  size and alignment; `dealloc_sized` receives the size and alignment the
+  block was allocated with. `resize` is optional: it grows or shrinks a
+  block in place and returns non-zero, or returns 0 to let the library
+  allocate, copy and free.
 
-Both kinds have the same alignment rule:
-
-- Blocks must be aligned to `QAWS_MEMORY_ALIGNMENT` (16). That is enough for every type the library keeps on the heap; its aligned SIMD loads only read stack arrays.
-- A misaligned block is given back to the allocator and the call fails with `QAWS_STATUS_ALLOCATION_FAILURE`. Debug builds also assert.
+Blocks must be aligned to `QAWS_MEMORY_ALIGNMENT` (16). A misaligned block
+is given back and the call fails with `QAWS_STATUS_ALLOCATION_FAILURE`.
 
 ## Lifetimes
 
-- **The descriptor** can be short-lived. Settings and `_ex` arguments are copied: callbacks and `user_data`. Each block keeps the copy it was made with, and so does every curve, surface or prepared object that allocates again later (derived curves, evaluation scratch). A descriptor can therefore be a local that goes out of scope before the objects it made (test 154).
-- **The state `user_data` points to** must outlive every block of that allocator. Copying the callbacks does not extend it.
-- **Blocks** are freed and grown by the allocator that gave them, whatever the settings at that time and whichever thread releases them (test 154: four workers' blocks freed on another thread under another allocator).
-- **Results** live as long as their objects and do not depend on any call's scratch. Scratch is meant to be freed before a call returns. Test 154 checks this for a mixed workload, both completed and failing for lack of memory inside a 2 KB arena (no block left held). It is not checked for every failure path of every operation.
+- **The descriptor** may be a short-lived local. Every setting and every
+  `_ex` argument is copied (callbacks and `user_data`) into every block the
+  library allocates and into the objects that allocate later.
+- **The state `user_data` points to** must outlive every block the
+  allocator gave.
+- **Blocks** are freed and grown by the copy they were made with, whatever
+  the settings at that time and on whichever thread.
 
 ## Settings
 
@@ -57,37 +79,50 @@ void qaws_get_thread_allocator(qaws_allocator* out_allocator);              /* z
 void qaws_exchange_thread_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator);
 ```
 
-- **The default is write-once in effect.** It can be set or cleared until the library first allocates from it. After that, `qaws_set_default_allocator` returns `QAWS_STATUS_UNSUPPORTED_OPERATION` and changes nothing. Setting and sealing are synchronized with atomics. Once sealed, reading the default is a plain load, so allocations take no lock.
-- **A thread's allocator** applies to that thread only, and the library never changes it. To nest, install with `qaws_exchange_thread_allocator(&mine, &previous)` and restore with `qaws_set_thread_allocator(&previous)` on every return path: success, failure and cancellation.
+- **`qaws_set_default_allocator`** is write-once in effect: the default can
+  be set (or cleared with NULL) until the library first allocates from it.
+  After that the call returns `QAWS_STATUS_UNSUPPORTED_OPERATION` and
+  nothing changes. Reading the sealed default is a plain load, so
+  allocations take no lock.
+- **`qaws_set_thread_allocator`** applies to the calling thread only; the
+  library never changes it.
+- **`qaws_get_thread_allocator`** copies the thread's allocator (zeroed:
+  none) into `out_allocator`.
+- **`qaws_exchange_thread_allocator`** installs `allocator` and returns the
+  one it replaces in `out_previous` (zeroed: none; `out_previous` may be
+  NULL), so a host can nest settings and restore them on every return path
+  with `qaws_set_thread_allocator(&previous)`.
 
 ```c
 qaws_allocator previous;
 qaws_exchange_thread_allocator(&previous, &frame_arena.allocator);
-status = qaws_curve_offset_2d(out, &count, curve, cap, d, 1);   /* every return path below restores */
-qaws_set_thread_allocator(&previous);
+status = qaws_curve_offset_2d(out, &count, curve, cap, d, 1);
+qaws_set_thread_allocator(&previous);   /* on every return path */
 ```
-
-- **Setting the default against the first allocation.** Sealing and setting go through one compare-and-swap state, and the descriptor is copied before the state that publishes it is stored (sequentially consistent atomics, `Interlocked*` on MSVC). An allocation therefore sees either no default or the whole copy, never a partly written one. Test 154 starts 24 fresh processes in which seven workers allocate while thread 0 sets the default: at once, while a worker enters its first allocation, or after it. Each run ends with the default installed or refused as sealed, the allocator's callbacks always see their own `user_data`, and every block returns to the allocator that gave it.
 
 ## Scratch apart from results
 
 ```c
-void qaws_exchange_thread_scratch_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator);   /* NULL: none */
+void qaws_exchange_thread_scratch_allocator(qaws_allocator* out_previous, qaws_allocator const* allocator);
 ```
 
-With a scratch allocator installed on a thread, the temporaries of adaptive sampling and tessellation come from it (and, in libraries built on qaws, those of their own operations): blocks allocated and freed within one call. Results and objects still follow the order above (`_ex` argument, thread allocator, default). A frame arena can therefore serve as scratch and be reset after every call while the results stay on the heap.
+Installs a scratch allocator on the calling thread (NULL: none) and returns
+the one it replaces (zeroed: none; `out_previous` may be NULL). With one
+installed, the temporaries of adaptive sampling, tessellation, meshing,
+clipping and the repulsive solvers (blocks allocated and released within
+one call) come from it. Results and objects still come from the `_ex`
+argument, the thread allocator or the default, so a frame arena can serve
+as scratch and be reset after each call while results stay. Other
+operations take their scratch from the order above. Restore it on every
+return path.
 
 ```c
 qaws_allocator previous;
 qaws_exchange_thread_scratch_allocator(&previous, &frame_arena.allocator);
-status = qaws_curve_sample_2d(points, &count, curve, capacity, &desc);   /* its temporaries: the arena */
+status = qaws_curve_sample_2d(points, &count, curve, capacity, &desc);
 qaws_exchange_thread_scratch_allocator(NULL, &previous);
-qaws_arena_reset(&frame_arena);                                    /* OK: the arena holds nothing after the call */
+qaws_arena_reset(&frame_arena);   /* the arena holds nothing after the call */
 ```
-
-- **Which allocations count as scratch.** A local pointer allocated and freed in the same function and never stored elsewhere. Everything else, including every block a result keeps, uses the persistent order, so a result never holds scratch memory.
-- **Coverage.** Other operations take their temporaries from the persistent order as before. Without a scratch allocator, nothing changes.
-- **Tests.** With `QAWS_TEST_SCRATCH=1`, the test runner installs a scratch arena for every suite and fails a suite that leaves a block in it.
 
 ## Memory kept for reuse
 
@@ -96,33 +131,27 @@ void qaws_set_kept_memory_limit(size_t bytes);   /* 0: none kept; default 16 MB 
 void qaws_release_kept_memory(void);
 ```
 
-Without a custom allocator in effect, blocks of the C allocator from 4 KB to 1 MB (header included) that the library frees are kept, up to the limit in all, and handed to the next requests of their size. Repeated calls then do not take their memory from the system each time: a system heap may return freed pages to the operating system and fault them in again at the next touch, which on Windows cost a chain of small mesh operations about a tenth of its time.
-
-- **Size classes.** Such blocks are made at their size class's bytes, a quarter octave apart (4, 5, 6, 7, 8, 10 ... 896, 1024 KB), so a kept block serves any request of its class. At most 64 blocks a class are kept.
-- **The limit** is process-wide and can be changed at any time. Lowering it frees the kept blocks past it; 0 keeps none. `qaws_release_kept_memory` frees every kept block and leaves the limit as it is.
-- **Threads.** Blocks freed on any thread are kept for all; one lock guards the kept blocks, held for a push or a pop. Both calls are thread-safe.
-- **Custom allocators** (an `_ex` argument, a thread or default allocator, a scratch allocator) are not affected: their blocks go back to them as before.
-- **Contents.** A kept block is handed out as it was left: the library initializes what it reads, as with any heap block.
-
-## Sizes and overflow
-
-- **Allocation sizes** are computed with checked arithmetic (`qaws_internal_mul2/3/4`, `qaws_internal_add2`). A product or sum that does not fit `size_t` becomes `SIZE_MAX`, which every allocation refuses before calling an allocator. The call returns `QAWS_STATUS_ALLOCATION_FAILURE`: the request cannot be represented, so it is reported the same way as memory the allocator does not have. A size never wraps into a short block that the library would then overrun.
-- **Element counts** that the library indexes with `unsigned int` (control points `u × v` of a surface, indices, list capacities) are refused at the public entry with the function's count status (`QAWS_STATUS_INVALID_CONTROL_POINT_COUNT` and similar) when their product does not fit. Growing lists double up to `UINT_MAX` and fail beyond it.
-- **Order.** Invalid dimensions and counts are refused before any allocation. Allocation failures happen before any result is published: a failed call leaves its output pointers `NULL` and frees what it allocated (test 154, every part in arenas from 256 bytes up, 0 blocks held and 0 results published on failure).
-- **The legacy interface** counts in `unsigned long`. A request above `ULONG_MAX` (4 GB on Windows) fails without calling `alloc`.
+Blocks of the C allocator (no custom allocator in effect) from 4 KB to
+1 MB that the library frees are kept, up to the limit in all, and handed to
+the next requests of their size, so repeated calls do not take their memory
+from the system each time. Such blocks are made at their size class's
+bytes, a quarter octave apart. The limit is process-wide and may be changed
+at any time; lowering it frees the kept blocks past it.
+`qaws_release_kept_memory` frees every kept block and leaves the limit.
+Both calls are thread-safe. Custom allocators are not affected.
 
 ## Caller memory: qaws_arena
 
 ```c
 typedef struct qaws_arena {
-    qaws_allocator allocator;      /* pass &arena.allocator */
+    qaws_allocator allocator;      /* pass &arena.allocator wherever an allocator is taken */
     unsigned char* base;
     size_t size;
-    size_t used;                   /* up to the end of the latest block */
-    size_t peak;                   /* most used since init */
-    size_t last;                   /* the latest block's offset */
+    size_t used;                   /* bytes up to the end of the latest block */
+    size_t peak;                   /* most bytes used since init */
+    size_t last;                   /* the latest block's header offset ((size_t)-1: none) */
     size_t live;                   /* blocks held */
-    size_t failures;               /* requests refused for room */
+    size_t failures;               /* allocations refused for room */
     size_t invalid_frees;          /* frees of blocks it does not hold */
     unsigned int generation;       /* resets so far */
 } qaws_arena;
@@ -131,277 +160,99 @@ void qaws_arena_init(qaws_arena* arena, void* memory, size_t size);
 qaws_status qaws_arena_reset(qaws_arena* arena);
 ```
 
-An extended allocator over memory the host provides: a mapped file, pinned memory, or a frame arena.
+An extended allocator over caller memory: a mapped file, pinned memory, a
+host frame arena.
 
-- **CPU access.** The memory must be CPU-accessible and coherent for the CPU. Putting the library's data in GPU-visible memory does not run any of its algorithms on a GPU.
-- **Allocation.** Blocks are cut in order and aligned. The latest block grows and shrinks in place, which is how growing arrays stay compact. A freed latest block is released at once; other freed blocks are released at reset.
-- **Hard bound.** When full, allocation fails and the call returns `QAWS_STATUS_ALLOCATION_FAILURE`. Nothing falls back to the heap. All offsets are computed without overflow, including requests near `SIZE_MAX`.
-- **Reset.** `qaws_arena_reset` refuses (`QAWS_STATUS_INVALID_ARGUMENT`) while blocks are held (`live > 0`). Destroy every arena-backed object and finish every call first. Freeing a block the arena does not hold (another arena, an earlier generation, or a double free) is counted in `invalid_frees`, and debug builds assert.
-- **Resize.** `qaws_internal_realloc` grows or shrinks the latest block in place. Any other block is copied into a new block, which the arena records as the latest, and the old one is marked freed. If a reallocation fails, the old block stays held and unchanged (test 154).
-- **Threads.** One thread at a time: allocation, free, reset, and the destruction of arena-backed objects. Destroying an arena-backed object on another thread while the owner resets is a race, and that use is unsupported. Reset refuses while any block is held, so a reset that does not race cannot invalidate a live object or result. For workers, use one arena per thread with `qaws_exchange_thread_allocator` (test 154 runs four workers this way, with arenas that are large enough and arenas that fail).
+- **`qaws_arena_init`** sets up the arena over `memory` (aligned up to 16
+  bytes inside it) and fills `allocator`.
+- **CPU access.** The memory must be CPU-accessible and coherent for the
+  CPU; placing the library's data there does not move any computation to a
+  GPU.
+- **Allocation.** Blocks are cut in order, aligned to
+  `QAWS_MEMORY_ALIGNMENT`, each after a small header. The latest block
+  grows and shrinks in place. A freed block is marked, and the freed blocks
+  at the top give their space back, so blocks released in last-in-first-out
+  order (nested scratch) are reclaimed at once; others wait for the blocks
+  above them, or the reset.
+- **Hard bound.** When full, allocation fails and calls return
+  `QAWS_STATUS_ALLOCATION_FAILURE`; nothing falls back to the heap.
+- **`qaws_arena_reset`** refuses (`QAWS_STATUS_INVALID_ARGUMENT`) while
+  blocks are held (`live > 0`): destroy every arena-backed object and
+  finish every call first. Freeing a block the arena does not hold (another
+  arena, an earlier generation, twice) is counted in `invalid_frees` and
+  asserts in debug builds.
+- **Threads.** One thread at a time. For workers, use one arena per thread
+  with `qaws_set_thread_allocator` or `qaws_exchange_thread_allocator`.
 
-Arena-backed objects never move to the heap. To keep an object beyond a reset, create it with another allocator (the `_ex` argument) while scratch uses the arena (the thread setting).
+Objects and results allocated in an arena live in it. To keep an object
+beyond a reset, create it with another allocator (the `_ex` argument) while
+scratch uses the arena.
 
 ## _ex creation functions
 
-The `_ex` variants of creation functions behave identically to their non-`_ex` counterparts but take their memory from the provided `qaws_allocator`. Pass NULL for `allocator` to use the order above.
-
-Curves and surfaces created with a custom allocator are destroyed with `qaws_curve_destroy` or `qaws_surface_destroy` as usual; they keep a copy of the descriptor, so only the state behind `user_data` must remain valid until then.
-
----
-
-## qaws_curve_create_bezier_ex
-
-```c
-qaws_status qaws_curve_create_bezier_ex(
-    qaws_curve** out_curve,
-    qaws_bezier_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_curve_create_bezier`.
-
-**Parameters:**
-- `desc` -- Bezier curve descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_curve` -- Receives the created curve.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## qaws_curve_create_hermite_ex
-
-```c
-qaws_status qaws_curve_create_hermite_ex(
-    qaws_curve** out_curve,
-    qaws_hermite_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_curve_create_hermite`.
-
-**Parameters:**
-- `desc` -- Hermite curve descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_curve` -- Receives the created curve.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## qaws_curve_create_catmull_rom_ex
-
-```c
-qaws_status qaws_curve_create_catmull_rom_ex(
-    qaws_curve** out_curve,
-    qaws_catmull_rom_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_curve_create_catmull_rom`.
-
-**Parameters:**
-- `desc` -- Catmull-Rom curve descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_curve` -- Receives the created curve.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## qaws_curve_create_bspline_ex
-
-```c
-qaws_status qaws_curve_create_bspline_ex(
-    qaws_curve** out_curve,
-    qaws_bspline_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_curve_create_bspline`.
-
-**Parameters:**
-- `desc` -- B-Spline curve descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_curve` -- Receives the created curve.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## qaws_curve_create_nurbs_ex
-
-```c
-qaws_status qaws_curve_create_nurbs_ex(
-    qaws_curve** out_curve,
-    qaws_nurbs_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_curve_create_nurbs`.
-
-**Parameters:**
-- `desc` -- NURBS curve descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_curve` -- Receives the created curve.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## qaws_curve_create_trajectory_ex
-
-```c
-qaws_status qaws_curve_create_trajectory_ex(
-    qaws_curve** out_curve,
-    qaws_trajectory_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_curve_create_trajectory`.
-
-**Parameters:**
-- `desc` -- Trajectory curve descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_curve` -- Receives the created curve.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## The other curve families
-
-```c
-qaws_status qaws_curve_create_rational_bezier_ex(qaws_curve** out_curve, qaws_rational_bezier_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_curve_create_yuksel_ex(qaws_curve** out_curve, qaws_yuksel_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_curve_create_arc_ex(qaws_curve** out_curve, qaws_arc_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_curve_create_polynomial_ex(qaws_curve** out_curve, qaws_polynomial_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_curve_create_clothoid_ex(qaws_curve** out_curve, qaws_clothoid_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_curve_create_composite_ex(qaws_curve** out_curve, qaws_composite_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_curve_create_subdivision_ex(qaws_curve** out_curve, qaws_subdivision_desc const* desc, qaws_allocator const* allocator);
-```
-
-Each is the allocator-aware variant of the constructor without `_ex`,
-which calls it with NULL. Every allocation the constructor makes goes
-through the allocator: the curve, its stored data, and its scratch (the
-subdivision's refinement levels). A composite owns its segments only on
-success; the segments keep the allocators they were made with.
-
-**Checked by test 146.** Every curve and surface constructor here runs with
-an allocator that fails at its k-th allocation, for every k. Each failure
-returns `QAWS_STATUS_ALLOCATION_FAILURE` with no object and nothing left
-allocated. A success, once destroyed, leaves nothing either.
-
----
-
-## qaws_surface_create_bezier_ex
-
-```c
-qaws_status qaws_surface_create_bezier_ex(
-    qaws_surface** out_surface,
-    qaws_surface_bezier_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_surface_create_bezier`.
-
-**Parameters:**
-- `desc` -- Bezier surface descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_surface` -- Receives the created surface.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## qaws_surface_create_bspline_ex
-
-```c
-qaws_status qaws_surface_create_bspline_ex(
-    qaws_surface** out_surface,
-    qaws_surface_bspline_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_surface_create_bspline`.
-
-**Parameters:**
-- `desc` -- B-Spline surface descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_surface` -- Receives the created surface.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## qaws_surface_create_nurbs_ex
-
-```c
-qaws_status qaws_surface_create_nurbs_ex(
-    qaws_surface** out_surface,
-    qaws_surface_nurbs_desc const* desc,
-    qaws_allocator const* allocator);
-```
-
-Allocator-aware variant of `qaws_surface_create_nurbs`.
-
-**Parameters:**
-- `desc` -- NURBS surface descriptor.
-- `allocator` -- Custom allocator, or NULL for default.
-- `out_surface` -- Receives the created surface.
-
-**Returns:** `QAWS_STATUS_OK` on success.
-
----
-
-## The other surface families
-
-```c
-qaws_status qaws_surface_create_bilinear_ex(qaws_surface** out_surface, qaws_surface_bilinear_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_biquadratic_ex(qaws_surface** out_surface, qaws_surface_biquadratic_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_coons_ex(qaws_surface** out_surface, qaws_surface_coons_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_extrusion_ex(qaws_surface** out_surface, qaws_surface_extrusion_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_offset_ex(qaws_surface** out_surface, qaws_surface_offset_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_pipe_ex(qaws_surface** out_surface, qaws_surface_pipe_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_revolution_ex(qaws_surface** out_surface, qaws_surface_revolution_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_ruled_ex(qaws_surface** out_surface, qaws_surface_ruled_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_swept_ex(qaws_surface** out_surface, qaws_surface_swept_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_loft_ex(qaws_surface** out_surface, qaws_surface_loft_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_gordon_ex(qaws_surface** out_surface, qaws_surface_gordon_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_trimmed_ex(qaws_surface** out_surface, qaws_surface_trim_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_tspline_ex(qaws_surface** out_surface, qaws_surface_tspline_desc const* desc, qaws_allocator const* allocator);
-qaws_status qaws_surface_create_subdiv_ex(qaws_surface** out_surface, qaws_surface_subdiv_desc const* desc, qaws_allocator const* allocator);
-```
-
-As for curves, the plain constructors call these with NULL, and every
-allocation the constructor makes goes through the allocator. That covers
-the surface, its stored data, and construction scratch, such as subdivision
-meshes. The curves a surface borrows are not counted.
-
-**Evaluation.** The loft and Gordon evaluators need scratch per section
-curve. Up to 32 sections it is on the stack; beyond that it comes from the
-surface's own allocator, so evaluation never calls malloc. A host that
-evaluates a large loft or Gordon surface from several threads needs an
-allocator that is safe across threads. Trimmed surfaces test containment
-without allocating.
-
-Test 146 covers all of these with an allocator failing at each allocation.
-
----
+Each behaves as its constructor without `_ex` (which calls it with NULL)
+and routes every allocation the constructor makes through `allocator`:
+the object, its stored data, and construction scratch. Pass NULL to use the
+order above. Objects keep a copy of the descriptor and are destroyed with
+`qaws_curve_destroy` or `qaws_surface_destroy` as usual; the state behind
+`user_data` must stay valid until then. On failure, `*out_curve` /
+`*out_surface` is not set to an object and nothing stays allocated.
+
+### Curves
+
+| Function | Descriptor ([family page](curve.md)) |
+|---|---|
+| `qaws_status qaws_curve_create_bezier_ex(qaws_curve** out_curve, qaws_bezier_desc const* desc, qaws_allocator const* allocator);` | [bezier.md](bezier.md) |
+| `qaws_status qaws_curve_create_hermite_ex(qaws_curve** out_curve, qaws_hermite_desc const* desc, qaws_allocator const* allocator);` | [hermite.md](hermite.md) |
+| `qaws_status qaws_curve_create_catmull_rom_ex(qaws_curve** out_curve, qaws_catmull_rom_desc const* desc, qaws_allocator const* allocator);` | [catmull_rom.md](catmull_rom.md) |
+| `qaws_status qaws_curve_create_bspline_ex(qaws_curve** out_curve, qaws_bspline_desc const* desc, qaws_allocator const* allocator);` | [bspline.md](bspline.md) |
+| `qaws_status qaws_curve_create_nurbs_ex(qaws_curve** out_curve, qaws_nurbs_desc const* desc, qaws_allocator const* allocator);` | [nurbs.md](nurbs.md) |
+| `qaws_status qaws_curve_create_trajectory_ex(qaws_curve** out_curve, qaws_trajectory_desc const* desc, qaws_allocator const* allocator);` | [trajectory.md](trajectory.md) |
+| `qaws_status qaws_curve_create_rational_bezier_ex(qaws_curve** out_curve, qaws_rational_bezier_desc const* desc, qaws_allocator const* allocator);` | [rational_bezier.md](rational_bezier.md) |
+| `qaws_status qaws_curve_create_yuksel_ex(qaws_curve** out_curve, qaws_yuksel_desc const* desc, qaws_allocator const* allocator);` | [yuksel.md](yuksel.md) |
+| `qaws_status qaws_curve_create_arc_ex(qaws_curve** out_curve, qaws_arc_desc const* desc, qaws_allocator const* allocator);` | [arc.md](arc.md) |
+| `qaws_status qaws_curve_create_polynomial_ex(qaws_curve** out_curve, qaws_polynomial_desc const* desc, qaws_allocator const* allocator);` | [polynomial.md](polynomial.md) |
+| `qaws_status qaws_curve_create_clothoid_ex(qaws_curve** out_curve, qaws_clothoid_desc const* desc, qaws_allocator const* allocator);` | [clothoid.md](clothoid.md) |
+| `qaws_status qaws_curve_create_composite_ex(qaws_curve** out_curve, qaws_composite_desc const* desc, qaws_allocator const* allocator);` | [composite.md](composite.md) |
+| `qaws_status qaws_curve_create_subdivision_ex(qaws_curve** out_curve, qaws_subdivision_desc const* desc, qaws_allocator const* allocator);` | [subdivision.md](subdivision.md) |
+
+A composite owns its segments only on success; the segments keep the
+allocators they were made with. The subdivision curve's refinement levels
+come from the allocator.
+
+### Surfaces
+
+| Function | Descriptor |
+|---|---|
+| `qaws_status qaws_surface_create_bezier_ex(qaws_surface** out_surface, qaws_surface_bezier_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_bspline_ex(qaws_surface** out_surface, qaws_surface_bspline_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_nurbs_ex(qaws_surface** out_surface, qaws_surface_nurbs_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_bilinear_ex(qaws_surface** out_surface, qaws_surface_bilinear_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_biquadratic_ex(qaws_surface** out_surface, qaws_surface_biquadratic_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_coons_ex(qaws_surface** out_surface, qaws_surface_coons_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_extrusion_ex(qaws_surface** out_surface, qaws_surface_extrusion_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_offset_ex(qaws_surface** out_surface, qaws_surface_offset_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_pipe_ex(qaws_surface** out_surface, qaws_surface_pipe_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_revolution_ex(qaws_surface** out_surface, qaws_surface_revolution_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_ruled_ex(qaws_surface** out_surface, qaws_surface_ruled_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_swept_ex(qaws_surface** out_surface, qaws_surface_swept_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_loft_ex(qaws_surface** out_surface, qaws_surface_loft_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_gordon_ex(qaws_surface** out_surface, qaws_surface_gordon_desc const* desc, qaws_allocator const* allocator);` | [surface_families.md](surface_families.md) |
+| `qaws_status qaws_surface_create_trimmed_ex(qaws_surface** out_surface, qaws_surface_trim_desc const* desc, qaws_allocator const* allocator);` | [surface_trim.md](surface_trim.md) |
+| `qaws_status qaws_surface_create_tspline_ex(qaws_surface** out_surface, qaws_surface_tspline_desc const* desc, qaws_allocator const* allocator);` | [surface_tspline.md](surface_tspline.md) |
+| `qaws_status qaws_surface_create_subdiv_ex(qaws_surface** out_surface, qaws_surface_subdiv_desc const* desc, qaws_allocator const* allocator);` | [surface_subdiv.md](surface_subdiv.md) |
+
+The curves a surface borrows are not counted. Loft and Gordon evaluation
+needs scratch per section curve: on the stack up to 32 sections, beyond
+that from the surface's own allocator, so a host that evaluates a large
+loft or Gordon surface from several threads needs an allocator that is
+safe across threads.
 
 ## Derived curves
 
 An operation that makes curves from a source curve gives its results the
 source curve's allocator: reverse, extract, split, join, conversion, degree
 elevation and reduction, merging a chain (the first curve's allocator),
-transforms, and the arc-length and length-matched wrappers. With a host
-allocator on the source, everything derived from it lives in that
-allocator, and is destroyed with `qaws_curve_destroy` as usual.
-
-Two kinds of curve keep the default allocator for now: curves built from
-raw arrays (polyline and offset outputs, clipping, skeletons, stacks blending
-several curves), and the scratch an operation frees before it returns.
-Test 146 checks reverse, extract, split, degree elevation, B-spline to
-NURBS, and both wrappers. It injects a failure at each allocation and
-checks that the results are counted in the source's allocator.
+transforms, and the arc-length and length-matched wrappers. Curves built
+from raw arrays (polyline and offset outputs, clipping, skeletons, stacks
+blending several curves) take the default order instead.

@@ -1,254 +1,177 @@
 # Inspection and Analysis
 
-Qaws provides functions to query curve properties and perform geometric analysis.
+`qaws_inspect.h` queries curve and surface properties and runs geometric
+analysis. Names below are the unsuffixed forms ([precision.md](precision.md)).
+Every function is thread-safe on immutable inputs. Intersections of many
+curves at once are in `qaws_curve_batch.h`
+([views_and_batches.md](views_and_batches.md)); exact predicates and
+certified exact queries are in `qaws_exact.h`
+([exact_kernel.md](exact_kernel.md)).
 
-## Generic inspection
-
-These work on any curve regardless of family:
+## Generic curve properties
 
 ```c
-qaws_curve_kind kind = qaws_curve_get_kind(curve);
-qaws_dimension  dim  = qaws_curve_get_dimension(curve);
-unsigned int  degree  = qaws_curve_get_degree(curve);
-unsigned int  spans   = qaws_curve_get_span_count(curve);
-qaws_range    range   = qaws_curve_get_parameter_range(curve);
-int           closed  = qaws_curve_is_closed(curve);
-int         periodic  = qaws_curve_is_periodic(curve);
-int         rational  = qaws_curve_is_rational(curve);
-qaws_continuity cont  = qaws_curve_get_continuity(curve);
+qaws_curve_kind kind     = qaws_curve_get_kind(curve);
+qaws_dimension  dim      = qaws_curve_get_dimension(curve);
+unsigned int    degree   = qaws_curve_get_degree(curve);
+unsigned int    spans    = qaws_curve_get_span_count(curve);
+qaws_range      range    = qaws_curve_get_parameter_range(curve);
+int             closed   = qaws_curve_is_closed(curve);
+int             periodic = qaws_curve_is_periodic(curve);
+int             rational = qaws_curve_is_rational(curve);
+qaws_continuity cont     = qaws_curve_get_continuity(curve);
 ```
 
-| Property | Description |
-|---|---|
-| `kind` | Curve family (BEZIER, HERMITE, CATMULL_ROM, BSPLINE, NURBS, TRAJECTORY, YUKSEL) |
-| `dimension` | 2D or 3D |
-| `degree` | Polynomial degree of the curve |
-| `span_count` | Number of piecewise segments |
-| `parameter_range` | Valid parameter domain [min, max] |
-| `is_closed` | 1 if the curve forms a closed loop |
-| `is_periodic` | 1 if the curve wraps periodically |
-| `is_rational` | 1 for NURBS (weighted control points) |
-| `continuity` | C0, C1, C2, or C3 at span boundaries |
+`kind` is any `qaws_curve_kind` (the 13 families, `REPARAMETERIZED`,
+`VIEW`). `qaws_curve_get_span_continuity(&c, curve, boundary_index)` gives the
+continuity at one span boundary (0 to span_count - 2).
 
 ## Arc length
 
-Compute the distance along the curve between two parameters:
-
 ```c
-qaws_scalar length;
-qaws_curve_compute_arc_length(&length,
-    curve, range.min_value, range.max_value);
+qaws_scalar length, t;
+qaws_curve_compute_arc_length(&length, curve, range.min_value, range.max_value);
+qaws_curve_compute_parameter_at_arc_length(&t, curve, range.min_value, length / 2);
 ```
 
-Internally uses Gauss-Legendre quadrature for accuracy.
+The length is adaptive Gauss-Kronrod 7-15 on each span, halving until the
+Gauss and Kronrod estimates agree to `QAWS_EPSILON` of the length. The inverse
+uses safeguarded Newton on the same measure; it returns
+`QAWS_STATUS_OUT_OF_RANGE` for a negative length or one past the end.
 
-## Bounding box
+## Bounds
 
-Compute an axis-aligned bounding box by sampling:
+`qaws_curve_compute_bounds_2d/3d` sample the curve (64 points per span, at
+least 64) and return the box of the samples. For guaranteed ranges use the
+enclosures below. `qaws_surface_compute_bounds` gives a surface's box.
+
+## Closest points
 
 ```c
-qaws_vec2 bbmin, bbmax;
-qaws_curve_compute_bounds_2d(&bbmin, &bbmax, curve);
-
-qaws_vec3 bbmin3, bbmax3;
-qaws_curve_compute_bounds_3d(&bbmin3, &bbmax3, curve);
+qaws_scalar t, dist, gap;
+qaws_curve_find_closest_parameter_2d(&t, curve, point);
+qaws_curve_find_closest_point_certified_2d(&t, &dist, &gap, curve, point);
 ```
 
-## Closest point
+- **Certified** (`qaws_curve_find_closest_point_certified_2d/3d`): for curves
+  with Bezier spans (Bezier, rational Bezier, B-spline, NURBS, borrowed
+  splines), branch and bound over the spans' Bezier forms with convex-hull and
+  fat-line bounds. The global minimum distance lies in
+  `[dist - gap, dist]`; the gap is within 1e-9 of the curve's extent
+  (`QAWS_EPSILON` in f32) unless the work bound (4096 halvings) is reached.
+  `QAWS_STATUS_UNSUPPORTED_OPERATION` for other families and non-positive
+  weights.
+- `qaws_curve_find_closest_parameter_2d/3d` use the certified search where it
+  applies; the other families use sampling followed by Newton refinement.
+- Surfaces: `qaws_surface_find_closest_point` (an 8 x 8 grid and Newton,
+  then certified where the surface has Bezier patches) and
+  `qaws_surface_find_closest_point_certified` (Bezier, B-spline, NURBS and
+  borrowed surfaces of degree at most 15; work bound 8192 splits).
 
-Find the curve parameter nearest to a given point:
+## Differential geometry of curves
 
-```c
-qaws_scalar closest_t;
+| Function | Result |
+|---|---|
+| `qaws_curve_compute_tangent_2d/3d` | Unit tangent |
+| `qaws_curve_compute_normal_2d` | Unit normal, the tangent turned 90 degrees counter-clockwise |
+| `qaws_curve_compute_curvature_2d/3d` | Signed curvature in 2D, `|d1 x d2| / |d1|^3` in 3D |
+| `qaws_curve_compute_torsion_3d` | Torsion |
+| `qaws_curve_compute_speed` | `|d1|` |
+| `qaws_curve_compute_frenet_frame_3d` | Unit tangent, principal normal, binormal |
+| `qaws_curve_compute_rotation_minimizing_frames_3d` | Frames at many parameters |
 
-// 2D
-qaws_vec2 target2 = { 1.5f, 0.5f };
-qaws_curve_find_closest_parameter_2d(&closest_t, curve, target2);
+`qaws_curve_compute_rotation_minimizing_frames_3d(out_frames, curve,
+parameters, initial_normal, count)` writes 9 scalars per non-decreasing
+parameter (unit tangent, normal, binormal). Each normal follows from the
+previous by double reflection (`core/qaws_frame_core.h`), fourth-order
+accurate in the step; the first is `initial_normal` made perpendicular to the
+tangent (NULL: chosen from the tangent). It is defined where the Frenet frame
+is not (straight pieces, inflections); a closed curve's frame need not close.
+`QAWS_STATUS_DEGENERATE_CURVE` where the speed vanishes. No allocation.
 
-// 3D
-qaws_vec3 target3 = { 1.5f, 0.5f, 0.0f };
-qaws_curve_find_closest_parameter_3d(&closest_t, curve, target3);
-
-// Evaluate at closest_t to get the actual closest point on the curve
-qaws_eval_result_2d result;
-qaws_curve_evaluate_2d(&result, curve,
-    closest_t, QAWS_EVAL_FLAG_POSITION);
-```
-
-Uses coarse sampling followed by Newton refinement.
-
-## Span continuity
-
-Query continuity at a specific span boundary:
-
-```c
-qaws_continuity cont;
-qaws_curve_get_span_continuity(&cont, curve, 0);
-// boundary_index is 0 to span_count-2
-```
-
-## Derived geometric helpers
-
-Convenience functions that compute geometric quantities from derivatives:
-
-### Tangent
-
-```c
-qaws_vec2 tangent;
-qaws_curve_compute_tangent_2d(&tangent, curve, t);
-// tangent is a unit vector in the direction of travel
-```
-
-### Normal (2D)
+## Features and topology
 
 ```c
-qaws_vec2 normal;
-qaws_curve_compute_normal_2d(&normal, curve, t);
-// Unit normal perpendicular to the tangent (rotated 90 degrees CCW)
-```
+qaws_scalar params[32];
+unsigned int n;
+qaws_curve_find_inflection_points(params, &n, curve, 32);
+qaws_curve_find_extrema(params, &n, curve, 32, /* axis 0 x, 1 y, 2 z */ 0);
 
-### Frenet frame (3D)
+qaws_curvature_sample_2d comb[100];   /* position, signed curvature, normal */
+qaws_curve_compute_curvature_comb_2d(comb, curve, 100, 100);
 
-Compute the full Frenet frame at a point on a 3D curve:
-
-```c
-qaws_vec3 tangent, normal, binormal;
-qaws_curve_compute_frenet_frame_3d(&tangent, &normal,
-    &binormal, curve, t);
-// tangent  -- unit tangent vector (direction of travel)
-// normal   -- unit principal normal (points toward center of curvature)
-// binormal -- tangent x normal, completes the right-handed frame
-```
-
-### Curvature
-
-```c
-qaws_scalar kappa;
-qaws_curve_compute_curvature_2d(&kappa, curve, t);
-// 2D: signed curvature (positive = CCW)
-// 3D: unsigned curvature |d1 x d2| / |d1|^3
-```
-
-### Torsion (3D only)
-
-```c
-qaws_scalar tau;
-qaws_curve_compute_torsion_3d(&tau, curve, t);
-// Rate of change of the osculating plane
-```
-
-### Speed
-
-```c
-qaws_scalar speed;
-qaws_curve_compute_speed(&speed, curve, t);
-// |d1| -- magnitude of the first derivative
-```
-
-## Inflection points
-
-Find parameter values where the curvature changes sign (inflection points):
-
-```c
-qaws_scalar inflections[32];
-unsigned int inflection_count;
-qaws_curve_find_inflection_points(inflections,
-    &inflection_count, curve, 32);
-// inflections[0..inflection_count-1] are the parameter values
-```
-
-## Extrema detection
-
-Find parameter values where the curve reaches a minimum or maximum along a given axis:
-
-```c
-qaws_scalar extrema[32];
-unsigned int extrema_count;
-unsigned int axis = 0; // 0 = x, 1 = y, 2 = z
-qaws_curve_find_extrema(extrema, &extrema_count,
-    curve, 32, axis);
-// extrema[0..extrema_count-1] are the parameter values
-```
-
-## Curvature comb
-
-Sample curvature comb data along the curve for visualization. Each sample contains the position on the curve, the signed curvature value, and the normal direction:
-
-```c
-// 2D
-qaws_curvature_sample_2d samples_2d[100];
-qaws_curve_compute_curvature_comb_2d(// number of samples
-    samples_2d,
-    curve,        100, // output buffer
-    100);       // buffer capacity
-
-// Each sample has:
-//   .position  -- point on the curve
-//   .curvature -- signed curvature at that point
-//   .normal    -- unit normal at that point
-
-// 3D
-qaws_curvature_sample_3d samples_3d[100];
-qaws_curve_compute_curvature_comb_3d(// number of samples
-    samples_3d,
-    curve,        100, // output buffer
-    100);       // buffer capacity
-```
-
-The sample structs are defined as:
-
-```c
-typedef struct qaws_curvature_sample_2d {
-    qaws_vec2   position;
-    qaws_scalar curvature;
-    qaws_vec2   normal;
-} qaws_curvature_sample_2d;
-
-typedef struct qaws_curvature_sample_3d {
-    qaws_vec3   position;
-    qaws_scalar curvature;
-    qaws_vec3   normal;
-} qaws_curvature_sample_3d;
-```
-
-## Winding number
-
-Compute the winding number of a closed 2D curve around a point. The winding number counts how many times the curve winds around the point (positive for CCW, negative for CW):
-
-```c
 int winding;
-qaws_vec2 point = { 0.5f, 0.5f };
-qaws_curve_compute_winding_number_2d(&winding, curve, point);
-// winding == 0 means the point is outside the curve
-// winding != 0 means the point is inside
+qaws_curve_compute_winding_number_2d(&winding, curve, point);   /* 0: outside */
+
+qaws_scalar h;
+qaws_curve_compute_hausdorff_distance_2d(&h, curve_a, curve_b, 256);  /* by samples */
 ```
+
+The comb and Hausdorff functions have `_3d` forms. For winding numbers and
+point location in regions of several paths, see `qaws_path.h`
+([regions_2d.md](regions_2d.md)).
+
+## Enclosures (guaranteed ranges)
+
+```c
+double lo[9], hi[9];
+qaws_curve_enclose(lo, hi, curve, t0, t1, /* order */ 2);
+qaws_surface_enclose(lo, hi, surface, u0, u1, v0, v1, /* order */ 1);
+```
+
+For every parameter in the interval (box), the value lies in `[lo, hi]`, and
+with `order` 1 or more the derivatives too (curves up to the second, surfaces
+up to the third). The ranges come from the Bezier nets of the interval, every
+operation rounded outward: wider than the true ranges, never narrower, and
+shrinking with the interval.
+
+- Curves: Bezier, rational Bezier, B-spline, NURBS (positive weights),
+  Hermite, uniform Catmull-Rom and borrowed splines of degree at most 15.
+- Surfaces: Bezier, B-spline, NURBS (positive weights) and borrowed spline
+  surfaces of degree at most 15. Second and third derivatives are unbounded
+  across an interior knot line where the surface is less than C2.
+- `QAWS_STATUS_UNSUPPORTED_OPERATION` for other kinds,
+  `QAWS_STATUS_NUMERICAL_FAILURE` where a weight's range reaches 0,
+  `QAWS_STATUS_INVALID_ARGUMENT` for an empty, non-finite or out-of-range
+  interval or an order too high.
+
+## Surface analysis
+
+| Function | Result |
+|---|---|
+| `qaws_surface_compute_area` | Area |
+| `qaws_surface_compute_gaussian_curvature`, `qaws_surface_compute_mean_curvature` | Curvature at (u, v) |
+| `qaws_surface_compute_principal_curvatures` | `qaws_surface_curvature_result`: gaussian, mean, kappa1, kappa2 |
+| `qaws_surface_project_curve` | A 3D curve projected to a 2D B-spline in (u, v) by closest points (`sample_count` 0: 128) |
+
+Surface tessellation (`qaws_surface_tessellate`,
+`qaws_surface_tessellate_adaptive`) is described in
+[sampling.md](sampling.md).
 
 ## Family-specific inspection
-
-### Bezier control points
 
 ```c
 qaws_vec2 cps[10];
 unsigned int count;
-qaws_status s = qaws_bezier_get_control_points(cps,
-    &count, curve, 10);
-// Returns QAWS_STATUS_UNSUPPORTED_OPERATION if not a Bezier curve
-```
+qaws_curve_get_control_points(cps, &count, curve, 10);   /* Bezier, rational Bezier, B-spline, NURBS */
+qaws_bezier_get_control_points(cps, &count, curve, 10);  /* Bezier only */
 
-### B-Spline / NURBS knot vector
-
-```c
-qaws_scalar knots[64];
-unsigned int knot_count;
+qaws_scalar knots[64], weights[32];
+unsigned int knot_count, weight_count;
 qaws_bspline_get_knots(knots, &knot_count, curve, 64);
-// Works for both B-Spline and NURBS curves
-```
-
-### NURBS weights
-
-```c
-qaws_scalar weights[32];
-unsigned int weight_count;
 qaws_nurbs_get_weights(weights, &weight_count, curve, 32);
-// Returns QAWS_STATUS_UNSUPPORTED_OPERATION if not NURBS
 ```
+
+A curve of another kind gives `QAWS_STATUS_UNSUPPORTED_OPERATION`; a short
+buffer `QAWS_STATUS_BUFFER_TOO_SMALL` with the count. Borrowed curves refuse
+these: the host holds the arrays.
+
+## Types declared here
+
+- `qaws_plane` (a point and a normal): the plane of the differentiable
+  curve-plane intersection in `qaws_diff_ops.h`
+  ([differentiation.md](differentiation.md)).
+- `qaws_intersection_2d/3d` (`parameter_a`, `parameter_b`, `position`) and
+  `qaws_surface_curve_intersection` (`u`, `v`, `t`, `position`): declared
+  here; no public function in this header returns them. Curve intersections
+  are found by the batch API in `qaws_curve_batch.h`.

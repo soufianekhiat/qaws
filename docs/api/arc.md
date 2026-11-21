@@ -1,8 +1,7 @@
-# API Reference: qaws_arc.h
+# qaws_arc.h: circular arcs
 
-Circular and elliptical arc creation.
-
----
+A curve made of one or more circular arc segments, parameterized by arc length. Each name exists as `name_f32` and
+`name_f64` ([precision.md](precision.md)).
 
 ## qaws_arc_segment
 
@@ -10,23 +9,19 @@ Circular and elliptical arc creation.
 typedef struct qaws_arc_segment {
     qaws_scalar center[3];
     qaws_scalar radius;
-    qaws_scalar angle_start;
-    qaws_scalar angle_end;
-    qaws_scalar axis_u[3];
-    qaws_scalar axis_v[3];
+    qaws_scalar angle_start;    /* radians */
+    qaws_scalar angle_end;      /* radians */
+    qaws_scalar axis_u[3];      /* 3D only: unit vector, cos direction */
+    qaws_scalar axis_v[3];      /* 3D only: unit vector, sin direction */
 } qaws_arc_segment;
 ```
 
-| Field | Description |
+| Member | Meaning |
 |---|---|
-| `center` | Arc center (x, y, z). For 2D, only x and y are used. |
-| `radius` | Arc radius. Must be > 0. |
-| `angle_start` | Start angle in radians. For 2D, CCW from +x axis. |
-| `angle_end` | End angle in radians. |
-| `axis_u` | 3D only: unit vector for the cosine direction (ignored for 2D). |
-| `axis_v` | 3D only: unit vector for the sine direction (ignored for 2D). |
-
----
+| `center` | the arc's center; in 2D only x and y are used |
+| `radius` | must be > 0 |
+| `angle_start`, `angle_end` | radians; in 2D counter-clockwise from +x. The sweep is `angle_end - angle_start` (negative: clockwise) and must not be zero |
+| `axis_u`, `axis_v` | 3D only (ignored in 2D): the plane basis; the point at angle a is `center + radius * (cos(a) * axis_u + sin(a) * axis_v)` |
 
 ## qaws_arc_desc
 
@@ -34,17 +29,9 @@ typedef struct qaws_arc_segment {
 typedef struct qaws_arc_desc {
     qaws_dimension dimension;
     qaws_arc_segment const* segments;
-    unsigned int segment_count;
+    unsigned int segment_count;    /* >= 1 */
 } qaws_arc_desc;
 ```
-
-| Field | Description |
-|---|---|
-| `dimension` | `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D` |
-| `segments` | Array of arc segments |
-| `segment_count` | Number of segments (>= 1) |
-
----
 
 ## qaws_curve_create_arc
 
@@ -54,16 +41,18 @@ qaws_status qaws_curve_create_arc(
     qaws_arc_desc const* desc);
 ```
 
-Creates an arc curve from one or more arc segments.
+Creates the curve. Each segment is one span, in array order; the parameter is the cumulative arc length, range
+[0, total length]. The segments are used as given: they are not moved to meet, so give end-to-end segments for a
+connected curve. The degree reported is 2. Segments are copied. Destroy the result with `qaws_curve_destroy`
+([curve.md](curve.md)).
 
-**Parameters:**
-- `desc` -- Arc descriptor. Must not be NULL.
-- `out_curve` -- Receives the created curve. Set to NULL on error.
+| Status | When |
+|---|---|
+| `QAWS_STATUS_OK` | created |
+| `QAWS_STATUS_INVALID_ARGUMENT` | `desc`, `out_curve` or `segments` NULL; `segment_count` 0; a radius <= 0 |
+| `QAWS_STATUS_INVALID_DIMENSION` | dimension not 2D or 3D |
+| `QAWS_STATUS_DEGENERATE_CURVE` | a segment with (near) zero sweep or length |
+| `QAWS_STATUS_ALLOCATION_FAILURE` | allocation failed |
 
-**Returns:** `QAWS_STATUS_OK` on success.
-
-**Notes:**
-- For 2D arcs, angles are in radians, measured counter-clockwise from the +x axis.
-- For 3D arcs, the arc lies in a plane defined by the `axis_u` and `axis_v` vectors.
-- Degenerate zero-radius segments are not supported.
-- Multiple segments are chained end-to-end.
+`*out_curve` is set to NULL first. The allocator-taking form `qaws_curve_create_arc_ex` is declared in `qaws_alloc.h`
+([alloc.md](alloc.md)).

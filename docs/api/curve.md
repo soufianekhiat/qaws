@@ -1,8 +1,8 @@
-# API Reference: qaws_curve.h
+# qaws_curve.h: curve lifetime
 
-Base curve lifecycle.
-
----
+Destroying a curve and making its reversed copy. Curves are created by the family headers (see
+[types.md](types.md) for the list of kinds). Each name exists as `name_f32` and `name_f64`
+([precision.md](precision.md)).
 
 ## qaws_curve_destroy
 
@@ -10,17 +10,12 @@ Base curve lifecycle.
 void qaws_curve_destroy(qaws_curve* curve);
 ```
 
-Destroys a curve object and frees all associated memory.
+Destroys a curve and frees its memory with the allocator it was created with. NULL is a no-op.
 
-**Parameters:**
-- `curve` -- Curve to destroy. May be NULL (no-op).
-
-**Semantics:**
-- Must be called for every curve created with `qaws_curve_create_*`.
-- After destruction, the pointer must not be used.
-- Any traversal objects referencing this curve become invalid.
-
----
+- Call it once for every curve a `qaws_curve_create_*` (or other curve-returning) call gave you. Never call it on an
+  inline curve ([inline.md](inline.md)).
+- A composite curve destroys the segment curves it owns ([composite.md](composite.md)).
+- The curve must not be in use by another thread, and traversals created on it must not be used afterwards.
 
 ## qaws_curve_reverse
 
@@ -30,19 +25,15 @@ qaws_status qaws_curve_reverse(
     qaws_curve const* curve);
 ```
 
-Creates a new curve that traces the same path as the input but in the opposite direction.
+Creates a new curve tracing the same path in the opposite direction: evaluating it at `t` gives the position of the
+original at `t_min + t_max - t`.
 
-**Parameters:**
-- `curve` -- The source curve.
-- `out_reversed` -- Receives the newly allocated reversed curve.
+- Bezier, Hermite, Catmull-Rom (a closed one keeps its start point), B-spline, NURBS, trajectory, quadratic-mode
+  Yuksel, rational Bezier, polynomial, arc, clothoid and composite curves come back as their own kind. Arc-mode Yuksel
+  (circular, elliptical, hybrid), subdivision, reparameterized and view curves come back as the reversed
+  `qaws_curve_extract` of their whole domain ([operations.md](operations.md)).
+- The result is a new allocation; destroy it with `qaws_curve_destroy`. The source is not changed.
 
-**Returns:** `QAWS_STATUS_OK` on success.
-
-**Semantics:**
-- The returned curve is a new allocation and must be destroyed with `qaws_curve_destroy`.
-- Evaluating the reversed curve at parameter `t` yields the same position as evaluating the original at `t_max - t + t_min`.
-- Every kind can be reversed. Bezier, Hermite, Catmull-Rom (closed ones keep
-  their start point), B-spline, NURBS, trajectory, quadratic Yuksel, rational
-  Bezier, polynomial, arc, clothoid and composite curves come back as their own
-  kind. Subdivision, reparameterized and arc-mode Yuksel curves come back as
-  the reversed `qaws_curve_extract` of their whole domain.
+Returns `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` for a NULL argument; `QAWS_STATUS_UNSUPPORTED_OPERATION` for an
+unknown kind; `QAWS_STATUS_ALLOCATION_FAILURE`; or the status of the creation it delegates to. `*out_reversed` is set
+to NULL first.

@@ -1,10 +1,17 @@
 # API Reference: qaws_import.h
 
-Deserialization and import from raw point data.
+Curves from raw point arrays (polylines): an interpolating Catmull-Rom spline or a cubic trajectory through the
+points. Each function creates a new curve with the default allocator, owned by the caller (destroy it with
+`qaws_curve_destroy`, see [curve.md](curve.md)).
+
+Names are shown unsuffixed; each exists as `_f32` and `_f64` (see [precision.md](precision.md)).
+
+Related: [export.md](export.md) (the reverse direction), [catmull_rom.md](catmull_rom.md),
+[trajectory.md](trajectory.md).
 
 ---
 
-## qaws_polyline_import_catmull_rom
+## Catmull-Rom from points
 
 ```c
 qaws_status qaws_polyline_import_catmull_rom(
@@ -16,21 +23,17 @@ qaws_status qaws_polyline_import_catmull_rom(
     int closed);
 ```
 
-Creates a Catmull-Rom spline that interpolates through a raw point array.
+A Catmull-Rom spline interpolating `points`, the same as `qaws_curve_create_catmull_rom` with these fields.
 
-**Parameters:**
-- `dimension` -- `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D`.
-- `points` -- Flat array of `qaws_vec2` or `qaws_vec3`.
-- `point_count` -- Number of points (>= 2).
-- `parameterization` -- Knot spacing. Pass 0 for centripetal (default).
-- `closed` -- Non-zero for a closed loop.
-- `out_curve` -- Receives the created Catmull-Rom curve.
-
-**Returns:** `QAWS_STATUS_OK` on success.
+- `points`: flat array of `point_count` `qaws_vec2` or `qaws_vec3`, as `dimension` says (`QAWS_DIMENSION_2D` or
+  `QAWS_DIMENSION_3D`). The points are copied.
+- `parameterization`: knot spacing; `QAWS_PARAMETERIZATION_DEFAULT` (0) is centripetal.
+- `closed`: non-zero for a closed loop.
+- Returns `QAWS_STATUS_INVALID_ARGUMENT` for a null pointer or `point_count < 2`, otherwise the creation status.
 
 ---
 
-## qaws_polyline_import_trajectory
+## Trajectory from points
 
 ```c
 qaws_status qaws_polyline_import_trajectory(
@@ -41,13 +44,9 @@ qaws_status qaws_polyline_import_trajectory(
     int closed);
 ```
 
-Creates a cubic trajectory that interpolates through a raw point array with uniform timing.
+A cubic trajectory through `points` with uniform timing: key `i` at time `i` (so the domain is
+`[0, point_count - 1]`), created with `qaws_curve_create_trajectory`.
 
-**Parameters:**
-- `dimension` -- `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D`.
-- `points` -- Flat array of `qaws_vec2` or `qaws_vec3`.
-- `point_count` -- Number of points (>= 2).
-- `closed` -- Non-zero for a closed loop.
-- `out_curve` -- Receives the created trajectory curve.
-
-**Returns:** `QAWS_STATUS_OK` on success.
+- `points`: flat array of `point_count` `qaws_vec2` or `qaws_vec3`. `closed`: non-zero for a closed loop.
+- Past 64 points a temporary time array is allocated (`QAWS_STATUS_ALLOCATION_FAILURE` if that fails).
+- Returns `QAWS_STATUS_INVALID_ARGUMENT` for a null pointer or `point_count < 2`, otherwise the creation status.

@@ -1,30 +1,21 @@
-# API Reference: qaws_yuksel.h
+# qaws_yuksel.h: Yuksel C2 interpolating splines
 
-Yuksel C2 interpolating spline creation.
-
-Based on: Cem Yuksel, "A Class of C2 Interpolating Splines", ACM Transactions on Graphics, 2020.
-
----
+A spline through every control point, C2 everywhere, built by blending overlapping sub-curves (one per point triplet)
+with cos^2 / sin^2 weights (Cem Yuksel, "A Class of C2 Interpolating Splines", ACM Transactions on Graphics, 2020).
+Each name exists as `name_f32` and `name_f64` ([precision.md](precision.md)).
 
 ## qaws_yuksel_mode
 
-```c
-typedef enum qaws_yuksel_mode {
-    QAWS_YUKSEL_MODE_BEZIER = 0,
-    QAWS_YUKSEL_MODE_CIRCULAR,
-    QAWS_YUKSEL_MODE_ELLIPTICAL,
-    QAWS_YUKSEL_MODE_HYBRID
-} qaws_yuksel_mode;
-```
+The sub-curve fitted through each triplet.
 
-| Mode | Description | Dimension |
-|---|---|---|
-| `BEZIER` | Quadratic Bezier sub-curves through point triplets | 2D, 3D |
-| `CIRCULAR` | Circular arcs through point triplets | 2D only |
-| `ELLIPTICAL` | Elliptical arcs with iterative fitting | 2D only |
-| `HYBRID` | Circular when arc angle is small, elliptical fallback | 2D only |
+| Value | Sub-curve |
+|---|---|
+| `QAWS_YUKSEL_MODE_BEZIER` (0) | quadratic Bezier |
+| `QAWS_YUKSEL_MODE_CIRCULAR` | circular arc |
+| `QAWS_YUKSEL_MODE_ELLIPTICAL` | elliptical arc |
+| `QAWS_YUKSEL_MODE_HYBRID` | circular arc when its span is within pi/2, else elliptical |
 
----
+All modes work in 2D and 3D; in 3D the arc modes fit each triplet in its own plane.
 
 ## qaws_yuksel_desc
 
@@ -38,15 +29,13 @@ typedef struct qaws_yuksel_desc {
 } qaws_yuksel_desc;
 ```
 
-| Field | Description |
+| Member | Meaning |
 |---|---|
 | `dimension` | `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D` |
-| `control_points` | Array of `qaws_vec2` or `qaws_vec3` |
-| `control_point_count` | Number of control points. Must be >= 3. |
-| `mode` | Interpolation mode (see above) |
-| `closed` | 0 for open, 1 for closed |
-
----
+| `control_points` | `dimension` scalars per point, packed |
+| `control_point_count` | at least 3 |
+| `mode` | see above |
+| `closed` | non-zero: the last point joins the first |
 
 ## qaws_curve_create_yuksel
 
@@ -56,29 +45,22 @@ qaws_status qaws_curve_create_yuksel(
     qaws_yuksel_desc const* desc);
 ```
 
-Creates a Yuksel C2 interpolating spline.
+Creates the curve. It passes through every point; point i is at parameter i.
 
-**Parameters:**
-- `desc` -- Curve descriptor
-- `out_curve` -- Receives the created curve
+- Open: `control_point_count - 1` spans. The first and last spans use the end sub-curve alone (unblended); interior
+  spans blend two neighbouring sub-curves.
+- Closed: `control_point_count` spans.
+- Parameter range [0, span_count]. `qaws_curve_get_degree` reports 2.
+- Inputs are copied. Destroy the result with `qaws_curve_destroy` ([curve.md](curve.md)). Reversing an arc-mode curve
+  gives an extracted copy, not a Yuksel curve ([curve.md](curve.md)).
 
-**Returns:** `QAWS_STATUS_OK` on success.
+| Status | When |
+|---|---|
+| `QAWS_STATUS_OK` | created |
+| `QAWS_STATUS_INVALID_ARGUMENT` | `desc`, `out_curve` or `control_points` NULL |
+| `QAWS_STATUS_INVALID_DIMENSION` | dimension not 2D or 3D |
+| `QAWS_STATUS_INVALID_CONTROL_POINT_COUNT` | fewer than 3 points, or a count too large to index |
+| `QAWS_STATUS_ALLOCATION_FAILURE` | allocation failed |
 
-**Errors:**
-- `INVALID_ARGUMENT` -- NULL pointers, or non-Bezier mode with 3D dimension
-- `INVALID_CONTROL_POINT_COUNT` -- fewer than 3 points
-- `ALLOCATION_FAILURE` -- malloc failed
-
-**Notes:**
-- All control points are interpolated exactly.
-- Continuity is C2 everywhere (achieved via cos^2/sin^2 blending).
-- For open curves: span_count = control_point_count - 1.
-- For closed curves: span_count = control_point_count.
-- Parameter range is [0, span_count].
-- The degree reported by `qaws_curve_get_degree()` is 2 (quadratic sub-curves).
-- 3D is only supported with `QAWS_YUKSEL_MODE_BEZIER`. Circular, Elliptical, and Hybrid modes require 2D because they rely on plane-specific geometry (perpendicular bisectors, arc angles).
-
-**Open curve boundary behavior:**
-- The first span uses the sub-curve at P[1] unblended (only the left half).
-- The last span uses the sub-curve at P[N-2] unblended (only the right half).
-- Interior spans blend two adjacent sub-curves.
+`*out_curve` is set to NULL first. The allocator-taking form `qaws_curve_create_yuksel_ex` is declared in
+`qaws_alloc.h` ([alloc.md](alloc.md)).

@@ -1,218 +1,523 @@
 # Exact / certified geometry (`qaws_exact.h`)
 
-C-only, built with `QAWS_ENABLE_EXACT` (default ON), independent of
-`QAWS_SCALAR_IS_FLOAT` and of the GPU backends. Plan and status:
-`docs/exact_kernel_plan.md`.
+Certified predicates on doubles, exact rational curves and surfaces prepared
+from the float objects, certified winding numbers and certified closest
+points. C only; compiled when `QAWS_ENABLE_EXACT` is on (the CMake option,
+default ON, also defines `QAWS_ENABLE_EXACT=1` for users). The model, the
+guarantees and the statuses are explained in
+[the exact kernel concept page](../exact_kernel.md).
 
-## Contract
+Every name exists as `name_f32` and `name_f64` (see [precision.md](precision.md));
+the exact kernel itself works on `double` in both, only the float objects it
+prepares from (`qaws_curve`, `qaws_surface`) carry the precision.
 
-- **Predicates on doubles** are certified: a finite double is an exact dyadic
-  rational, so `qaws_exact_orient2d`, `qaws_exact_orient3d` and
-  `qaws_exact_compare_ratio` return the true sign of the polynomial in the
-  given doubles. An f64 evaluation with Shewchuk's error bound decides when
-  it can; otherwise the inputs are decoded exactly and evaluated in
-  multi-limb integers; points sharing a coordinate (a zero column) are a
-  zero at once, on the exact path. The f64 filter never decides a zero.
-- **Exact curves** are exact relative to their lattice inputs: coordinates
-  are rounded once onto `x = i 2^space_exp2`, weights scaled by a common
-  power of two, knots and parameters onto `t = T 2^-shift`. After that
-  boundary nothing rounds. Every value returned as a double is the
-  correctly rounded value of an exact rational.
-- **Overflow is never silent**: past the 2048-bit integer budget an
-  operation returns `QAWS_STATUS_EXACT_RANGE_EXCEEDED`.
-- **Undecidable is reported, not guessed**: `QAWS_STATUS_CERTIFICATION_FAILED`
-  (for example a winding number queried exactly on the curve).
+Statuses specific to this header (see [status.md](status.md)):
+`QAWS_STATUS_EXACT_UNSUPPORTED`, `QAWS_STATUS_EXACT_RANGE_EXCEEDED`,
+`QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE`, `QAWS_STATUS_CERTIFICATION_FAILED`.
+Non-finite inputs and NULL required pointers return
+`QAWS_STATUS_INVALID_ARGUMENT`.
 
 ## Predicates
 
 ```c
-qaws_status qaws_exact_orient2d(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double const a[2], double const b[2], double const c[2]);
-qaws_status qaws_exact_orient3d(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double const a[3], double const b[3], double const c[3], double const d[3]);
-qaws_status qaws_exact_compare_ratio(qaws_exact_sign* out_sign, qaws_exact_path* out_path, double a, double b, double c, double d);
+typedef enum qaws_exact_sign
+{
+	QAWS_EXACT_NEGATIVE = -1,
+	QAWS_EXACT_ZERO = 0,
+	QAWS_EXACT_POSITIVE = 1
+} qaws_exact_sign;
+
+typedef enum qaws_exact_path
+{
+	QAWS_EXACT_PATH_FILTER = 0,   /* the f64 evaluation and its error bound */
+	QAWS_EXACT_PATH_EXACT         /* exact integer evaluation */
+} qaws_exact_path;
 ```
 
-`out_path` (may be NULL) tells whether the f64 filter or the exact path
-decided. Inputs spanning more than about 900 binary orders of magnitude
-return `QAWS_STATUS_EXACT_RANGE_EXCEEDED`.
+```c
+qaws_status qaws_exact_orient2d(qaws_exact_sign* out_sign, qaws_exact_path* out_path,
+	double const a[2], double const b[2], double const c[2]);
+```
+
+Sign of `(a - c) x (b - c)`: positive when a, b, c turn counterclockwise.
+
+```c
+qaws_status qaws_exact_orient3d(qaws_exact_sign* out_sign, qaws_exact_path* out_path,
+	double const a[3], double const b[3], double const c[3], double const d[3]);
+```
+
+Sign of the volume `(a - d) . ((b - d) x (c - d))`.
+
+```c
+qaws_status qaws_exact_compare_ratio(qaws_exact_sign* out_sign, qaws_exact_path* out_path,
+	double a, double b, double c, double d);
+```
+
+Sign of `a / b - c / d`. `b` and `d` must be non-zero
+(`QAWS_STATUS_INVALID_ARGUMENT` otherwise).
+
+Common to the three:
+
+- `out_sign` is required; `out_path` may be NULL and tells which path decided.
+- The f64 filter uses Shewchuk's error bounds and decides only a sign it
+  proves; it never decides a zero. Otherwise the inputs are decoded exactly
+  and the polynomial is evaluated in multi-limb integers. The filter is also
+  skipped near underflow or when a term overflows.
+- Points sharing a coordinate (all equal in x, say) give a zero column: an
+  exact zero decided at once, reported as `QAWS_EXACT_PATH_EXACT`.
+- `QAWS_STATUS_EXACT_RANGE_EXCEEDED` when the inputs span more binary
+  exponents than the integer budget covers (about 2^900 between the smallest
+  and the largest magnitude); `QAWS_STATUS_INVALID_ARGUMENT` for a non-finite
+  input.
 
 ## Exact curves
 
+### Types
+
 ```c
-void qaws_exact_desc_default(qaws_exact_desc* desc);   /* 2^-20 lattice, 26 coordinate bits, 24 parameter and weight bits */
-qaws_status qaws_exact_curve_prepare(qaws_exact_curve** out_curve, qaws_exact_report* out_report, qaws_curve const* curve, qaws_exact_desc const* desc);
+typedef struct qaws_exact_curve qaws_exact_curve;   /* opaque */
+
+typedef enum qaws_numeric_quality
+{
+	QAWS_NUMERIC_APPROXIMATE = 0,
+	QAWS_NUMERIC_CERTIFIED,
+	QAWS_NUMERIC_EXACT_RATIONAL,
+	QAWS_NUMERIC_UNSUPPORTED
+} qaws_numeric_quality;
+
+typedef enum qaws_exact_flag
+{
+	QAWS_EXACT_FLAG_NONE = 0,
+	QAWS_EXACT_FLAG_INPUT_QUANTIZED = 1 << 0,   /* inputs were rounded onto the lattices */
+	QAWS_EXACT_FLAG_PREP_QUANTIZED = 1 << 1     /* an approximate preparation was frozen */
+} qaws_exact_flag;
+
+typedef struct qaws_exact_desc
+{
+	int space_exp2;              /* lattice step 2^space_exp2 world units */
+	unsigned int coord_bits;     /* usable coordinate magnitude bits (default 26) */
+	unsigned int param_bits;     /* parameter lattice bits (default 24) */
+	unsigned int weight_bits;    /* weight bits (default 24) */
+} qaws_exact_desc;
+
+typedef struct qaws_exact_report
+{
+	qaws_numeric_quality quality;
+	unsigned int flags;                      /* qaws_exact_flag bits */
+	unsigned int storage_bits;               /* widest homogeneous control value */
+	double max_position_quantization_error;  /* world units */
+	double max_weight_quantization_error;    /* relative */
+	double parameter_quantization_error;     /* last evaluation */
+} qaws_exact_report;
+```
+
+The preparation functions set `quality` to `QAWS_NUMERIC_EXACT_RATIONAL`;
+the other `qaws_numeric_quality` values are part of the vocabulary but are
+not produced by this header.
+
+`qaws_exact_desc` fixes the exact space:
+
+- coordinates are rounded (nearest, ties to even) onto `x = i 2^space_exp2`,
+  `|i| < 2^coord_bits`;
+- weights are scaled by a common power of two to `weight_bits`;
+- knots and parameters are rounded onto `t = T 2^-shift`, the shift chosen
+  from the domain and `param_bits`.
+
+Valid ranges: `coord_bits` 1..32, `param_bits` 1..56, `weight_bits` 1..30
+(`QAWS_STATUS_INVALID_ARGUMENT` otherwise). Objects used together (a winding
+loop, a batch) must share `space_exp2`.
+
+### Functions
+
+```c
+void qaws_exact_desc_default(qaws_exact_desc* desc);
+```
+
+Defaults: `space_exp2 = -20` (2^-20 world units), 26 coordinate bits, 24
+parameter and weight bits.
+
+```c
+qaws_status qaws_exact_curve_prepare(qaws_exact_curve** out_curve, qaws_exact_report* out_report,
+	qaws_curve const* curve, qaws_exact_desc const* desc);
 void qaws_exact_curve_destroy(qaws_exact_curve* curve);
-qaws_status qaws_exact_curve_evaluate(double* out, qaws_exact_report* out_report, qaws_exact_curve const* curve, double t, unsigned int order);
-unsigned int qaws_exact_curve_span_count(qaws_exact_curve const* curve);
-qaws_status qaws_exact_curve_span_bezier(unsigned int* out_degree, double* out_t0, double* out_t1, double* out_points, double* out_weights, qaws_exact_curve const* curve, unsigned int s);
 ```
 
-A prepared curve holds one integer homogeneous Bezier per span. Bezier and
-rational Bezier curves are one span. B-spline and NURBS spans come from
-exact blossoms (de Boor triangles with the span ends as arguments), reduced
-by gcd and cleared to one common denominator. Evaluation is division-free
-De Casteljau on the k-th integer derivative polygon. The exact quotient rule
-gives `C^(k)` as one rational per component. Span selection: `a <= T < b`,
-the last span at the domain end.
+Prepares `curve` once into one integer homogeneous Bezier per span. `desc`
+may be NULL (defaults); `out_report` may be NULL. On success `*out_curve` is
+owned by the caller and freed with `qaws_exact_curve_destroy` (NULL is
+accepted); it does not reference `curve` afterwards. On failure
+`*out_curve` is NULL.
 
-Cubic Hermite and uniform Catmull-Rom spans become integer cubic Beziers
-with one common factor (3 and 6). Polynomial coefficients are decoded
-exactly as dyadics, re-expanded around the quantized domain start and
-converted to Bernstein form over one integer denominator; only the domain
-ends are quantized. Chordal and centripetal Catmull-Rom need square roots
-and return `QAWS_STATUS_EXACT_UNSUPPORTED`.
+Supported families, 2D and 3D:
 
-The report gives the quality (`QAWS_NUMERIC_EXACT_RATIONAL`), whether
-inputs were quantized, the widest stored integer and the quantization
-errors.
+| family | preparation |
+|---|---|
+| Bezier, rational Bezier | one span |
+| B-spline, NURBS | one span per non-empty knot interval (exact blossoms, de Boor triangles with the span ends as arguments, cleared to one denominator) |
+| cubic Hermite | integer cubic Bezier per unit span, common factor 3 |
+| uniform Catmull-Rom | integer cubic Bezier per unit span, common factor 6 |
+| chordal / centripetal Catmull-Rom | the runtime's own per-segment cubics frozen and taken exactly; report flag `QAWS_EXACT_FLAG_PREP_QUANTIZED` |
+| polynomial | dyadic coefficients taken exactly; only the domain ends are quantized |
+| composite | each segment prepared exactly, segment `i` moved to `[i, i + 1]`; bounds off the lattice are reported as a parameter quantization |
 
-Integer budget at full precision (24-bit knots and weights, 26-bit
-coordinates), measured by test 67:
+Other families (arcs, clothoids, Yuksel curves, ...) return
+`QAWS_STATUS_EXACT_UNSUPPORTED`. Degree above 16, more than 256 knots, a
+dimension other than 2 or 3, or a coordinate past `2^coord_bits` lattice
+steps return `QAWS_STATUS_EXACT_RANGE_EXCEEDED`; so does any integer that
+outgrows the 2048-bit budget. `QAWS_STATUS_ALLOCATION_FAILURE` when memory
+runs out.
 
-| degree | span storage (bits) | highest derivative within 2048 bits |
-|---|---|---|
-| 1..5 | 49..341 | C''' |
-| 6..7 | 427..521 | C'' |
-| 8..9 | 618..711 | C' |
-| 10..16 | 801..1343 | position |
-
-Coarser lattices raise every row.
-
-## Certified winding numbers
+The report: `flags` has `QAWS_EXACT_FLAG_INPUT_QUANTIZED` when any position,
+weight or knot was rounded; `storage_bits` is the widest stored integer;
+the quantization errors are the largest rounding of a position (world
+units), of a weight (relative) and of a knot / domain end.
 
 ```c
-qaws_status qaws_exact_winding_2d(int* out_winding, qaws_exact_curve const* const* pieces, double const p[2], unsigned int count);
+qaws_status qaws_exact_curve_evaluate(double* out, qaws_exact_report* out_report,
+	qaws_exact_curve const* curve, double t, unsigned int order);
 ```
 
-The ray crossings `x > p_x` are decided on the exact integer Bernstein
-coefficients of `Y - p_y W` and `X - p_x W`, with exact halving
-subdivision. The loop must close exactly and share one exact space.
+Position and derivatives at `t`: `out` receives `order + 1` points of the
+curve's dimension, `C, C', ..., C^(order)`, `order <= 3`. `t` is rounded onto
+the parameter lattice and clamped to the domain; span selection is
+`a <= T < b`, the last span at the domain end. Evaluation is division-free
+De Casteljau on integer derivative polygons with the exact quotient rule;
+each value is converted to double once, correctly rounded. `out_report` (may
+be NULL) receives `quality` and `parameter_quantization_error` (only those
+two fields are written). `QAWS_STATUS_INVALID_ARGUMENT` for `order > 3` or a
+non-finite `t`; `QAWS_STATUS_EXACT_RANGE_EXCEEDED` when the derivative
+outgrows the integer budget (high degrees reach it before `C'''`).
+
+```c
+unsigned int qaws_exact_curve_span_count(qaws_exact_curve const* curve);
+```
+
+Number of spans, one exact rational Bezier each (0 for NULL).
+
+```c
+qaws_status qaws_exact_curve_span_bezier(unsigned int* out_degree, double* out_t0, double* out_t1,
+	double* out_points, double* out_weights, qaws_exact_curve const* curve, unsigned int s);
+```
+
+Span `s` as a rational Bezier, rounded once: degree, parameter interval
+`[t0, t1]`, `degree + 1` control points of the curve's dimension (world
+units) and `degree + 1` weights relative to the largest. Every output may be
+NULL. `QAWS_STATUS_INVALID_ARGUMENT` for `s >= span_count`.
+
+## Certified winding number
+
+```c
+qaws_status qaws_exact_winding_2d(int* out_winding, qaws_exact_curve const* const* pieces,
+	double const p[2], unsigned int count);
+```
+
+Winding number of the closed 2D loop `pieces[0..count)` around the double
+point `p`: the signed crossings of the ray `x > p_x`, decided on the exact
+integer Bernstein coefficients of `Y - p_y W` and `X - p_x W` with exact
+halving subdivision.
+
+- Each piece's end must equal the next one's start exactly (the last piece
+  joins the first); a loop that does not close, a NULL or non-2D piece
+  returns `QAWS_STATUS_INVALID_ARGUMENT`.
+- Pieces in different exact spaces: `QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE`.
+- `QAWS_STATUS_CERTIFICATION_FAILED` when `p` lies on the curve, or so close
+  in parameter that 200 halvings do not separate it: the winding number is
+  undefined there and never guessed.
+- `p` needing more than 1500 bits below the lattice step:
+  `QAWS_STATUS_EXACT_RANGE_EXCEEDED`.
 
 ## Exact surfaces
 
 ```c
-qaws_status qaws_exact_surface_prepare(qaws_exact_surface** out_surface, qaws_exact_report* out_report, qaws_surface const* surface, qaws_exact_desc const* desc);
+typedef struct qaws_exact_surface qaws_exact_surface;   /* opaque */
+
+qaws_status qaws_exact_surface_prepare(qaws_exact_surface** out_surface, qaws_exact_report* out_report,
+	qaws_surface const* surface, qaws_exact_desc const* desc);
 void qaws_exact_surface_destroy(qaws_exact_surface* surface);
-qaws_status qaws_exact_surface_evaluate(double* out, double* out_normal, qaws_exact_surface const* surface, double u, double v, unsigned int order);
-void qaws_exact_surface_patch_count(unsigned int* out_u_count, unsigned int* out_v_count, qaws_exact_surface const* surface);
-qaws_status qaws_exact_surface_patch_bezier(unsigned int* out_p, unsigned int* out_q, double out_rect[4], double* out_points, double* out_weights, qaws_exact_surface const* surface, unsigned int iu, unsigned int iv);
 ```
 
 Bezier, B-spline and NURBS surfaces become one integer homogeneous Bezier
-patch per non-empty knot rectangle: exact blossoms along u on each control
-column, then along v on each row, one lcm for the net. `order` 0, 1, 2
-returns S; then Su, Sv; then Suu, Suv, Svv. They come from integer
-derivative nets (rows, then the column) and the bivariate quotient rule,
-for example `Suv = (Xuv W^2 - Wuv X W - Wu Nv - Wv Nu) / W^3` with
-`Nu = Xu W - X Wu`. `out_normal` is `Su x Sv` with exact components, so
-its sign along any lattice direction is certified. The unit normal needs a
-square root and is not exact.
-
-## Certified closest points
-
-The exact batch descs (`qaws_exact_batch_desc`, `qaws_exact_ssi_batch_desc`)
-give N exact curves or surfaces in one exact space, with an optional
-`executor`.
-
-### Over N curves
+patch per non-empty knot rectangle, on the same lattices as the curves
+(coordinates, weights, knots). Ownership and `desc` / `out_report` handling
+as for curves. Other surface families return
+`QAWS_STATUS_EXACT_UNSUPPORTED`; degree 0 or above 16, more than 256 knots
+or more than 64 control points along u or v return
+`QAWS_STATUS_EXACT_RANGE_EXCEEDED`.
 
 ```c
-qaws_status qaws_exact_curve_batch_closest(qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats, double const* points,
-	unsigned int point_count, qaws_exact_batch_desc const* desc);
+qaws_status qaws_exact_surface_evaluate(double* out, double* out_normal, qaws_exact_surface const* surface,
+	double u, double v, unsigned int order);
 ```
 
-For every query point (exact doubles, world units), the call returns the
-nearest point over the exact curves, with its curve, a parameter enclosure,
-a distance enclosure and a `certified` flag.
-
-- The query point becomes P / Q on the lattice, with Q a power of two.
-- On a span C = X / W, the squared distance is stationary at the roots of
-  the integer polynomial g(s) = Σ (Q X_c − P_c W)(X_c' W − X_c W'), of
-  degree 3n − 2.
-- Its roots in (0, 1), isolated exactly, and the span ends are the
-  candidates. A knot counts once, and the start of a closed curve once.
-- Each candidate's squared distance E / V, with E = Σ (Q X_c − P_c W)²
-  and V = (Q W)², is enclosed by the ratios of their Bernstein coefficients
-  restricted together to its interval.
-- Spans come from one grid over their sound control boxes, nearest box
-  first, while a box can still win.
-- The winner is certified when its enclosure lies below every other
-  candidate's. Overlapping root intervals are refined first.
-
-A span whose roots do not isolate (a double root, or g ≡ 0) enters as one
-candidate covering the whole span. An exact tie, such as a point midway
-between two lines, is reported with `certified = 0`.
-
-300 dyadic points against dyadic parabolas and segments are all certified,
-with distance enclosures at most 1.1e-16 wide, in 0.04 s. Every answer of
-the float batch lies inside its enclosure.
-
-### Over M surfaces
+Values at `(u, v)` (rounded onto the parameter lattices), exact and rounded
+once, as vec3 entries: order 0 gives `S` (3 doubles); order 1 adds `Su, Sv`
+(9); order 2 adds `Suu, Suv, Svv` (18). They come from integer derivative
+nets and the exact bivariate quotient rule. `out_normal` (may be NULL)
+receives the unnormalized `Su x Sv`, exact and rounded once (its unit length
+needs a square root and is not offered). `QAWS_STATUS_INVALID_ARGUMENT` for
+`order > 2` or a non-finite parameter.
 
 ```c
-qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats, double const* points,
-	unsigned int point_count, qaws_exact_ssi_batch_desc const* desc);
+void qaws_exact_surface_patch_count(unsigned int* out_u_count, unsigned int* out_v_count,
+	qaws_exact_surface const* surface);
 ```
 
-For every query point, the call returns the nearest point over the exact
-surfaces (up to bicubic patches): its surface, (u, v) enclosures, a
-distance enclosure and a `certified` flag. On a patch S = X / W the
-squared distance to p = P / Q is stationary where G_u = G_v = 0, with
-G_u = Σ (Q X_c − P_c W)(X_c,u W − X_c W_u) and G_v likewise.
+Patches along u and v (0 for NULL). Either output may be NULL.
 
-- **Localising the interior.** Branch and bound on E / V over quarter
-  boxes keeps only the boxes that can beat the best distance. The corners
-  of each box are exact surface points, so their distances tighten that
-  bound as the search goes.
-- **Solving.** On each surviving box, G_u and G_v are restricted exactly
-  (integer de Casteljau to any dyadic interval). The system with
-  3w − 1 = 0 goes to the certified 3D solver, refined only to 2⁻²² in u
-  and v.
-- **Edges and corners.** These are exact curves, solved by the curve
-  method. Each edge and corner counts once over the surface.
-- **Certification.** Every candidate gets a distance enclosure, and the
-  nearest is certified when its enclosure lies below every other
-  candidate's. A pruned box is proven farther than an actual surface
-  point, so the nearest point is always among the candidates.
+```c
+qaws_status qaws_exact_surface_patch_bezier(unsigned int* out_p, unsigned int* out_q, double out_rect[4],
+	double* out_points, double* out_weights, qaws_exact_surface const* surface, unsigned int iu, unsigned int iv);
+```
 
-120 dyadic points against three paraboloids and two planes.
-all are certified, every answer of the float batch lies inside its
-enclosure, and the run takes 1.0 s. A point midway between two planes is
-reported as a tie.
+Patch `(iu, iv)` rounded once: degrees `p`, `q`; parameter rectangle
+`{u0, u1, v0, v1}`; `(p + 1)(q + 1)` vec3 control points, row-major with the
+u index major; weights relative to the largest. Every output may be NULL.
+`QAWS_STATUS_INVALID_ARGUMENT` for an index out of range.
 
-### Parallel execution
+## Batches
 
-The exact batch descs (`qaws_exact_batch_desc`, `qaws_exact_ssi_batch_desc`)
-take the optional `executor` of the float batches
-([curve_batch.md](curve_batch.md#parallel-execution)). The closest-point
-batches run query chunks of 4. The kernel has no mutable globals, and the
-results are bit-identical whatever the executor does.
+### Descriptors and statistics
 
-## Capability matrix
+```c
+#define QAWS_EXACT_BATCH_SELF 1u
 
-| quantity | status |
-|---|---|
-| orient2d / orient3d / ratio compare on doubles | certified |
-| Bezier, rational Bezier: position, C', C'', C''' | exact rational |
-| B-spline, NURBS: position, C', C'', C''' | exact rational (budget above) |
-| span selection | exact (integer knots) |
-| winding number of a closed loop | certified |
-| Hermite (cubic), uniform Catmull-Rom (open, closed) | exact rational (lattice points and tangents) |
-| polynomial | exact rational (dyadic coefficients taken as given, no quantization) |
-| composites | exact rational (segment spans moved to [i, i + 1]; non-dyadic bounds reported as a parameter quantization) |
-| chordal / centripetal Catmull-Rom | exact relative to the runtime's frozen preparation (QAWS_EXACT_FLAG_PREP_QUANTIZED) |
-| Yuksel curves | not rational (trigonometric blend of sub-curves) |
-| arcs, clothoids (sin/cos, Fresnel) | not rational |
-| unit normals, curvature, arc length (sqrt) | not rational |
-| Bezier, B-spline, NURBS surfaces: S, Su, Sv, Suu, Suv, Svv, Su x Sv | exact rational |
-| unit surface normal, curvatures (sqrt) | not rational |
-| other surface families (sweeps, lofts, offsets, ...) | planned or not rational |
-| closest points over N curves | certified: roots of the distance derivative isolated exactly, distance enclosures, unique nearest proven or a tie reported |
-| closest points over M surfaces | certified: interior stationary points by the 3D solver on boxes localised by branch and bound, edges as exact curves, unique nearest proven or a tie reported |
+typedef struct qaws_exact_batch_desc
+{
+	qaws_exact_curve const* const* curves;
+	unsigned int curve_count;
+	unsigned int const* families;          /* optional, one id per curve */
+	unsigned int flags;                    /* QAWS_EXACT_BATCH_* */
+	qaws_batch_executor const* executor;   /* optional: runs independent work in parallel */
+} qaws_exact_batch_desc;
 
-Exact intersections, ray casts and 2D Booleans are not part of qaws; they
-are built on these exact curves and surfaces.
+typedef struct qaws_exact_surface_batch_desc
+{
+	qaws_exact_curve const* const* curves;
+	unsigned int curve_count;
+	qaws_exact_surface const* const* surfaces;
+	unsigned int surface_count;
+	qaws_batch_executor const* executor;
+} qaws_exact_surface_batch_desc;
 
-Tests: 63 (integers), 64 (predicates), 65 (Bezier), 66 (winding), 67
-(B-spline / NURBS), 68 (Hermite, Catmull-Rom, polynomial), 69 (surfaces),
-76 (composites, frozen Catmull-Rom), all against Mathematica exact
-references. Figures: `examples/exact_showcase.c`.
+typedef struct qaws_exact_ssi_batch_desc
+{
+	qaws_exact_surface const* const* surfaces;
+	unsigned int surface_count;
+	unsigned int const* families;          /* optional, one id per surface */
+	unsigned int min_depth;                /* subdivision depth before certifying */
+	qaws_batch_executor const* executor;
+} qaws_exact_ssi_batch_desc;
+
+typedef struct qaws_exact_batch_stats
+{
+	unsigned int span_count;        /* spans over all curves */
+	unsigned int cell_count;        /* grid cells */
+	unsigned int candidate_count;   /* span pairs whose boxes overlap (closest: spans or patches solved) */
+	unsigned int uncertified_count; /* items that failed certification */
+	unsigned int hit_count;
+	unsigned int patch_count;       /* surface patches */
+} qaws_exact_batch_stats;
+```
+
+`QAWS_EXACT_BATCH_SELF` asks an intersection batch to add each curve's
+self-intersections; `families` skips pairs with the same id.
+`qaws_exact_surface_batch_desc` describes N curves against M surfaces.
+`executor` is the one of the float batches ([batch_executor.md](batch_executor.md)).
+The kernel has no mutable globals, so results are identical whatever the
+executor does.
+
+### Certified closest points on curves
+
+```c
+#define QAWS_EXACT_CLOSEST_NONE 0xFFFFFFFFu
+
+typedef struct qaws_exact_closest_point
+{
+	unsigned int curve;               /* QAWS_EXACT_CLOSEST_NONE without curves */
+	double t_lo, t_hi;                /* the nearest point's parameter (lo == hi: exact) */
+	double distance_lo, distance_hi;  /* its distance, world units */
+	int certified;                    /* the nearest point is proven unique */
+} qaws_exact_closest_point;
+
+qaws_status qaws_exact_curve_batch_closest(qaws_exact_closest_point* out_points, qaws_exact_batch_stats* out_stats,
+	double const* points, unsigned int point_count, qaws_exact_batch_desc const* desc);
+```
+
+For each of `point_count` query points (the curves' dimension, exact
+doubles, world units), the nearest point over `desc->curves` (`families` and
+`flags` are ignored).
+
+- On a span `C = X / W` the squared distance to `p = P / Q` is stationary at
+  the roots of the integer polynomial
+  `g(s) = sum_c (Q X_c - P_c W)(X_c' W - X_c W')` (degree `3n - 2`). Its
+  roots, isolated exactly, and the span ends are the candidates, each with
+  an enclosure of its distance (knots and the start of a closed curve count
+  once).
+- Spans come from one grid over their sound control boxes, nearest first,
+  while they can still win.
+- `certified = 1` when the winner's distance enclosure lies below every
+  other candidate's (overlapping root intervals are refined first).
+  Otherwise the nearest candidate is still reported with `certified = 0`: an
+  exact tie (the centre of a circle) or candidates closer than refinement
+  can separate. An uncertified answer does not change the status.
+- Parameter and distance enclosures are rounded outward.
+- `out_stats` (may be NULL): `span_count`, `candidate_count` (spans solved),
+  `hit_count`, `uncertified_count`.
+- Every output entry starts as `curve = QAWS_EXACT_CLOSEST_NONE`; with no
+  curves or no points the call returns `QAWS_STATUS_OK` with those entries.
+- Curves of different dimensions, a NULL curve: `QAWS_STATUS_INVALID_ARGUMENT`;
+  different exact spaces: `QAWS_STATUS_EXACT_INCOMPATIBLE_SPACE`.
+- Query points run in chunks of 4 on the executor.
+
+### Certified closest points on surfaces
+
+```c
+typedef struct qaws_exact_surface_closest_point
+{
+	unsigned int surface;             /* QAWS_EXACT_CLOSEST_NONE without surfaces */
+	double u_lo, u_hi, v_lo, v_hi;    /* the nearest point's parameters */
+	double distance_lo, distance_hi;  /* its distance, world units */
+	int certified;
+} qaws_exact_surface_closest_point;
+
+qaws_status qaws_exact_surface_batch_closest(qaws_exact_surface_closest_point* out_points, qaws_exact_batch_stats* out_stats,
+	double const* points, unsigned int point_count, qaws_exact_ssi_batch_desc const* desc);
+```
+
+For each 3D query point, the nearest point over `desc->surfaces`
+(`families` and `min_depth` are ignored). On a patch `S = X / W` the squared
+distance to `p = P / Q` is stationary where
+
+    G_u = sum_c (Q X_c - P_c W)(X_c,u W - X_c W_u) = 0
+    G_v = sum_c (Q X_c - P_c W)(X_c,v W - X_c W_v) = 0
+
+With `3w - 1 = 0` a certified 3D solver isolates the interior roots on boxes
+kept by a branch and bound on the distance; the patch edges, exact curves,
+add theirs and the corners (each edge and corner once over the surface).
+Certification, tie handling, enclosures, initial `QAWS_EXACT_CLOSEST_NONE`,
+statuses and executor chunks are as for curves. `out_stats`: `patch_count`,
+`candidate_count` (patches solved), `hit_count`, `uncertified_count`.
+Patches up to bicubic.
+
+## Intersection result types
+
+The header also declares the result vocabulary of certified intersections,
+Booleans and ray casts. qaws declares no function that fills these types;
+they are the shared format for intersection code built on the exact curves
+and surfaces. Enclosures are rounded outward; the true value is inside.
+
+```c
+typedef enum qaws_exact_hit_kind
+{
+	QAWS_EXACT_HIT_CROSSING = 0,   /* (t_lo, t_hi) holds exactly one transversal intersection */
+	QAWS_EXACT_HIT_POINT,          /* an intersection at t_lo == t_hi exactly (enclosed when not a double) */
+	QAWS_EXACT_HIT_OVERLAP         /* the curve lies in the line / plane on [t_lo, t_hi] */
+} qaws_exact_hit_kind;
+
+typedef struct qaws_exact_hit
+{
+	qaws_exact_hit_kind kind;
+	double t_lo, t_hi;   /* curve parameters */
+} qaws_exact_hit;
+
+typedef struct qaws_exact_pair
+{
+	qaws_exact_hit_kind kind;
+	double a_lo, a_hi;
+	double b_lo, b_hi;
+	unsigned int multiplicity;  /* 1 transversal, even a touch, 0 not determined */
+	int opposite;               /* OVERLAP only: b runs from b_hi to b_lo as a goes up */
+} qaws_exact_pair;
+
+typedef struct qaws_exact_batch_hit
+{
+	unsigned int curve_a;
+	unsigned int curve_b;
+	qaws_exact_pair pair;       /* a_* on curve_a, b_* on curve_b */
+} qaws_exact_batch_hit;
+```
+
+`qaws_exact_pair`: POINT has both parameters exact (`lo == hi`); CROSSING
+encloses one intersection; OVERLAP means the curves coincide over a's
+`[a_lo, a_hi]` and b's `[b_lo, b_hi]`.
+
+```c
+typedef struct qaws_exact_piece
+{
+	unsigned int region;    /* 0: a, 1: b */
+	double t0_lo, t0_hi;    /* where the piece starts along its traversal (lo == hi when exact) */
+	double t1_lo, t1_hi;    /* where it ends */
+	int reversed;           /* traversed against the curve's parameter */
+} qaws_exact_piece;
+
+typedef struct qaws_exact_loop
+{
+	unsigned int first, count;   /* pieces[first .. first + count - 1], each ending where the next starts */
+} qaws_exact_loop;
+```
+
+A 2D Boolean result: pieces of input boundary curves (region 0 or 1)
+between two parameters, grouped into loops.
+
+```c
+typedef struct qaws_exact_surface_hit
+{
+	qaws_exact_hit_kind kind;   /* POINT: u, v and t exact (lo == hi); CROSSING: enclosures */
+	double u_lo, u_hi;
+	double v_lo, v_hi;
+	double t_lo, t_hi;          /* x = p0 + t (p1 - p0) */
+} qaws_exact_surface_hit;
+
+typedef struct qaws_exact_curve_surface_hit
+{
+	double t_lo, t_hi;   /* curve parameter */
+	double u_lo, u_hi;
+	double v_lo, v_hi;
+} qaws_exact_curve_surface_hit;
+
+typedef struct qaws_exact_curve_surface_batch_hit
+{
+	unsigned int curve;
+	unsigned int surface;
+	qaws_exact_curve_surface_hit hit;
+} qaws_exact_curve_surface_batch_hit;
+```
+
+A line / surface hit and a curve / surface hit, with patch parameters and
+the line or curve parameter enclosed.
+
+```c
+typedef struct qaws_exact_ssi_point
+{
+	double u1_lo, u1_hi, v1_lo, v1_hi;   /* on surface a */
+	double u2_lo, u2_hi, v2_lo, v2_hi;   /* on surface b */
+} qaws_exact_ssi_point;
+
+typedef struct qaws_exact_ssi_branch
+{
+	unsigned int first, count;   /* points[first .. first + count - 1] */
+	int closed;                  /* the last point joins the first */
+} qaws_exact_ssi_branch;
+
+typedef struct qaws_exact_ssi_batch_branch
+{
+	unsigned int surface_a;
+	unsigned int surface_b;
+	qaws_exact_ssi_branch branch;   /* first indexes the shared point buffer */
+} qaws_exact_ssi_batch_branch;
+```
+
+A surface / surface intersection curve as branches of enclosed parameter
+pairs.
+
+```c
+typedef struct qaws_exact_ray_hit
+{
+	unsigned int surface;           /* QAWS_EXACT_CLOSEST_NONE: no hit */
+	qaws_exact_surface_hit hit;     /* u, v and t enclosures (t along p0 -> p1) */
+	int certified;                  /* the first hit (or the miss) is proven */
+} qaws_exact_ray_hit;
+```
+
+The first hit of a ray `x = p0 + t (p1 - p0)`, `t >= 0`, over a set of exact
+surfaces.

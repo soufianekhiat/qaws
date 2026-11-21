@@ -1,8 +1,8 @@
-# API Reference: qaws_trajectory.h
+# qaws_trajectory.h: time-keyed trajectories
 
-Trajectory curve creation.
-
----
+A piecewise cubic curve through keyed positions whose parameter is time: the curve is at each key's position at that
+key's time. Each name exists as `name_f32` and `name_f64` ([precision.md](precision.md)). Pairs with
+`QAWS_TRAVERSAL_MODE_TIME` ([traversal.md](traversal.md)).
 
 ## qaws_trajectory_desc
 
@@ -22,21 +22,19 @@ typedef struct qaws_trajectory_desc {
 } qaws_trajectory_desc;
 ```
 
-| Field | Description |
+| Member | Meaning |
 |---|---|
 | `dimension` | `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D` |
-| `degree` | Polynomial degree (typically 3) |
-| `key_positions` | Array of keyframe positions (`qaws_vec2*` or `qaws_vec3*`) |
-| `key_count` | Number of keyframes. Must be >= 2. |
-| `key_times` | Time value for each keyframe |
-| `key_time_count` | Must equal `key_count` |
-| `key_velocities` | Optional velocity constraints at keys (NULL if unused) |
-| `key_velocity_count` | Number of velocity constraints (0 if unused) |
-| `key_accelerations` | Optional acceleration constraints at keys (NULL if unused) |
-| `key_acceleration_count` | Number of acceleration constraints (0 if unused) |
-| `closed` | 0 for open, 1 for closed |
-
----
+| `degree` | must be 3 (cubic Hermite spans) |
+| `key_positions` | `key_count` positions, `dimension` scalars each, packed |
+| `key_count` | at least 2 |
+| `key_times` | one time per key, strictly increasing |
+| `key_time_count` | must equal `key_count` |
+| `key_velocities` | optional velocity (d position / d time) at each key, same layout as positions |
+| `key_velocity_count` | used only when it equals `key_count` (with `key_velocities` non-NULL); otherwise velocities are estimated from the keys |
+| `key_accelerations` | optional; copied and kept with the curve, not used to shape it |
+| `key_acceleration_count` | number of accelerations given (0: none) |
+| `closed` | non-zero marks the trajectory closed: reported by `qaws_curve_is_closed` and used when velocities are estimated; it adds no span |
 
 ## qaws_curve_create_trajectory
 
@@ -46,16 +44,19 @@ qaws_status qaws_curve_create_trajectory(
     qaws_trajectory_desc const* desc);
 ```
 
-Creates a time-keyed trajectory curve.
+Creates the curve: `key_count - 1` spans, span boundaries at the key times, parameter range
+[key_times[0], key_times[key_count - 1]]. With velocities given, each span is the cubic Hermite with those end
+velocities; without, the velocities are estimated by finite differences of the keys. C1 at the keys. Inputs are
+copied. Destroy the result with `qaws_curve_destroy` ([curve.md](curve.md)).
 
-**Parameters:**
-- `desc` -- Trajectory descriptor
-- `out_curve` -- Receives the created curve
+| Status | When |
+|---|---|
+| `QAWS_STATUS_OK` | created |
+| `QAWS_STATUS_INVALID_ARGUMENT` | `desc`, `out_curve`, `key_positions` or `key_times` NULL; fewer than 2 keys; `key_time_count != key_count`; a count too large to index |
+| `QAWS_STATUS_INVALID_DIMENSION` | dimension not 2D or 3D |
+| `QAWS_STATUS_INVALID_DEGREE` | degree not 3 |
+| `QAWS_STATUS_INVALID_PARAMETER_RANGE` | times not strictly increasing |
+| `QAWS_STATUS_ALLOCATION_FAILURE` | allocation failed |
 
-**Returns:** `QAWS_STATUS_OK` on success.
-
-**Notes:**
-- The parameter domain matches the time domain (from first key_time to last key_time).
-- Without velocity/acceleration constraints, the curve uses natural interpolation.
-- Works naturally with the traversal system in `QAWS_TRAVERSAL_MODE_TIME`.
-- Continuity: C1 at keyframe boundaries.
+`*out_curve` is set to NULL first. The allocator-taking form `qaws_curve_create_trajectory_ex` is declared in
+`qaws_alloc.h` ([alloc.md](alloc.md)).

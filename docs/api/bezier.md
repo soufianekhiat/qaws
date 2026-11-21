@@ -1,8 +1,7 @@
-# API Reference: qaws_bezier.h
+# qaws_bezier.h: Bezier curves
 
-Bezier curve creation.
-
----
+A single-span polynomial Bezier curve of any degree from 1 to 16. Each name exists as `name_f32` and `name_f64`
+([precision.md](precision.md)). For a stack-held Bezier with no allocation, see [inline.md](inline.md).
 
 ## qaws_bezier_desc
 
@@ -15,14 +14,12 @@ typedef struct qaws_bezier_desc {
 } qaws_bezier_desc;
 ```
 
-| Field | Description |
+| Member | Meaning |
 |---|---|
 | `dimension` | `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D` |
-| `degree` | Polynomial degree (1=linear, 2=quadratic, 3=cubic, ...) |
-| `control_points` | Pointer to array of `qaws_vec2` or `qaws_vec3` |
-| `control_point_count` | Number of control points. Must equal `degree + 1`. |
-
----
+| `degree` | 1 (linear) to `QAWS_CORE_MAX_DEGREE` (16) |
+| `control_points` | `control_point_count` points, `dimension` scalars each, packed (`qaws_vec2` / `qaws_vec3` array) |
+| `control_point_count` | must be `degree + 1` |
 
 ## qaws_curve_create_bezier
 
@@ -32,22 +29,17 @@ qaws_status qaws_curve_create_bezier(
     qaws_bezier_desc const* desc);
 ```
 
-Creates a single-span Bezier curve.
+Creates the curve. The control points are copied; the caller's array may be freed afterwards. Parameter range
+[0, 1], one span. Destroy the result with `qaws_curve_destroy` ([curve.md](curve.md)).
 
-**Parameters:**
-- `desc` -- Curve descriptor. Must not be NULL.
-- `out_curve` -- Receives the created curve. Set to NULL on error.
+| Status | When |
+|---|---|
+| `QAWS_STATUS_OK` | created |
+| `QAWS_STATUS_INVALID_ARGUMENT` | `desc`, `out_curve` or `control_points` NULL |
+| `QAWS_STATUS_INVALID_DIMENSION` | dimension not 2D or 3D |
+| `QAWS_STATUS_INVALID_DEGREE` | degree 0 or above 16 |
+| `QAWS_STATUS_INVALID_CONTROL_POINT_COUNT` | count not `degree + 1` |
+| `QAWS_STATUS_ALLOCATION_FAILURE` | allocation failed |
 
-**Returns:** `QAWS_STATUS_OK` on success.
-
-**Errors:**
-- `INVALID_ARGUMENT` -- NULL desc or out_curve, or NULL control_points
-- `INVALID_DIMENSION` -- dimension is not 2D or 3D
-- `INVALID_DEGREE` -- degree is 0
-- `INVALID_CONTROL_POINT_COUNT` -- count != degree + 1
-- `ALLOCATION_FAILURE` -- malloc failed
-
-**Notes:**
-- The descriptor data is copied. The caller may free `control_points` after creation.
-- Parameter range is [0, 1].
-- Span count is always 1.
+`*out_curve` is written only on success. The allocator-taking form `qaws_curve_create_bezier_ex` is declared in
+`qaws_alloc.h` ([alloc.md](alloc.md)).

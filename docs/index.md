@@ -1,79 +1,51 @@
 # Qaws Documentation
 
-**Qaws** (قوس) -- Dependency-free C11 curve evaluation and traversal library for 2D and 3D.
+**Qaws** (Arabic for "arc") is a dependency-free C11 geometry library for 2D and 3D: curves and surfaces,
+their evaluation, sampling, traversal and inspection, 2D regions and clipping, trimmed and subdivided
+surfaces, B-rep and shatter, an exact rational kernel, and exact differentiation of all of it.
 
-## Guides
+Two documentation sets:
 
-- [Overview](overview.md) -- What Qaws is, design principles, quick start
-- [Building](building.md) -- CMake and Sharpmake build instructions
-- [Integration](integration.md) -- Using Qaws without CMake: dropping the sources in, unity builds, the single-file amalgamation
-- [Curve Families](curve_families.md) -- All curve types with examples
-- [Surfaces](surfaces.md) -- Bezier, B-spline, NURBS, swept, ruled surfaces
-- [Evaluation](evaluation.md) -- Position and derivative evaluation
-- [Sampling](sampling.md) -- Generating point arrays from curves
-- [Traversal](traversal.md) -- Motion profiles, constant-speed, arc-length
-- [Inspection](inspection.md) -- Querying curve properties and analysis
-- [Differentiation](differentiation.md) -- Exact tangents, adjoints and second derivatives of evaluation, geometry, solves and operations
-- [Backends](backends.md) -- Multi-backend architecture (C, HLSL, GLSL, Halide)
-- [Error Handling](error_handling.md) -- Status codes and error patterns
+- Concepts and design (this folder): what the library models, how the parts fit, conventions and the
+  reasons behind them.
+- [API reference](api/index.md): one page per public header area, every function, type and flag.
 
-## Feature matrix
+## Getting started
 
-- [Capabilities](capabilities.md) -- What runs on which backend, and which test or check backs it
+- [Overview](overview.md) -- Scope, design principles, quick start, repository layout
+- [Building](building.md) -- Sharpmake (primary) and CMake builds, options
+- [Integration](integration.md) -- Using Qaws without a build system: sources, unity builds, the amalgamation
 
-## API reference
+## Geometry
 
-Per-header documentation with all function signatures and parameters:
+- [Curve families](curve_families.md) -- Every curve type, its parameters and continuity
+- [Surfaces](surfaces.md) -- Patches, swept and lofted surfaces, trims, T-splines, subdivision, offsets
+- [2D regions](regions_2d.md) -- Paths, fill rules, clipping and Boolean operations
+- [B-rep](brep.md) -- The boundary representation and how trimmed surfaces relate to it
+- [Shatter](shatter.md) -- Shatter and seams
 
-### Core
+## Using curves and surfaces
 
-- [qaws_types.h](api/types.md) -- Scalar, vector, enum, and struct definitions
-- [qaws_status.h](api/status.md) -- Error codes
-- [qaws_curve.h](api/curve.md) -- Curve lifecycle (destroy)
+- [Evaluation](evaluation.md) -- Position and derivatives, flags, prepared evaluation
+- [Sampling](sampling.md) -- Point arrays from curves and surfaces
+- [Traversal](traversal.md) -- Arc length, constant speed, motion profiles
+- [Inspection](inspection.md) -- Curvature, frames, bounds, closest points, intersections
+- [Operations](operations.md) -- Split, join, offset, conversion, fitting, import and export
+- [Views and batches](views_and_batches.md) -- Borrowed host arrays, their lifetime, batched evaluation
 
-### Evaluation, sampling, traversal, inspection
+## Robustness and exactness
 
-- [qaws_eval.h](api/eval.md) -- Evaluation functions
-- [qaws_sampling.h](api/sampling.md) -- Sampling functions
-- [qaws_traversal.h](api/traversal.md) -- Traversal functions
-- [qaws_inspect.h](api/inspect.md) -- Inspection and analysis functions
+- [Precision](precision.md) -- f32 and f64, the naming scheme, tolerances, the float robustness model
+- [Exact kernel](exact_kernel.md) -- Rational arithmetic, integer budgets, certified signs
+- [Differentiation](differentiation.md) -- Tangents, adjoints and second derivatives of evaluation, geometry, solves and operations
 
-### Curve creation
+## Runtime model
 
-- [qaws_bezier.h](api/bezier.md) -- Bezier creation
-- [qaws_hermite.h](api/hermite.md) -- Hermite creation
-- [qaws_catmull_rom.h](api/catmull_rom.md) -- Catmull-Rom creation
-- [qaws_bspline.h](api/bspline.md) -- B-Spline creation
-- [qaws_nurbs.h](api/nurbs.md) -- NURBS creation
-- [qaws_trajectory.h](api/trajectory.md) -- Trajectory creation
-- [qaws_yuksel.h](api/yuksel.md) -- Yuksel C2 spline creation
-- [qaws_rational_bezier.h](api/rational_bezier.md) -- Rational Bezier creation
-- [qaws_arc.h](api/arc.md) -- Circular and elliptical arc creation
-- [qaws_polynomial.h](api/polynomial.md) -- Polynomial curve creation
-- [qaws_clothoid.h](api/clothoid.md) -- Clothoid (Euler spiral) creation
-- [qaws_subdivision.h](api/subdivision.md) -- Subdivision curve creation
-- [qaws_composite.h](api/composite.md) -- Composite / piecewise curve creation
+- [Memory](memory.md) -- Allocators, arenas, ownership and destroy rules, heap-free curves
+- [Threading](threading.md) -- No threads of its own, the batch executor, what is safe to share, cancellation
+- [Error handling](error_handling.md) -- Status codes and error patterns
 
-### Operations, conversion, import/export
+## Backends and coverage
 
-- [qaws_operations.h](api/operations.md) -- Curve operations (split, join, offset, reparameterization)
-- [qaws_convert.h](api/convert.md) -- Conversion between curve types and degree manipulation
-- [qaws_export.h](api/export.md) -- Serialization, export, and curve fitting
-- [qaws_import.h](api/import.md) -- Deserialization / import from raw point data
-
-### Utilities
-
-- [qaws_alloc.h](api/alloc.md) -- Custom allocator support
-- [qaws_inline.h](api/inline.md) -- Stack-allocated inline curve initialization
-- [qaws_prepare.h](api/prepare.md) -- Precomputation / preparation utilities
-- [qaws_view.h](api/view.md) -- Borrowed curves and surfaces: host arrays (f32/f64, strided, planar), prepared evaluation, ranges, the lifetime contract
-
-### Differentiation
-
-- [qaws_diff*.h](api/diff.md) -- Fields, views, jets, tangents, adjoints, geometry, implicit operations, differential maps
-
-### Headers without dedicated doc pages yet
-
-The following APIs are implemented and available via their headers but do not have standalone documentation pages. See the header files in `src/qaws/` for signatures and usage.
-
-- `qaws_surface.h` -- Surface evaluation and types (see also `qaws_surface_types.h`, `qaws_surface_bezier.h`, `qaws_surface_bspline.h`, `qaws_surface_nurbs.h`, `qaws_surface_swept.h`, `qaws_surface_ruled.h`)
+- [Backends](backends.md) -- C runtime, portable core headers, HLSL, GLSL, Halide, SIMD
+- [Capabilities](capabilities.md) -- What runs on which backend, and which test backs it

@@ -1,8 +1,7 @@
-# API Reference: qaws_bspline.h
+# qaws_bspline.h: B-spline curves
 
-B-Spline curve creation.
-
----
+A non-rational B-spline of degree 1 to 31, with a given knot vector or a generated clamped uniform one. Each name
+exists as `name_f32` and `name_f64` ([precision.md](precision.md)).
 
 ## qaws_bspline_desc
 
@@ -19,49 +18,48 @@ typedef struct qaws_bspline_desc {
 } qaws_bspline_desc;
 ```
 
-| Field | Description |
+| Member | Meaning |
 |---|---|
 | `dimension` | `QAWS_DIMENSION_2D` or `QAWS_DIMENSION_3D` |
-| `degree` | Polynomial degree (commonly 3) |
-| `control_points` | Array of `qaws_vec2` or `qaws_vec3` |
-| `control_point_count` | Number of control points |
-| `knots` | Custom knot vector, or NULL for auto-generated |
-| `knot_count` | Number of knots (must be control_point_count + degree + 1 if provided) |
-| `is_uniform` | 1 for uniform clamped knots (auto-generates if knots is NULL) |
-| `is_closed` | 0 for open, 1 for closed |
+| `degree` | 1 to 31 |
+| `control_points` | `dimension` scalars per point, packed |
+| `control_point_count` | at least `degree + 1` |
+| `knots` | the knot vector, non-decreasing; NULL: a clamped uniform vector is generated |
+| `knot_count` | with `knots`: must be `control_point_count + degree + 1` |
+| `is_uniform` | non-zero with `knots` NULL asks for the generated vector (the same as `knots` NULL alone); ignored when `knots` is given |
+| `is_closed` | not read by creation; whether the curve is closed is reported from its geometry (`qaws_curve_is_closed`, [inspect.md](inspect.md)) |
 
----
-
-## qaws_curve_create_bspline
+## qaws_curve_create_bspline, qaws_curve_create_bspline_ex
 
 ```c
 qaws_status qaws_curve_create_bspline(
     qaws_curve** out_curve,
     qaws_bspline_desc const* desc);
+
+qaws_status qaws_curve_create_bspline_ex(
+    qaws_curve** out_curve,
+    qaws_bspline_desc const* desc,
+    qaws_allocator const* allocator);
 ```
 
-Creates a B-Spline curve.
+Creates the curve. The `_ex` form takes its memory from `allocator` (NULL: the default, see [alloc.md](alloc.md)).
 
-**Parameters:**
-- `desc` -- Curve descriptor
-- `out_curve` -- Receives the created curve
+- Parameter range [knots[degree], knots[control_point_count]]. Each non-empty knot interval in that range is one span.
+- The generated vector has `degree + 1` zeros, interior knots 1, 2, ..., and `degree + 1` copies of
+  `control_point_count - degree`: the curve starts and ends at the end control points. For degree 3 and 6 points it is
+  `{0, 0, 0, 0, 1, 2, 3, 3, 3, 3}`, range [0, 3], 3 spans.
+- Continuity at a simple interior knot is C(degree - 1).
+- Control points and knots are copied. Destroy the result with `qaws_curve_destroy` ([curve.md](curve.md)).
 
-**Returns:** `QAWS_STATUS_OK` on success.
+| Status | When |
+|---|---|
+| `QAWS_STATUS_OK` | created |
+| `QAWS_STATUS_INVALID_ARGUMENT` | `desc`, `out_curve` or `control_points` NULL; no non-empty span |
+| `QAWS_STATUS_INVALID_DIMENSION` | dimension not 2D or 3D |
+| `QAWS_STATUS_INVALID_DEGREE` | degree 0 or above 31 |
+| `QAWS_STATUS_INVALID_CONTROL_POINT_COUNT` | fewer than `degree + 1` points, or a count too large to index |
+| `QAWS_STATUS_INVALID_KNOT_COUNT` | `knot_count` not `control_point_count + degree + 1` (or 0) |
+| `QAWS_STATUS_INVALID_KNOT_VECTOR` | a knot smaller than the one before it |
+| `QAWS_STATUS_ALLOCATION_FAILURE` | allocation failed |
 
-**Errors:**
-- `INVALID_KNOT_COUNT` -- knot_count != control_point_count + degree + 1
-- `INVALID_KNOT_VECTOR` -- knots are not non-decreasing
-
-**Notes:**
-- When `is_uniform = 1` and `knots = NULL`, a clamped uniform knot vector is generated automatically. Clamped means the first and last knots have multiplicity degree+1, causing the curve to interpolate the first and last control points.
-- When `knots` is provided, it is used directly.
-- Continuity at internal knots: up to C(degree-1) for simple knots.
-- The parameter range spans the active portion of the knot vector.
-
-**Knot vector reference:**
-
-For a degree-3 B-Spline with 6 control points, a clamped uniform knot vector is:
-```
-{0, 0, 0, 0, 1, 2, 3, 3, 3, 3}
-```
-The active parameter range is [0, 3], with 3 spans.
+`*out_curve` is set to NULL first.

@@ -1,19 +1,21 @@
 # API Reference: qaws_diff*.h
 
-Differentiation of curves, surfaces, geometric quantities, implicit operations, geometry-building operations, integral functionals and inverse-CDF sampling.
+Differentiation of curves, surfaces, geometric quantities, implicit operations, geometry-building operations and inverse-CDF sampling. All headers are included by `qaws.h`. The concepts are explained in [differentiation](../differentiation.md).
 
-Headers: `qaws_diff_types.h`, `qaws_diff.h`, `qaws_diff_geometry.h`, `qaws_diff_ops.h`, `qaws_diff_map.h`, `qaws_diff_sampling.h`.
+Every name on this page exists as `name_f32` and `name_f64`; the unsuffixed name maps to the build's default precision (see [precision](precision.md)).
 
-- [Types](#types)
-- [Context and reports](#context-and-reports)
-- [Views and parameter keys](#views-and-parameter-keys)
-- [Curves](#curves)
-- [Surfaces](#surfaces)
-- [Geometry](#geometry)
-- [Implicit operations](#implicit-operations)
-- [Differential maps](#differential-maps)
-- [Integral functionals](#integral-functionals)
-- [Inverse-CDF sampling](#inverse-cdf-sampling)
+| Section | Header |
+|---|---|
+| [Overview](#overview) | all |
+| [Types](#types) | `qaws_diff_types.h` |
+| [Context and reports](#context-and-reports) | types in `qaws_diff_types.h`, functions in `qaws_diff.h` |
+| [Views and parameter keys](#views-and-parameter-keys) | `qaws_diff.h` |
+| [Curves](#curves) | `qaws_diff.h` |
+| [Surfaces](#surfaces) | `qaws_diff.h` |
+| [Geometry](#geometry) | `qaws_diff_geometry.h` |
+| [Implicit operations](#implicit-operations) | `qaws_diff_ops.h` |
+| [Differential maps](#differential-maps) | `qaws_diff_map.h` |
+| [Inverse-CDF sampling](#inverse-cdf-sampling) | `qaws_diff_sampling.h` |
 
 ---
 
@@ -154,7 +156,7 @@ typedef enum qaws_diff_capability
 } qaws_diff_capability;
 ```
 
-Capability bits reported per object (`qaws_curve_get_diff_capabilities`, `qaws_surface_get_diff_capabilities`) and per field (`qaws_field_desc::capabilities`).
+Capability bits reported per object (`qaws_curve_get_diff_capabilities`, `qaws_surface_get_diff_capabilities`) and per field (`qaws_field_desc::capabilities`). `QAWS_CAP_DIRECT_HVP` is part of the enum but no object family reports it; Hessian-vector products are provided by the sampling functions (`qaws_curve_cdf_sample_hvp`, `qaws_surface_cdf_sample_hvp`).
 
 ### qaws_diff_freeze
 
@@ -1592,7 +1594,7 @@ typedef enum qaws_diff_map_kind
 } qaws_diff_map_kind;
 ```
 
-Opaque map handle and its representation. All operations in this header currently return `QAWS_DIFF_MAP_LINEAR_SPARSE` maps.
+Opaque map handle and its representation. Every operation in this header returns a `QAWS_DIFF_MAP_LINEAR_SPARSE` map.
 
 ### qaws_diff_map_entry
 
@@ -1789,9 +1791,7 @@ The derivative follows every smooth stage of the fit: chord-length parameters (w
 
 **Returns:** `QAWS_STATUS_OK`; the status of `qaws_curve_fit_bspline`; `QAWS_STATUS_UNSUPPORTED_OPERATION` if `degree + 1 > QAWS_DIFF_MAX_SUPPORT`; `QAWS_STATUS_NUMERICAL_FAILURE` if the normal equations are not positive definite; `QAWS_STATUS_INVALID_ARGUMENT` on NULL `desc` or `out_curve`.
 
----
-
-### qaws_curve_offset_3d_diff
+#### qaws_curve_offset_3d_diff
 
 ```c
 qaws_status qaws_curve_offset_3d_diff(
@@ -1898,7 +1898,9 @@ qaws_status qaws_curve_cdf_sample_tangent(
 
 Solves every target and writes the samples (`out_value`), their first (`out_tangent`) and second (`out_tangent2`) directional derivatives along `param_tangent` and the per-target distance rates `distance_tangent` and `distance_tangent2` (first and second derivative of the target distance along the same path), and the total measure. Any of the rates, `param_tangent` and the outputs may be NULL.
 
-**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on a NULL curve, NULL targets or an invalid measure; `QAWS_STATUS_UNSUPPORTED_OPERATION` for a knot view or when second order is asked of a family without `QAWS_CAP_TANGENT2`.
+A `QAWS_FIELD_KNOTS` view is accepted when the curve differentiates its knots (B-spline, NURBS); other curves ignore it.
+
+**Returns:** `QAWS_STATUS_OK`; `QAWS_STATUS_INVALID_ARGUMENT` on a NULL curve, NULL targets with a non-zero count or an invalid measure; `QAWS_STATUS_ALLOCATION_FAILURE`; the status of the curve evaluation otherwise (`QAWS_STATUS_UNSUPPORTED_OPERATION` when second order is asked of a family without `QAWS_CAP_TANGENT2`).
 
 ### qaws_curve_cdf_sample_adjoint
 
@@ -1965,22 +1967,46 @@ typedef struct qaws_surface_cdf_sample
 } qaws_surface_cdf_sample;
 
 qaws_status qaws_surface_cdf_sample_tangent(
-	qaws_surface_cdf_sample* out_value, qaws_surface_cdf_sample* out_tangent, qaws_surface_cdf_sample* out_tangent2,
-	qaws_scalar* out_total, qaws_surface const* surface, qaws_scalar const* xi,
-	qaws_scalar const* xi_tangent, qaws_diff_views const* param_tangent, unsigned int count,
-	qaws_sample_measure_desc const* measure, unsigned int cells,
-	unsigned int quadrature, qaws_diff_context const* ctx);
+	qaws_surface_cdf_sample* out_value,
+	qaws_surface_cdf_sample* out_tangent,
+	qaws_surface_cdf_sample* out_tangent2,
+	qaws_scalar* out_total,
+	qaws_surface const* surface,
+	qaws_scalar const* xi,
+	qaws_scalar const* xi_tangent,
+	qaws_diff_views const* param_tangent,
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int cells,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_cdf_sample_adjoint(
-	qaws_diff_views* param_adjoint, qaws_scalar* xi_adjoint, qaws_surface const* surface,
-	qaws_scalar const* xi, qaws_surface_cdf_sample const* adjoint, unsigned int count, qaws_sample_measure_desc const* measure,
-	unsigned int cells, unsigned int quadrature, qaws_diff_context const* ctx);
+	qaws_diff_views* param_adjoint,
+	qaws_scalar* xi_adjoint,
+	qaws_surface const* surface,
+	qaws_scalar const* xi,
+	qaws_surface_cdf_sample const* adjoint,
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int cells,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 
 qaws_status qaws_surface_cdf_sample_hvp(
-	qaws_diff_views* out_hv, qaws_surface const* surface, qaws_scalar const* xi,
-	qaws_surface_cdf_sample const* adjoint, qaws_diff_views const* direction, unsigned int count, qaws_sample_measure_desc const* measure,
-	unsigned int cells, unsigned int quadrature, qaws_diff_context const* ctx);
+	qaws_diff_views* out_hv,
+	qaws_surface const* surface,
+	qaws_scalar const* xi,
+	qaws_surface_cdf_sample const* adjoint,
+	qaws_diff_views const* direction,
+	unsigned int count,
+	qaws_sample_measure_desc const* measure,
+	unsigned int cells,
+	unsigned int quadrature,
+	qaws_diff_context const* ctx);
 ```
+
+`xi` holds 2 scalars per point; `xi_tangent` and `xi_adjoint` 2 per point (each may be NULL). `out_tangent`, `out_tangent2` and `out_total` may be NULL; `out_total` receives the total measure. The adjoint accumulates (`+=`) into `param_adjoint` and `xi_adjoint`; the HVP accumulates `H * direction` for the top-level fields present in `out_hv`, `H` the Hessian of `sum_i (u_bar_i u_i + v_bar_i v_i + p_bar_i . p_i)`.
 
 Warps points `xi` of the unit square (stratified, blue noise, low discrepancy...) onto a surface by the inverse CDFs of the measure `w = rho(S) |S_u x S_v|` (`QAWS_MEASURE_AREA`, `QAWS_MEASURE_DENSITY`, or `QAWS_MEASURE_CURVATURE` with `rho = sqrt(floor^2 + k1^2 + k2^2)` from the principal curvatures, `k1^2 + k2^2 = 4 H^2 - 2 K`; its rates read the third and, at second order, the fourth derivatives of the patch): `u` solves the marginal `A(u) = xi_u A_total`, `v` the conditional `B(v; u) = xi_v B(v1; u)`, so samples follow the measure and keep the stratification of `xi`. The integrals use a grid of `cells x cells` cells (0 = 6) with `quadrature` Gauss points per cell and direction (0 = 8).
 
