@@ -30,7 +30,11 @@ Each edge has two sides:
 
 `qaws_brep_add_face` refuses (`INVALID_ARGUMENT`) a face whose edge side is already taken, so an edge never has more
 than two faces. An edge with one face is a boundary edge. These two sides are what the header calls the half-edges of
-the edge. No query takes a half-edge id.
+the edge: half-edge `2e` is edge `e`'s use on its left face (from `v_start` to `v_end`), `2e + 1` its use on its right
+face (from `v_end` to `v_start`). `qaws_brep_get_face_halfedge` gives a face's first half-edge and
+`qaws_brep_get_halfedge` its face, next and previous half-edges in the face's edge list (its loop when the edges were
+given in loop order), twin, origin and target, so a loop or the faces around a vertex can be walked without searching
+the edge lists.
 
 ### Building a shell
 

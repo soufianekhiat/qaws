@@ -39,8 +39,10 @@ typedef struct qaws_brep_edge_desc {
 } qaws_brep_edge_desc;
 ```
 
-Ids are indices in creation order, starting at 0. `qaws_brep_halfedge_id`
-is declared for half-edge handles; no function in this header takes one.
+Ids are indices in creation order, starting at 0. Half-edge `2e` is edge
+`e`'s use on its left face (orientation +1, from `v_start` to `v_end`) and
+`2e + 1` its use on its right face (orientation -1, from `v_end` to
+`v_start`).
 
 ### qaws_brep_validation_flags
 
@@ -117,6 +119,35 @@ qaws_status qaws_brep_get_face_edges(qaws_brep_edge_id* out_edges, unsigned int*
 - Statuses: `QAWS_STATUS_INVALID_ARGUMENT` on a NULL pointer,
   `QAWS_STATUS_OUT_OF_RANGE` for an unknown id,
   `QAWS_STATUS_BUFFER_TOO_SMALL` when the list does not fit `capacity`.
+
+## Half-edges
+
+```c
+typedef struct qaws_brep_halfedge_info {
+	qaws_brep_edge_id edge;         /* h / 2 */
+	qaws_brep_face_id face;
+	qaws_brep_halfedge_id next;     /* the next in the face's edge list */
+	qaws_brep_halfedge_id prev;
+	qaws_brep_halfedge_id twin;
+	qaws_brep_vertex_id origin;     /* v_start for 2e, v_end for 2e + 1 */
+	qaws_brep_vertex_id target;
+} qaws_brep_halfedge_info;
+
+qaws_status qaws_brep_get_face_halfedge(qaws_brep_halfedge_id* out_halfedge, qaws_brep_shell const* shell,
+	qaws_brep_face_id id);
+qaws_status qaws_brep_get_halfedge(qaws_brep_halfedge_info* out_info, qaws_brep_shell const* shell,
+	qaws_brep_halfedge_id h);
+```
+
+- `qaws_brep_get_face_halfedge`: the half-edge of the face's first edge, as given to `qaws_brep_add_face`;
+  `QAWS_BREP_INVALID_ID` for a face without edges.
+- `qaws_brep_get_halfedge`: a half-edge no face uses has `face`, `next`, `prev` and `twin` `QAWS_BREP_INVALID_ID`;
+  `twin` is `h ^ 1` when a face uses the other side, else `QAWS_BREP_INVALID_ID` (a boundary edge).
+- `next` and `prev` follow the face's edge list as given to `qaws_brep_add_face` (cyclically), which is its loop when
+  the edges were given in loop order (the shell does not check that they chain). Walking a loop: `next` from the face's
+  half-edge until it comes back. Around a vertex of chained loops: `twin` then `next`.
+- Statuses: `QAWS_STATUS_INVALID_ARGUMENT` on a NULL pointer, `QAWS_STATUS_OUT_OF_RANGE` for a face past the count or
+  `h >= 2 *` the edge count.
 
 ## Adjacency queries
 

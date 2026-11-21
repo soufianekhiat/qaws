@@ -369,6 +369,60 @@ qaws_status qaws_brep_get_edge_faces(
 	return QAWS_STATUS_OK;
 }
 
+qaws_status qaws_brep_get_face_halfedge(
+	qaws_brep_halfedge_id* out_halfedge,
+	qaws_brep_shell const* shell,
+	qaws_brep_face_id id)
+{
+	brep_face const* f;
+	if (!shell || !out_halfedge)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (id >= shell->face_count)
+		return QAWS_STATUS_OUT_OF_RANGE;
+	f = &shell->faces[id];
+	*out_halfedge = f->edge_count ? 2 * f->edge_ids[0] + (f->edge_orientations[0] == -1) : QAWS_BREP_INVALID_ID;
+	return QAWS_STATUS_OK;
+}
+
+qaws_status qaws_brep_get_halfedge(
+	qaws_brep_halfedge_info* out_info,
+	qaws_brep_shell const* shell,
+	qaws_brep_halfedge_id h)
+{
+	brep_edge const* e;
+	qaws_brep_face_id face;
+	unsigned int j;
+	int ori;
+	if (!shell || !out_info)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	if (h / 2 >= shell->edge_count)
+		return QAWS_STATUS_OUT_OF_RANGE;
+	e = &shell->edges[h / 2];
+	ori = h & 1 ? -1 : 1;
+	face = h & 1 ? e->face_right : e->face_left;
+	out_info->edge = h / 2;
+	out_info->face = face;
+	out_info->next = out_info->prev = out_info->twin = QAWS_BREP_INVALID_ID;
+	out_info->origin = h & 1 ? e->v_end : e->v_start;
+	out_info->target = h & 1 ? e->v_start : e->v_end;
+	if (face == QAWS_BREP_INVALID_ID)
+		return QAWS_STATUS_OK;
+	if ((h & 1 ? e->face_left : e->face_right) != QAWS_BREP_INVALID_ID)
+		out_info->twin = h ^ 1u;
+	{
+		brep_face const* f = &shell->faces[face];
+		for (j = 0; j < f->edge_count; j++)
+			if (f->edge_ids[j] == h / 2 && f->edge_orientations[j] == ori)
+			{
+				unsigned int n = j + 1 < f->edge_count ? j + 1 : 0, p = j ? j - 1 : f->edge_count - 1;
+				out_info->next = 2 * f->edge_ids[n] + (f->edge_orientations[n] == -1);
+				out_info->prev = 2 * f->edge_ids[p] + (f->edge_orientations[p] == -1);
+				break;
+			}
+	}
+	return QAWS_STATUS_OK;
+}
+
 qaws_status qaws_brep_get_face_edges(
 	qaws_brep_edge_id* out_edges,
 	unsigned int* out_count,

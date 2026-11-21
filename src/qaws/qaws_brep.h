@@ -27,9 +27,11 @@
    Vertices are shared between edges.
 
    The topology uses a half-edge data structure:
-   - Each edge has two half-edges, one for each adjacent face.
+   - Each edge e has two half-edges: 2e, its use on its left face (the face
+     that lists it with orientation +1, from v_start to v_end), and 2e + 1,
+     its use on its right face (orientation -1, from v_end to v_start).
    - Each half-edge knows its face, next/prev half-edges in the face loop,
-     and its twin half-edge on the adjacent face.
+     and its twin half-edge on the adjacent face (qaws_brep_get_halfedge).
 
    Surfaces and curves are borrowed (not owned by the shell). */
 
@@ -114,6 +116,33 @@ qaws_status qaws_brep_get_face_edges(
 	qaws_brep_shell const* shell,
 	unsigned int capacity,
 	qaws_brep_face_id id);
+
+/* A half-edge's neighbours. face, next and prev are QAWS_BREP_INVALID_ID
+   when no face uses the half-edge; twin is h ^ 1 when a face uses it, else
+   QAWS_BREP_INVALID_ID. */
+typedef struct qaws_brep_halfedge_info
+{
+	qaws_brep_edge_id edge;         /* h / 2 */
+	qaws_brep_face_id face;
+	qaws_brep_halfedge_id next;     /* the next in the face's edge list (its loop when the edges were given in order) */
+	qaws_brep_halfedge_id prev;
+	qaws_brep_halfedge_id twin;
+	qaws_brep_vertex_id origin;     /* where it starts (v_start for 2e, v_end for 2e + 1) */
+	qaws_brep_vertex_id target;
+} qaws_brep_halfedge_info;
+
+/* the first half-edge of a face's loop (QAWS_BREP_INVALID_ID for a face
+   without edges); OUT_OF_RANGE for a face past the count */
+qaws_status qaws_brep_get_face_halfedge(
+	qaws_brep_halfedge_id* out_halfedge,
+	qaws_brep_shell const* shell,
+	qaws_brep_face_id id);
+
+/* OUT_OF_RANGE for h >= 2 * the edge count */
+qaws_status qaws_brep_get_halfedge(
+	qaws_brep_halfedge_info* out_info,
+	qaws_brep_shell const* shell,
+	qaws_brep_halfedge_id h);
 
 /* Adjacency queries */
 qaws_status qaws_brep_get_vertex_edges(

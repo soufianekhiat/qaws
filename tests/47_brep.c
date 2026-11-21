@@ -202,6 +202,40 @@ static void test_brep_box(void)
 		printf("    Edge 0 faces: f%u, f%u\n", fl, fr);
 	}
 
+	/* Half-edges: each face's list closes after its 4 edges, prev undoes next; on the closed box every half-edge has a twin
+	   on another face, running the other way; on the faces given in loop order (bottom, top) next starts where h ends */
+	{
+		unsigned int f, k, bad = 0, walked = 0;
+		for (f = 0; f < 6; f++)
+		{
+			qaws_brep_halfedge_id h0 = QAWS_BREP_INVALID_ID, h;
+			qaws_brep_halfedge_info a, b, t;
+			if (qaws_brep_get_face_halfedge(&h0, shell, fids[f]) != QAWS_STATUS_OK || h0 == QAWS_BREP_INVALID_ID)
+			{
+				bad++;
+				continue;
+			}
+			h = h0;
+			for (k = 0; k < 4; k++, walked++)
+			{
+				if (qaws_brep_get_halfedge(&a, shell, h) != QAWS_STATUS_OK || a.face != fids[f] || a.edge != h / 2
+					|| qaws_brep_get_halfedge(&b, shell, a.next) != QAWS_STATUS_OK || (f < 2 && b.origin != a.target) || b.prev != h
+					|| a.twin == QAWS_BREP_INVALID_ID || qaws_brep_get_halfedge(&t, shell, a.twin) != QAWS_STATUS_OK || t.face == a.face
+					|| t.origin != a.target || t.target != a.origin || t.twin != h)
+					bad++;
+				h = a.next;
+			}
+			if (h != h0)
+				bad++;
+		}
+		printf("    Half-edges walked: %u (24), %u wrong\n", walked, bad);
+		TEST_ASSERT(walked == 24 && bad == 0, "half-edge loops, twins, next and prev");
+		{
+			qaws_brep_halfedge_info info;
+			TEST_ASSERT(qaws_brep_get_halfedge(&info, shell, 2 * 12) == QAWS_STATUS_OUT_OF_RANGE, "half-edge past the edges: OUT_OF_RANGE");
+		}
+	}
+
 	/* Cleanup */
 	qaws_brep_destroy(shell);
 	for (i = 0; i < 6; i++)
