@@ -15,8 +15,8 @@ typedef struct qaws_transform
 ```
 
 - A zeroed `qaws_transform` is the identity.
-- A negative scale component mirrors: with an odd number of them the object is turned inside out, so windings and
-  signed distances computed on it change sign.
+- A negative scale component mirrors: the object's mirror image, its inside kept inside (a placed solid stays a solid,
+  whatever the parity of its negative components).
 - In 2D (x, y) the rotation must turn about z (its x and y components 0); the third components of `scale` and
   `translation` are ignored.
 

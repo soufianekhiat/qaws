@@ -24,8 +24,8 @@
  * placed object map into its frame without rebuilding what was built there.
  *
  *   rotation     a quaternion (w, x, y, z), normalized where used; all zero: none
- *   scale        per axis; a component 0 counts as 1; negative mirrors (the object turned inside out: windings and
- *                signed distances change sign when an odd number of components are negative)
+ *   scale        per axis; a component 0 counts as 1; negative mirrors (the object's mirror image, its inside kept
+ *                inside: a placed solid stays a solid)
  *   translation  added last
  *
  * A zeroed qaws_transform is the identity. In 2D (x, y) the rotation must turn about z (its x and y components 0) and
