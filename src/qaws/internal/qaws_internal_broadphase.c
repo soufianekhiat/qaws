@@ -549,7 +549,9 @@ typedef struct bp_key
 static int bp_cmp_key(void const* a, void const* b)
 {
 	double x = ((bp_key const*)a)->lo, y = ((bp_key const*)b)->lo;
-	return x < y ? -1 : (x > y ? 1 : 0);
+	unsigned int i = ((bp_key const*)a)->i, j = ((bp_key const*)b)->i;
+	/* ties broken by the box: qsort slows to quadratic on many equal keys (collinear edges) */
+	return x < y ? -1 : (x > y ? 1 : (i < j ? -1 : (i > j ? 1 : 0)));
 }
 
 /* the axis with the largest extent of the bounded boxes */
