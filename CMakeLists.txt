@@ -80,6 +80,7 @@ set(QAWS_SOURCES
   src/qaws/qaws_path.c
   src/qaws/qaws_clip.c
 src/qaws/qaws_motion.c
+src/qaws/qaws_transform.c
   src/qaws/qaws_convert.c
   src/qaws/qaws_export.c
   src/qaws/qaws_import.c
@@ -565,6 +566,7 @@ if(QAWS_INSTALL)
       src/qaws/qaws_prepare.h
       src/qaws/qaws_exact.h
       src/qaws/qaws_motion.h
+      src/qaws/qaws_transform.h
       src/qaws/qaws_hlsl.h
       src/qaws/qaws_glsl.h
       src/qaws/qaws_halide.h

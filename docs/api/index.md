@@ -48,6 +48,7 @@ For concepts and design, start at [../index.md](../index.md).
 | [sampling.md](sampling.md) | `qaws_sampling.h` |
 | [traversal.md](traversal.md) | `qaws_traversal.h` |
 | [motion.md](motion.md) | `qaws_motion.h` |
+| [transform.md](transform.md) | `qaws_transform.h` |
 | [inspect.md](inspect.md) | `qaws_inspect.h` |
 
 ## Views and batches

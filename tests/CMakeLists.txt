@@ -80,6 +80,7 @@ add_executable(
 157_curve_enclose.c
 179_motion.c
 180_progress.c
+181_transform.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

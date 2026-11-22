@@ -75,6 +75,7 @@
 #include "qaws_exact.h"
 #include "qaws_batch_executor.h"
 #include "qaws_motion.h"
+#include "qaws_transform.h"
 #include "qaws_alloc.h"
 #include "qaws_inline.h"
 #include "qaws_diff.h"
