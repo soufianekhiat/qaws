@@ -84,6 +84,15 @@ unsigned int qaws_internal_find_knot_span(
    0 where this does not apply (a degree past 5, no SIMD for the precision). t holds that many parameters, 32-byte
    aligned; out_ders[(d * (degree + 1) + j) * QAWS_INTERNAL_BASIS_LANES_MAX + i], 32-byte aligned. */
 #define QAWS_INTERNAL_BASIS_LANES_MAX 8
+
+/* a static function inlined wherever it is called (the evaluators' sums: one call with a unit stride, one per lane) */
+#if defined(_MSC_VER)
+# define QAWS_INTERNAL_FORCE_INLINE static __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+# define QAWS_INTERNAL_FORCE_INLINE static inline __attribute__((always_inline))
+#else
+# define QAWS_INTERNAL_FORCE_INLINE static inline
+#endif
 unsigned int qaws_internal_bspline_basis_lanes(unsigned int degree);
 void qaws_internal_bspline_basis_derivs_lanes(
 	qaws_scalar* out_ders,

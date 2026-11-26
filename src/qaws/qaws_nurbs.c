@@ -61,7 +61,7 @@ static int nurbs_compute_span_boundaries(
 
 /* the sums of a span and the quotient: the basis functions and derivatives ders ((max_deriv + 1) rows of degree + 1,
    es scalars apart) times the weighted control points of knot span knot_span */
-static qaws_status nurbs_sum_2d(
+QAWS_INTERNAL_FORCE_INLINE qaws_status nurbs_sum_2d(
 	qaws_nurbs_impl const *impl,
 	unsigned int degree,
 	unsigned int knot_span,
@@ -193,7 +193,7 @@ static qaws_status nurbs_eval_span_2d(
 
 /* the sums of a span and the quotient: the basis functions and derivatives ders ((max_deriv + 1) rows of degree + 1,
    es scalars apart) times the weighted control points of knot span knot_span */
-static qaws_status nurbs_sum_3d(
+QAWS_INTERNAL_FORCE_INLINE qaws_status nurbs_sum_3d(
 	qaws_nurbs_impl const *impl,
 	unsigned int degree,
 	unsigned int knot_span,

@@ -59,7 +59,7 @@ static qaws_status generate_uniform_knots(
 
 /* the sums of a span: the basis functions and derivatives ders_buf ((max_deriv_order + 1) rows of degree + 1, es
    scalars apart) times the control points of knot span knot_span */
-static qaws_status bspline_sum_2d(
+QAWS_INTERNAL_FORCE_INLINE qaws_status bspline_sum_2d(
 	qaws_bspline_impl const *impl,
 	unsigned int degree,
 	unsigned int knot_span,
@@ -190,7 +190,7 @@ static qaws_status bspline_eval_span_2d(
 
 /* the sums of a span: the basis functions and derivatives ders_buf ((max_deriv_order + 1) rows of degree + 1, es
    scalars apart) times the control points of knot span knot_span */
-static qaws_status bspline_sum_3d(
+QAWS_INTERNAL_FORCE_INLINE qaws_status bspline_sum_3d(
 	qaws_bspline_impl const *impl,
 	unsigned int degree,
 	unsigned int knot_span,

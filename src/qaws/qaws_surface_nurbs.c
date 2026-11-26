@@ -11,7 +11,7 @@
 
 /* the tensor sums and the quotient: the u and v basis functions and derivatives (rows of degree + 1, u_es and v_es
    scalars apart) times the weighted control points of knot spans u_span and v_span */
-static qaws_status nurbs_surface_sum(
+QAWS_INTERNAL_FORCE_INLINE qaws_status nurbs_surface_sum(
 	qaws_surface_nurbs_impl const* impl,
 	unsigned int ud,
 	unsigned int vd,

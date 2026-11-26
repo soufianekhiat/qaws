@@ -11,7 +11,7 @@
 
 /* the tensor sums: the u and v basis functions and derivatives (rows of degree + 1, u_es and v_es scalars apart) times
    the control points of knot spans u_span and v_span */
-static qaws_status bspline_surface_sum(
+QAWS_INTERNAL_FORCE_INLINE qaws_status bspline_surface_sum(
 	qaws_surface_bspline_impl const* impl,
 	unsigned int ud,
 	unsigned int vd,
