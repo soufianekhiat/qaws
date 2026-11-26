@@ -1122,10 +1122,56 @@ static double pt_perp2(qaws_scalar const* p, qaws_scalar const* a, qaws_scalar c
 	return cr * cr / l2;
 }
 
+/* the min-heap of the points by (distance, index), a NaN distance last: heap[] holds point indices, at[] each
+   point's slot */
+static int pt_heap_less(double const* dist, unsigned int a, unsigned int b)
+{
+	double x = dist[a], y = dist[b];
+	if (x != x || y != y)
+		return y != y && (x == x || a < b);
+	return x < y || (x == y && a < b);
+}
+
+static void pt_heap_up(unsigned int* heap, unsigned int* at, double const* dist, unsigned int k)
+{
+	unsigned int v = heap[k];
+	while (k > 0)
+	{
+		unsigned int p = (k - 1) / 2;
+		if (!pt_heap_less(dist, v, heap[p]))
+			break;
+		heap[k] = heap[p];
+		at[heap[k]] = k;
+		k = p;
+	}
+	heap[k] = v;
+	at[v] = k;
+}
+
+static void pt_heap_down(unsigned int* heap, unsigned int* at, double const* dist, unsigned int size, unsigned int k)
+{
+	unsigned int v = heap[k];
+	for (;;)
+	{
+		unsigned int c = 2 * k + 1;
+		if (c >= size)
+			break;
+		if (c + 1 < size && pt_heap_less(dist, heap[c + 1], heap[c]))
+			c++;
+		if (!pt_heap_less(dist, heap[c], v))
+			break;
+		heap[k] = heap[c];
+		at[heap[k]] = k;
+		k = c;
+	}
+	heap[k] = v;
+	at[v] = k;
+}
+
 qaws_status qaws_polyline_simplify_2d(qaws_scalar* out, unsigned int* out_count, qaws_scalar const* points, unsigned int count,
 	int closed, qaws_scalar epsilon)
 {
-	unsigned int *prev, *next, i, alive, n = count;
+	unsigned int *prev, *next, *heap, *at, i, alive, size, n = count;
 	unsigned char* gone;
 	double *dist, eps2 = (double)epsilon * epsilon;
 	if ((!points && count) || !out || !out_count)
@@ -1136,7 +1182,7 @@ qaws_status qaws_polyline_simplify_2d(qaws_scalar* out, unsigned int* out_count,
 		*out_count = count;
 		return QAWS_STATUS_OK;
 	}
-	prev = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 2, n));
+	prev = (unsigned int*)qaws_internal_malloc(qaws_internal_mul3(sizeof(unsigned int), 4, n));
 	dist = (double*)qaws_internal_malloc(qaws_internal_mul2(sizeof(double), n));
 	gone = (unsigned char*)qaws_internal_zalloc(n, 1);
 	if (!prev || !dist || !gone)
@@ -1145,6 +1191,8 @@ qaws_status qaws_polyline_simplify_2d(qaws_scalar* out, unsigned int* out_count,
 		return QAWS_STATUS_ALLOCATION_FAILURE;
 	}
 	next = prev + n;
+	heap = next + n;
+	at = heap + n;
 	for (i = 0; i < n; i++)
 	{
 		prev[i] = (i + n - 1) % n;
@@ -1154,33 +1202,41 @@ qaws_status qaws_polyline_simplify_2d(qaws_scalar* out, unsigned int* out_count,
 		dist[i] = (!closed && (i == 0 || i == n - 1)) ? 1e300
 			: pt_perp2(&points[2 * i], &points[2 * prev[i]], &points[2 * next[i]]);
 	alive = n;
-	/* remove the nearest point while it is within epsilon (n^2, as Clipper's
-	   result does not depend on the order of ties) */
+	for (i = 0; i < n; i++)
+		heap[i] = i, at[i] = i;
+	for (i = n / 2; i-- > 0;)
+		pt_heap_down(heap, at, dist, n, i);
+	size = n;
+	/* remove the nearest point (ties: the lowest index) while it is within epsilon */
 	while (alive > (closed ? 3u : 2u))
 	{
-		unsigned int best = n;
-		double bd = eps2;
-		for (i = 0; i < n; i++)
-			if (!gone[i] && dist[i] <= bd)
-			{
-				if (best == n || dist[i] < bd)
-				{
-					best = i;
-					bd = dist[i];
-				}
-			}
-		if (best == n)
+		unsigned int best = heap[0];
+		if (!(dist[best] <= eps2))
 			break;
 		gone[best] = 1;
 		alive--;
+		heap[0] = heap[--size];
+		at[heap[0]] = 0;
+		if (size)
+			pt_heap_down(heap, at, dist, size, 0);
 		next[prev[best]] = next[best];
 		prev[next[best]] = prev[best];
 		{
-			unsigned int a = prev[best], b = next[best];
+			unsigned int a = prev[best], b = next[best], k;
 			if (closed || a != 0)
+			{
 				dist[a] = pt_perp2(&points[2 * a], &points[2 * prev[a]], &points[2 * next[a]]);
+				k = at[a];
+				pt_heap_up(heap, at, dist, k);
+				pt_heap_down(heap, at, dist, size, at[a]);
+			}
 			if (closed || b != n - 1)
+			{
 				dist[b] = pt_perp2(&points[2 * b], &points[2 * prev[b]], &points[2 * next[b]]);
+				k = at[b];
+				pt_heap_up(heap, at, dist, k);
+				pt_heap_down(heap, at, dist, size, at[b]);
+			}
 		}
 	}
 	{

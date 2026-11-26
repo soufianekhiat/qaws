@@ -2720,7 +2720,43 @@ static unsigned int qaws_tess_find_vertex(
 	return (unsigned int)-1;
 }
 
-/* Evaluate surface and add vertex, with deduplication by (u,v). */
+/* The vertices by their exact (u, v): an open-addressing table of index + 1 (0: empty). Used when the
+   finest quads' sides are far above the 1e-10 matching tolerance, where matching within it is matching
+   exactly (each lattice value is computed once, by one midpoint). */
+typedef struct qaws_tess_map {
+	unsigned int *slot;
+	size_t mask;
+} qaws_tess_map;
+
+static qaws_scalar qaws_tess_unsigned_zero(qaws_scalar x)
+{
+	return x == QAWS_LITERAL(0.0) ? QAWS_LITERAL(0.0) : x;   /* (-0 matches +0) */
+}
+
+static size_t qaws_tess_hash(qaws_scalar u, qaws_scalar v)
+{
+	unsigned long long a = 0, b = 0;
+	u = qaws_tess_unsigned_zero(u);
+	v = qaws_tess_unsigned_zero(v);
+	memcpy(&a, &u, sizeof u);
+	memcpy(&b, &v, sizeof v);
+	a = (a ^ (b * 0x9E3779B97F4A7C15ull)) * 0xBF58476D1CE4E5B9ull;
+	return (size_t)(a ^ (a >> 31));
+}
+
+/* the slot holding (u, v), or the empty slot it would go in */
+static unsigned int *qaws_tess_map_find(qaws_tess_map const *map, qaws_tessellation_vertex const *vertices, qaws_scalar u, qaws_scalar v)
+{
+	size_t h = qaws_tess_hash(u, v) & map->mask;
+	for (;; h = (h + 1) & map->mask)
+	{
+		unsigned int s = map->slot[h];
+		if (!s || (vertices[s - 1].u == u && vertices[s - 1].v == v))
+			return &map->slot[h];
+	}
+}
+
+/* Evaluate surface and add vertex, with deduplication by (u,v) (through map when not NULL). */
 static unsigned int qaws_tess_eval_add(
 	qaws_surface const *surface,
 	qaws_tessellation_vertex *vertices,
@@ -2728,15 +2764,26 @@ static unsigned int qaws_tess_eval_add(
 	unsigned int vertex_capacity,
 	qaws_scalar u,
 	qaws_scalar v,
-	qaws_status *out_status)
+	qaws_status *out_status,
+	qaws_tess_map const *map)
 {
 	unsigned int idx;
 	unsigned int n;
+	unsigned int *slot = NULL;
 	qaws_surface_eval_result r;
 
-	idx = qaws_tess_find_vertex(vertices, *vertex_count, u, v);
-	if (idx != (unsigned int)-1)
-		return idx;
+	if (map)
+	{
+		slot = qaws_tess_map_find(map, vertices, u, v);
+		if (*slot)
+			return *slot - 1;
+	}
+	else
+	{
+		idx = qaws_tess_find_vertex(vertices, *vertex_count, u, v);
+		if (idx != (unsigned int)-1)
+			return idx;
+	}
 
 	memset(&r, 0, sizeof(r));
 	*out_status = qaws_surface_evaluate(&r, surface, u,
@@ -2752,10 +2799,59 @@ static unsigned int qaws_tess_eval_add(
 		vertices[n].u = u;
 		vertices[n].v = v;
 		*vertex_count = n + 1;
+		if (slot)
+			*slot = n + 1;
 		return n;
 	}
 	*out_status = QAWS_STATUS_BUFFER_TOO_SMALL;
 	return 0;
+}
+
+/* The vertices ordered by (a, b): (v, u) for the horizontal edges, (u, v) for the vertical ones. */
+typedef struct qaws_tess_ord {
+	qaws_scalar a, b;
+	unsigned int i;
+} qaws_tess_ord;
+
+static int qaws_tess_ord_cmp(void const *x, void const *y)
+{
+	qaws_tess_ord const *p = (qaws_tess_ord const *)x, *q = (qaws_tess_ord const *)y;
+	if (p->a != q->a)
+		return p->a < q->a ? -1 : 1;
+	if (p->b != q->b)
+		return p->b < q->b ? -1 : 1;
+	return 0;
+}
+
+/* The vertices with a == a_const and b in [b_lo - 1e-10, b_hi + 1e-10], ascending b (an edge's, as
+   qaws_tess_collect_h / _v find them when matching within the tolerance is matching exactly). More than
+   max_out: (unsigned)-1, the caller's scan keeps its own choice of which max_out. */
+static unsigned int qaws_tess_collect_ord(
+	qaws_tess_ord const *ord,
+	unsigned int count,
+	qaws_scalar a_const,
+	qaws_scalar b_lo,
+	qaws_scalar b_hi,
+	unsigned int *out,
+	unsigned int max_out)
+{
+	unsigned int lo = 0, hi = count, n = 0;
+	qaws_scalar const b0 = b_lo - QAWS_LITERAL(1.0e-10), b1 = b_hi + QAWS_LITERAL(1.0e-10);
+	while (lo < hi)
+	{
+		unsigned int mid = lo + (hi - lo) / 2;
+		if (ord[mid].a < a_const || (ord[mid].a == a_const && ord[mid].b < b0))
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	for (; lo < count && ord[lo].a == a_const && ord[lo].b <= b1; ++lo)
+	{
+		if (n == max_out)
+			return (unsigned int)-1;
+		out[n++] = ord[lo].i;
+	}
+	return n;
 }
 
 /* Collect all vertex indices on a horizontal edge (v = v_const,
@@ -2850,6 +2946,12 @@ qaws_status qaws_surface_tessellate(
 	unsigned int leaf_capacity;
 	qaws_tess_leaf *leaves;
 	unsigned int leaf_count;
+
+	/* exact matching: the vertex table and the two edge orders (NULL: the scans) */
+	qaws_tess_map map;
+	qaws_tess_map const *use_map = NULL;
+	qaws_tess_ord *ord_h = NULL, *ord_v = NULL;
+	unsigned int ord_n = 0;
 
 	if (!surface || !desc || !out_vertices || !out_vertex_count
 		|| !out_indices || !out_index_count)
@@ -3081,22 +3183,67 @@ qaws_status qaws_surface_tessellate(
 
 	qaws_internal_free(stack);
 
+#define QAWS_TESS_FREE_EXACT() (qaws_internal_free(map.slot), qaws_internal_free(ord_h), qaws_internal_free(ord_v))
+	/* Exact matching when the finest quads' sides are far above the 1e-10 tolerance (as a 1e-8 side
+	   at least): the corners and centres (at most 5 per leaf) through a table a third full or less, the
+	   edges' vertices by binary search; else, or short of memory, the scans. */
+	map.slot = NULL;
+	map.mask = 0;
+	if (max_depth < 60
+		&& ldexp((double)u_max - (double)u_min, -(int)max_depth) > 1e-8
+		&& ldexp((double)v_max - (double)v_min, -(int)max_depth) > 1e-8)
+	{
+		size_t cap = 64;
+		while (cap < (size_t)leaf_count * 16)
+			cap <<= 1;
+		map.slot = (unsigned int *)qaws_internal_zalloc(cap, sizeof(unsigned int));
+		if (map.slot)
+		{
+			map.mask = cap - 1;
+			use_map = &map;
+		}
+	}
+
 	/* ---- Phase 2: Add all leaf corner vertices ---- */
 	status = QAWS_STATUS_OK;
 	for (li = 0; li < leaf_count; ++li)
 	{
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
-			vertex_capacity, leaves[li].u0, leaves[li].v0, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
+			vertex_capacity, leaves[li].u0, leaves[li].v0, &status, use_map);
+		if (status != QAWS_STATUS_OK) { QAWS_TESS_FREE_EXACT(); qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
-			vertex_capacity, leaves[li].u1, leaves[li].v0, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
+			vertex_capacity, leaves[li].u1, leaves[li].v0, &status, use_map);
+		if (status != QAWS_STATUS_OK) { QAWS_TESS_FREE_EXACT(); qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
-			vertex_capacity, leaves[li].u0, leaves[li].v1, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
+			vertex_capacity, leaves[li].u0, leaves[li].v1, &status, use_map);
+		if (status != QAWS_STATUS_OK) { QAWS_TESS_FREE_EXACT(); qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 		qaws_tess_eval_add(surface, out_vertices, &vert_count,
-			vertex_capacity, leaves[li].u1, leaves[li].v1, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
+			vertex_capacity, leaves[li].u1, leaves[li].v1, &status, use_map);
+		if (status != QAWS_STATUS_OK) { QAWS_TESS_FREE_EXACT(); qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
+	}
+
+	/* the corners in the two edge orders (the centres added below lie inside their leaves, on no edge) */
+	if (use_map && vert_count)
+	{
+		ord_h = (qaws_tess_ord *)qaws_internal_scratch_malloc(qaws_internal_mul2(vert_count, sizeof(qaws_tess_ord)));
+		ord_v = (qaws_tess_ord *)qaws_internal_scratch_malloc(qaws_internal_mul2(vert_count, sizeof(qaws_tess_ord)));
+		if (ord_h && ord_v)
+		{
+			for (li = 0; li < vert_count; ++li)
+			{
+				ord_h[li].a = out_vertices[li].v, ord_h[li].b = out_vertices[li].u, ord_h[li].i = li;
+				ord_v[li].a = out_vertices[li].u, ord_v[li].b = out_vertices[li].v, ord_v[li].i = li;
+			}
+			qsort(ord_h, vert_count, sizeof(qaws_tess_ord), qaws_tess_ord_cmp);
+			qsort(ord_v, vert_count, sizeof(qaws_tess_ord), qaws_tess_ord_cmp);
+			ord_n = vert_count;
+		}
+		else
+		{
+			qaws_internal_free(ord_h);
+			qaws_internal_free(ord_v);
+			ord_h = ord_v = NULL;
+		}
 	}
 
 	/* ---- Phase 3: Triangulate each leaf with T-junction stitching ----
@@ -3125,20 +3272,26 @@ qaws_status qaws_surface_tessellate(
 		perim_count = 0;
 
 		/* Bottom edge: u ascending at v=v0 */
-		edge_n = qaws_tess_collect_h(out_vertices, vert_count,
-			v0, u0, u1, edge_buf, 64);
+		edge_n = ord_h ? qaws_tess_collect_ord(ord_h, ord_n, v0, u0, u1, edge_buf, 64) : (unsigned int)-1;
+		if (edge_n == (unsigned int)-1)
+			edge_n = qaws_tess_collect_h(out_vertices, vert_count,
+				v0, u0, u1, edge_buf, 64);
 		for (k = 0; k < edge_n; ++k)
 			perim[perim_count++] = edge_buf[k];
 
 		/* Right edge: v ascending at u=u1, skip first (=last of bottom) */
-		edge_n = qaws_tess_collect_v(out_vertices, vert_count,
-			u1, v0, v1, edge_buf, 64);
+		edge_n = ord_v ? qaws_tess_collect_ord(ord_v, ord_n, u1, v0, v1, edge_buf, 64) : (unsigned int)-1;
+		if (edge_n == (unsigned int)-1)
+			edge_n = qaws_tess_collect_v(out_vertices, vert_count,
+				u1, v0, v1, edge_buf, 64);
 		for (k = 1; k < edge_n; ++k)
 			perim[perim_count++] = edge_buf[k];
 
 		/* Top edge: u DESCENDING at v=v1, skip first (=last of right) */
-		edge_n = qaws_tess_collect_h(out_vertices, vert_count,
-			v1, u0, u1, edge_buf, 64);
+		edge_n = ord_h ? qaws_tess_collect_ord(ord_h, ord_n, v1, u0, u1, edge_buf, 64) : (unsigned int)-1;
+		if (edge_n == (unsigned int)-1)
+			edge_n = qaws_tess_collect_h(out_vertices, vert_count,
+				v1, u0, u1, edge_buf, 64);
 		/* Reverse */
 		for (k = 0; k < edge_n / 2; ++k)
 		{
@@ -3150,8 +3303,10 @@ qaws_status qaws_surface_tessellate(
 			perim[perim_count++] = edge_buf[k];
 
 		/* Left edge: v DESCENDING at u=u0, skip first and last */
-		edge_n = qaws_tess_collect_v(out_vertices, vert_count,
-			u0, v0, v1, edge_buf, 64);
+		edge_n = ord_v ? qaws_tess_collect_ord(ord_v, ord_n, u0, v0, v1, edge_buf, 64) : (unsigned int)-1;
+		if (edge_n == (unsigned int)-1)
+			edge_n = qaws_tess_collect_v(out_vertices, vert_count,
+				u0, v0, v1, edge_buf, 64);
 		/* Reverse */
 		for (k = 0; k < edge_n / 2; ++k)
 		{
@@ -3167,8 +3322,8 @@ qaws_status qaws_surface_tessellate(
 
 		/* Add center vertex for fan */
 		i_center = qaws_tess_eval_add(surface, out_vertices, &vert_count,
-			vertex_capacity, u_mid, v_mid, &status);
-		if (status != QAWS_STATUS_OK) { qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
+			vertex_capacity, u_mid, v_mid, &status, use_map);
+		if (status != QAWS_STATUS_OK) { QAWS_TESS_FREE_EXACT(); qaws_internal_free(leaves); *out_vertex_count = vert_count; *out_index_count = idx_count; return status; }
 
 		/* Emit fan triangles: (center, perim[k], perim[k+1]) */
 		for (k = 0; k < perim_count; ++k)
@@ -3188,6 +3343,8 @@ qaws_status qaws_surface_tessellate(
 			break;
 	}
 
+	QAWS_TESS_FREE_EXACT();
+#undef QAWS_TESS_FREE_EXACT
 	qaws_internal_free(leaves);
 
 	*out_vertex_count = vert_count;

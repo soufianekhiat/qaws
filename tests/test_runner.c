@@ -77,6 +77,7 @@ extern int test_84_interpolating_offset_main(void);
 extern int test_85_shatter_main(void);
 extern int test_180_progress_main(void);
 extern int test_181_transform_main(void);
+extern int test_182_stress_main(void);
 extern int test_140_eval_limits_main(void);
 extern int test_141_eval_threads_main(void);
 extern int test_142_curve_view_main(void);
@@ -181,6 +182,7 @@ static test_suite const g_test_suites[] = {
 	{"179_motion", test_179_motion_main},
 	{"180_progress", test_180_progress_main},
 	{"181_transform", test_181_transform_main},
+	{"182_stress", test_182_stress_main},
 };
 
 int main(void) {

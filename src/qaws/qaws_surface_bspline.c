@@ -69,6 +69,12 @@ static qaws_status bspline_surface_eval(
 		{
 			for (kv = 0; kv <= max_v_deriv; kv++)
 			{
+				/* only the sums a flag reads (each has its own accumulator) */
+				unsigned int const reads = ku == 0 ? (kv == 0 ? QAWS_SURFACE_EVAL_POSITION : kv == 1 ? QAWS_SURFACE_EVAL_DV : QAWS_SURFACE_EVAL_DVV)
+					: ku == 1 ? (kv == 0 ? QAWS_SURFACE_EVAL_DU : kv == 1 ? QAWS_SURFACE_EVAL_DUV : 0)
+					: (kv == 0 ? QAWS_SURFACE_EVAL_DUU : 0);
+				if (!(eval_flags & reads))
+					continue;
 				for (i = 0; i < u_order; i++)
 				{
 					unsigned int ci = u_span - ud + i;

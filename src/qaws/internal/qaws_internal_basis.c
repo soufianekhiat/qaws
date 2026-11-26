@@ -159,24 +159,24 @@ void qaws_internal_bspline_basis(
 	}
 }
 
-void qaws_internal_bspline_basis_derivs(
-	qaws_scalar* out_ders,
-	qaws_scalar const* knots,
-	unsigned int knot_count,
-	unsigned int degree,
-	unsigned int span,
-	qaws_scalar t,
-	unsigned int k)
+#if defined(_MSC_VER)
+# define QB_ALWAYS_INLINE static __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+# define QB_ALWAYS_INLINE static inline __attribute__((always_inline))
+#else
+# define QB_ALWAYS_INLINE static inline
+#endif
+
+/* Basis functions and their derivatives (The NURBS Book, A2.3) into ndu ((p + 1)^2 scalars); inlined
+   per degree below, so the loops unroll with the operations and their order unchanged */
+QB_ALWAYS_INLINE void qb_basis_derivs(qaws_scalar* out_ders, qaws_scalar const* knots, unsigned int p, unsigned int span,
+	qaws_scalar t, unsigned int k, qaws_scalar* ndu)
 {
-	unsigned int p = degree;
 	unsigned int order = p + 1;
 
-	qaws_scalar ndu[1024]; /* max (32*32) */
 	qaws_scalar left_arr[32];
 	qaws_scalar right_arr[32];
 	qaws_scalar a[2][32];
-
-	(void)knot_count;
 
 	ndu[0] = QAWS_ONE;
 
@@ -242,3 +242,24 @@ void qaws_internal_bspline_basis_derivs(
 		factor *= (qaws_scalar)(p - d);
 	}
 }
+
+void qaws_internal_bspline_basis_derivs(
+	qaws_scalar* out_ders,
+	qaws_scalar const* knots,
+	unsigned int knot_count,
+	unsigned int degree,
+	unsigned int span,
+	qaws_scalar t,
+	unsigned int k)
+{
+	(void)knot_count;
+	switch (degree) {
+	case 1: { qaws_scalar ndu[4]; qb_basis_derivs(out_ders, knots, 1, span, t, k, ndu); return; }
+	case 2: { qaws_scalar ndu[9]; qb_basis_derivs(out_ders, knots, 2, span, t, k, ndu); return; }
+	case 3: { qaws_scalar ndu[16]; qb_basis_derivs(out_ders, knots, 3, span, t, k, ndu); return; }
+	case 4: { qaws_scalar ndu[25]; qb_basis_derivs(out_ders, knots, 4, span, t, k, ndu); return; }
+	case 5: { qaws_scalar ndu[36]; qb_basis_derivs(out_ders, knots, 5, span, t, k, ndu); return; }
+	default: { qaws_scalar ndu[1024]; /* max (32*32) */ qb_basis_derivs(out_ders, knots, degree, span, t, k, ndu); return; }
+	}
+}
+

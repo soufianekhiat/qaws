@@ -80,6 +80,12 @@ static qaws_status nurbs_surface_eval(
 		{
 			for (kv = 0; kv <= max_v_deriv; kv++)
 			{
+				/* the quotient's terms read the sums of order 1 or less always, each second-order one only for
+				   its own flag (each sum has its own accumulators) */
+				if (ku + kv > 1 && !(ku == 2 && kv == 0 && (eval_flags & QAWS_SURFACE_EVAL_DUU))
+					&& !(ku == 0 && kv == 2 && (eval_flags & QAWS_SURFACE_EVAL_DVV))
+					&& !(ku == 1 && kv == 1 && (eval_flags & QAWS_SURFACE_EVAL_DUV)))
+					continue;
 				for (i = 0; i < u_order; i++)
 				{
 					unsigned int ci = u_span - ud + i;

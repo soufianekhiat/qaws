@@ -81,6 +81,7 @@ add_executable(
 179_motion.c
 180_progress.c
 181_transform.c
+182_stress.c
 )
 
 # The amalgamated library exports exactly the same symbols, so the tests can

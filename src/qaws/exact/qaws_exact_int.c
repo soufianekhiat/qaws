@@ -435,23 +435,22 @@ qaws_status qaws_exact_int_shl(qaws_exact_int* r, qaws_exact_int const* a, unsig
 void qaws_exact_int_shr(qaws_exact_int* r, qaws_exact_int const* a, unsigned int k)
 {
 	unsigned int limbs = k / 32, bits = k % 32;
-	qaws_exact_int t;
-	int i, n = a->size - (int)limbs;
+	int i, size = a->size, sign = a->sign, n = size - (int)limbs;
 	if (n <= 0)
 	{
 		qaws_exact_int_zero(r);
 		return;
 	}
+	/* ascending: limb i is written after the limbs at i + limbs and above are read, so r may be a */
 	for (i = 0; i < n; i++)
 	{
 		uint64_t lo = a->limb[i + (int)limbs];
-		uint64_t hi = i + (int)limbs + 1 < a->size ? a->limb[i + (int)limbs + 1] : 0u;
-		t.limb[i] = (uint32_t)(((hi << 32) | lo) >> bits);
+		uint64_t hi = i + (int)limbs + 1 < size ? a->limb[i + (int)limbs + 1] : 0u;
+		r->limb[i] = (uint32_t)(((hi << 32) | lo) >> bits);
 	}
-	t.size = n;
-	t.sign = a->sign;
-	normalize(&t);
-	copy_int(r, &t);
+	r->size = n;
+	r->sign = sign;
+	normalize(r);
 }
 
 qaws_status qaws_exact_int_divexact_u32(qaws_exact_int* r, qaws_exact_int const* a, uint32_t d)
@@ -596,25 +595,43 @@ qaws_status qaws_exact_int_divmod(qaws_exact_int* q, qaws_exact_int* r, qaws_exa
 	return QAWS_STATUS_OK;
 }
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
+/* trailing zero bits of a non-zero word */
+static unsigned int ei_ctz32(uint32_t v)
+{
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86) || defined(_M_ARM64))
+	unsigned long i;
+	_BitScanForward(&i, v);
+	return (unsigned int)i;
+#elif defined(__GNUC__) || defined(__clang__)
+	return (unsigned int)__builtin_ctz(v);
+#else
+	unsigned int b = 0;
+	if (!(v & 0xFFFFu)) { v >>= 16; b += 16; }
+	if (!(v & 0xFFu)) { v >>= 8; b += 8; }
+	if (!(v & 0xFu)) { v >>= 4; b += 4; }
+	if (!(v & 0x3u)) { v >>= 2; b += 2; }
+	return b + !(v & 1u);
+#endif
+}
+
 /* Trailing zero bits of a non-zero magnitude. */
 unsigned int qaws_exact_int_ctz(qaws_exact_int const* x)
 {
-	unsigned int i, b;
+	unsigned int i;
 	for (i = 0; i < (unsigned int)x->size; i++)
 		if (x->limb[i])
-		{
-			uint32_t v = x->limb[i];
-			for (b = 0; !(v & 1u); b++)
-				v >>= 1;
-			return 32 * i + b;
-		}
+			return 32 * i + ei_ctz32(x->limb[i]);
 	return 0;
 }
 
 void qaws_exact_int_gcd(qaws_exact_int* g, qaws_exact_int const* a, qaws_exact_int const* b)
 {
-	/* binary gcd (Stein) on magnitudes: shifts and subtractions only */
-	qaws_exact_int x, y;
+	/* binary gcd (Stein) on magnitudes: shifts and subtractions only; the two swapped as pointers */
+	qaws_exact_int x, y, *px = &x, *py = &y;
 	unsigned int k, kx, ky;
 	if (a->sign == 0 || b->sign == 0)
 	{
@@ -626,38 +643,51 @@ void qaws_exact_int_gcd(qaws_exact_int* g, qaws_exact_int const* a, qaws_exact_i
 	y = *b;
 	x.sign = 1;
 	y.sign = 1;
-	/* a one-limb operand: Euclid in machine words after one reduction */
+	/* both in two limbs or fewer: Euclid in 64-bit words */
 	kx = qaws_exact_int_ctz(&x);
 	ky = qaws_exact_int_ctz(&y);
 	k = kx < ky ? kx : ky;
-	qaws_exact_int_shr(&x, &x, kx);
+	qaws_exact_int_shr(px, px, kx);
 	for (;;)
 	{
-		qaws_exact_int_shr(&y, &y, qaws_exact_int_ctz(&y));
-		if (x.size == 1 && y.size == 1)
+		qaws_exact_int_shr(py, py, qaws_exact_int_ctz(py));
+		if (px->size <= 2 && py->size <= 2)
 		{
-			uint32_t u = x.limb[0], v = y.limb[0];
+			uint64_t u = px->limb[0] | (px->size > 1 ? (uint64_t)px->limb[1] << 32 : 0u);
+			uint64_t v = py->limb[0] | (py->size > 1 ? (uint64_t)py->limb[1] << 32 : 0u);
 			while (v)
 			{
-				uint32_t t = u % v;
+				uint64_t t = u % v;
 				u = v;
 				v = t;
 			}
-			qaws_exact_int_from_i64(&x, (int64_t)u);
+			px->limb[0] = (uint32_t)u;
+			px->limb[1] = (uint32_t)(u >> 32);
+			px->size = 2;
+			px->sign = 1;
+			normalize(px);
 			break;
 		}
-		if (mag_cmp(&x, &y) > 0)
+		if (mag_cmp(px, py) > 0)
 		{
-			qaws_exact_int t = x;
-			x = y;
-			y = t;
+			qaws_exact_int* t = px;
+			px = py;
+			py = t;
 		}
-		mag_sub(&y, &y, &x);
-		normalize(&y);
-		if (y.size == 0)
+		/* a limb or more apart: one remainder step (y mod x, x odd: the twos it leaves go at the top) instead
+		   of a subtraction per bit */
+		if (py->size > px->size)
+		{
+			qaws_exact_int q;
+			mag_divmod(&q, py, py, px);
+		}
+		else
+			mag_sub(py, py, px);
+		normalize(py);
+		if (py->size == 0)
 			break;
 	}
-	qaws_exact_int_shl(g, &x, k);
+	qaws_exact_int_shl(g, px, k);
 }
 
 /* ------------------------------------------------------------------ */
