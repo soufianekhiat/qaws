@@ -35,5 +35,12 @@ qaws_status qaws_internal_bspline_eval_batch(
 	qaws_scalar const* parameters,
 	unsigned int count,
 	unsigned int eval_flags);
+/* The same on a NURBS curve (each result as the one-point evaluation makes it; the first failing status) */
+qaws_status qaws_internal_nurbs_eval_batch(
+	void* out_results,
+	qaws_curve const* curve,
+	qaws_scalar const* parameters,
+	unsigned int count,
+	unsigned int eval_flags);
 
 #endif /* QAWS_INTERNAL_CURVE_H */

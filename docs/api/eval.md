@@ -87,9 +87,9 @@ Evaluates `curve` at `count` global parameters.
 - Returns `QAWS_STATUS_OK` if all evaluations succeed. On partial failure every entry is still attempted and the
   first error status is returned; `out_results[i].valid_flags == 0` marks a failed entry.
 - `QAWS_STATUS_INVALID_ARGUMENT` for a null pointer, `QAWS_STATUS_INVALID_DIMENSION` for a dimension mismatch.
-- B-splines of degree 1 to 5 compute the basis functions of several parameters at once, one per SIMD lane (2 or 4
-  in f64, 4 or 8 in f32, SSE2 or AVX2; NEON f32), and reuse a span while the parameters stay inside it: each result
-  equals the one-point evaluation bit for bit. Sorted parameters are the fastest.
+- B-spline and NURBS curves of degree 1 to 5 compute the basis functions of several parameters at once, one per SIMD
+  lane (2 or 4 in f64, 4 or 8 in f32, SSE2 or AVX2; NEON f32), and reuse a span while the parameters stay inside it:
+  each result equals the one-point evaluation bit for bit. Sorted parameters are the fastest.
 
 ---
 
@@ -112,3 +112,6 @@ Evaluates `surface` at `count` (u, v) pairs, calling `qaws_surface_evaluate` for
 - `eval_flags`: bitmask of `QAWS_SURFACE_EVAL_*` (`POSITION`, `DU`, `DV`, `NORMAL`, `DUU`, `DUV`, `DVV`).
 - Returns `QAWS_STATUS_OK` if all succeed, otherwise the first error status (all entries attempted);
   `QAWS_STATUS_INVALID_ARGUMENT` for a null pointer.
+- B-spline and NURBS surfaces of degrees 1 to 5 compute the u and v basis functions of several points at once, one per
+  SIMD lane, reusing knot spans while the points stay inside them: each result equals `qaws_surface_evaluate`'s bit for
+  bit.

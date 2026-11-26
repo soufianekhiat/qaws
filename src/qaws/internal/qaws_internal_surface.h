@@ -157,4 +157,23 @@ unsigned int qaws_internal_trim_loop_count(qaws_surface const* surface);
 struct qaws_curve;
 struct qaws_curve const* const* qaws_internal_trim_loop(unsigned int* out_count, int* out_outer, qaws_surface const* surface, unsigned int index);
 
+/* qaws_surface_evaluate_batch on B-spline and NURBS surfaces of degrees 1 to 5: the u and v basis functions of a SIMD
+   register's worth of points at once (qaws_internal_bspline_basis_derivs_lanes), each result as qaws_surface_evaluate
+   makes it, bit for bit (the first failing status); QAWS_STATUS_UNSUPPORTED_OPERATION for the other surfaces and degrees
+   and without SIMD (the caller loops). */
+qaws_status qaws_internal_bspline_surface_eval_batch(
+	qaws_surface_eval_result* out_results,
+	qaws_surface const* surface,
+	qaws_scalar const* u_params,
+	qaws_scalar const* v_params,
+	unsigned int count,
+	unsigned int eval_flags);
+qaws_status qaws_internal_nurbs_surface_eval_batch(
+	qaws_surface_eval_result* out_results,
+	qaws_surface const* surface,
+	qaws_scalar const* u_params,
+	qaws_scalar const* v_params,
+	unsigned int count,
+	unsigned int eval_flags);
+
 #endif /* QAWS_INTERNAL_SURFACE_H */

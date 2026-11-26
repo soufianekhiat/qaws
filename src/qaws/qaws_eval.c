@@ -3,6 +3,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_span.h"
 #include "internal/qaws_internal_curve.h"
+#include "internal/qaws_internal_surface.h"
 #include "internal/qaws_internal_kinds.h"
 #include <string.h>
 
@@ -99,9 +100,11 @@ qaws_status qaws_curve_evaluate_batch_2d(
 	if (curve->dimension != QAWS_DIMENSION_2D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
-	if (curve->kind == QAWS_CURVE_KIND_BSPLINE)
+	if (curve->kind == QAWS_CURVE_KIND_BSPLINE || curve->kind == QAWS_CURVE_KIND_NURBS)
 	{
-		qaws_status const s = qaws_internal_bspline_eval_batch(out_results, curve, parameters, count, eval_flags);
+		qaws_status const s = curve->kind == QAWS_CURVE_KIND_BSPLINE
+			? qaws_internal_bspline_eval_batch(out_results, curve, parameters, count, eval_flags)
+			: qaws_internal_nurbs_eval_batch(out_results, curve, parameters, count, eval_flags);
 		if (s != QAWS_STATUS_UNSUPPORTED_OPERATION)
 			return s;
 	}
@@ -136,9 +139,11 @@ qaws_status qaws_curve_evaluate_batch_3d(
 	if (curve->dimension != QAWS_DIMENSION_3D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
-	if (curve->kind == QAWS_CURVE_KIND_BSPLINE)
+	if (curve->kind == QAWS_CURVE_KIND_BSPLINE || curve->kind == QAWS_CURVE_KIND_NURBS)
 	{
-		qaws_status const s = qaws_internal_bspline_eval_batch(out_results, curve, parameters, count, eval_flags);
+		qaws_status const s = curve->kind == QAWS_CURVE_KIND_BSPLINE
+			? qaws_internal_bspline_eval_batch(out_results, curve, parameters, count, eval_flags)
+			: qaws_internal_nurbs_eval_batch(out_results, curve, parameters, count, eval_flags);
 		if (s != QAWS_STATUS_UNSUPPORTED_OPERATION)
 			return s;
 	}
@@ -171,6 +176,15 @@ qaws_status qaws_surface_evaluate_batch(
 
 	if (!surface || !u_params || !v_params || !out_results)
 		return QAWS_STATUS_INVALID_ARGUMENT;
+
+	if (surface->kind == QAWS_SURFACE_KIND_BSPLINE || surface->kind == QAWS_SURFACE_KIND_NURBS)
+	{
+		qaws_status const s = surface->kind == QAWS_SURFACE_KIND_BSPLINE
+			? qaws_internal_bspline_surface_eval_batch(out_results, surface, u_params, v_params, count, eval_flags)
+			: qaws_internal_nurbs_surface_eval_batch(out_results, surface, u_params, v_params, count, eval_flags);
+		if (s != QAWS_STATUS_UNSUPPORTED_OPERATION)
+			return s;
+	}
 
 	for (i = 0; i < count; i++)
 	{

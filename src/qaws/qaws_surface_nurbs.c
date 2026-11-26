@@ -7,6 +7,158 @@
 #include <string.h>
 #include <math.h>
 #include "qaws_platform.h"
+#include "simd/qaws_simd.h"
+
+/* the tensor sums and the quotient: the u and v basis functions and derivatives (rows of degree + 1, u_es and v_es
+   scalars apart) times the weighted control points of knot spans u_span and v_span */
+static qaws_status nurbs_surface_sum(
+	qaws_surface_nurbs_impl const* impl,
+	unsigned int ud,
+	unsigned int vd,
+	unsigned int u_span,
+	unsigned int v_span,
+	qaws_scalar const* u_ders,
+	unsigned int u_es,
+	qaws_scalar const* v_ders,
+	unsigned int v_es,
+	unsigned int max_u_deriv,
+	unsigned int max_v_deriv,
+	unsigned int eval_flags,
+	qaws_surface_eval_result* out_result)
+{
+	unsigned int vc = impl->v_count;
+	qaws_scalar const* cp = impl->control_points;
+	qaws_scalar const* wt = impl->weights;
+	unsigned int u_order = ud + 1;
+	unsigned int v_order = vd + 1;
+	unsigned int ku, kv, i, j;
+	/* A[ku][kv] = weighted point accumulator, W[ku][kv] = weight accumulator */
+	qaws_scalar A[3][3][3];
+	qaws_scalar W[3][3];
+	qaws_scalar inv_w0;
+	qaws_vec3 S00; /* position */
+	qaws_vec3 Su, Sv; /* first partials */
+	qaws_vec3 Suu, Svv, Suv; /* second partials */
+
+	memset(A, 0, sizeof(A));
+	memset(W, 0, sizeof(W));
+
+	for (ku = 0; ku <= max_u_deriv; ku++)
+	{
+		for (kv = 0; kv <= max_v_deriv; kv++)
+		{
+			/* the quotient's terms read the sums of order 1 or less always, each second-order one only for
+			   its own flag (each sum has its own accumulators) */
+			if (ku + kv > 1 && !(ku == 2 && kv == 0 && (eval_flags & QAWS_SURFACE_EVAL_DUU))
+				&& !(ku == 0 && kv == 2 && (eval_flags & QAWS_SURFACE_EVAL_DVV))
+				&& !(ku == 1 && kv == 1 && (eval_flags & QAWS_SURFACE_EVAL_DUV)))
+				continue;
+			for (i = 0; i < u_order; i++)
+			{
+				unsigned int ci = u_span - ud + i;
+				qaws_scalar Nu = u_ders[(ku * u_order + i) * u_es];
+				for (j = 0; j < v_order; j++)
+				{
+					unsigned int cj = v_span - vd + j;
+					qaws_scalar Nv = v_ders[(kv * v_order + j) * v_es];
+					qaws_scalar w = wt[ci * vc + cj];
+					qaws_scalar Nw = Nu * Nv * w;
+					unsigned int cp_idx = (ci * vc + cj) * 3;
+					W[ku][kv] += Nw;
+					A[ku][kv][0] += Nw * cp[cp_idx + 0];
+					A[ku][kv][1] += Nw * cp[cp_idx + 1];
+					A[ku][kv][2] += Nw * cp[cp_idx + 2];
+				}
+			}
+		}
+	}
+
+	/* Check for degenerate weight */
+	if (W[0][0] < QAWS_LITERAL(1e-15) && W[0][0] > -QAWS_LITERAL(1e-15))
+		return QAWS_STATUS_DEGENERATE_CURVE;
+
+	inv_w0 = QAWS_ONE / W[0][0];
+
+	/* Position: S = A[0][0] / W[0][0] */
+	S00.x = A[0][0][0] * inv_w0;
+	S00.y = A[0][0][1] * inv_w0;
+	S00.z = A[0][0][2] * inv_w0;
+
+	if (eval_flags & QAWS_SURFACE_EVAL_POSITION)
+	{
+		out_result->position = S00;
+		out_result->valid_flags |= QAWS_SURFACE_EVAL_POSITION;
+	}
+
+	/* First partial du: Su = (A[1][0] - S * W[1][0]) / W[0][0] */
+	Su.x = Su.y = Su.z = 0;
+	if (max_u_deriv >= 1)
+	{
+		Su.x = (A[1][0][0] - S00.x * W[1][0]) * inv_w0;
+		Su.y = (A[1][0][1] - S00.y * W[1][0]) * inv_w0;
+		Su.z = (A[1][0][2] - S00.z * W[1][0]) * inv_w0;
+	}
+	if (eval_flags & QAWS_SURFACE_EVAL_DU)
+	{
+		out_result->du = Su;
+		out_result->valid_flags |= QAWS_SURFACE_EVAL_DU;
+	}
+
+	/* First partial dv: Sv = (A[0][1] - S * W[0][1]) / W[0][0] */
+	Sv.x = Sv.y = Sv.z = 0;
+	if (max_v_deriv >= 1)
+	{
+		Sv.x = (A[0][1][0] - S00.x * W[0][1]) * inv_w0;
+		Sv.y = (A[0][1][1] - S00.y * W[0][1]) * inv_w0;
+		Sv.z = (A[0][1][2] - S00.z * W[0][1]) * inv_w0;
+	}
+	if (eval_flags & QAWS_SURFACE_EVAL_DV)
+	{
+		out_result->dv = Sv;
+		out_result->valid_flags |= QAWS_SURFACE_EVAL_DV;
+	}
+
+	/* Second partial duu: Suu = (A[2][0] - 2*Su*W[1][0] - S*W[2][0]) / W[0][0] */
+	Suu.x = Suu.y = Suu.z = 0;
+	if (eval_flags & QAWS_SURFACE_EVAL_DUU)
+	{
+		Suu.x = (A[2][0][0] - QAWS_LITERAL(2.0) * Su.x * W[1][0] - S00.x * W[2][0]) * inv_w0;
+		Suu.y = (A[2][0][1] - QAWS_LITERAL(2.0) * Su.y * W[1][0] - S00.y * W[2][0]) * inv_w0;
+		Suu.z = (A[2][0][2] - QAWS_LITERAL(2.0) * Su.z * W[1][0] - S00.z * W[2][0]) * inv_w0;
+		out_result->duu = Suu;
+		out_result->valid_flags |= QAWS_SURFACE_EVAL_DUU;
+	}
+
+	/* Second partial dvv: Svv = (A[0][2] - 2*Sv*W[0][1] - S*W[0][2]) / W[0][0] */
+	Svv.x = Svv.y = Svv.z = 0;
+	if (eval_flags & QAWS_SURFACE_EVAL_DVV)
+	{
+		Svv.x = (A[0][2][0] - QAWS_LITERAL(2.0) * Sv.x * W[0][1] - S00.x * W[0][2]) * inv_w0;
+		Svv.y = (A[0][2][1] - QAWS_LITERAL(2.0) * Sv.y * W[0][1] - S00.y * W[0][2]) * inv_w0;
+		Svv.z = (A[0][2][2] - QAWS_LITERAL(2.0) * Sv.z * W[0][1] - S00.z * W[0][2]) * inv_w0;
+		out_result->dvv = Svv;
+		out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV;
+	}
+
+	/* Mixed partial duv: Suv = (A[1][1] - Su*W[0][1] - Sv*W[1][0] - S*W[1][1]) / W[0][0] */
+	Suv.x = Suv.y = Suv.z = 0;
+	if ((eval_flags & QAWS_SURFACE_EVAL_DUV) && max_u_deriv >= 1 && max_v_deriv >= 1)
+	{
+		Suv.x = (A[1][1][0] - Su.x * W[0][1] - Sv.x * W[1][0] - S00.x * W[1][1]) * inv_w0;
+		Suv.y = (A[1][1][1] - Su.y * W[0][1] - Sv.y * W[1][0] - S00.y * W[1][1]) * inv_w0;
+		Suv.z = (A[1][1][2] - Su.z * W[0][1] - Sv.z * W[1][0] - S00.z * W[1][1]) * inv_w0;
+		out_result->duv = Suv;
+		out_result->valid_flags |= QAWS_SURFACE_EVAL_DUV;
+	}
+
+	/* Normal */
+	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
+	{
+		qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
+		out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
+	}
+	return QAWS_STATUS_OK;
+}
 
 /* Evaluate a tensor-product NURBS surface at (u,v) using the quotient rule.
    S(u,v) = A(u,v) / W(u,v), where:
@@ -27,10 +179,6 @@ static qaws_status nurbs_surface_eval(
 	unsigned int vd = surface->v_degree;
 	unsigned int uc = impl->u_count;
 	unsigned int vc = impl->v_count;
-	qaws_scalar const* cp = impl->control_points;
-	qaws_scalar const* wt = impl->weights;
-	unsigned int u_order = ud + 1;
-	unsigned int v_order = vd + 1;
 
 	unsigned int u_span, v_span;
 	unsigned int max_u_deriv = 0, max_v_deriv = 0;
@@ -57,14 +205,6 @@ static qaws_status nurbs_surface_eval(
 	{
 		qaws_scalar u_ders[3 * 64];
 		qaws_scalar v_ders[3 * 64];
-		unsigned int ku, kv, i, j;
-		/* A[ku][kv] = weighted point accumulator, W[ku][kv] = weight accumulator */
-		qaws_scalar A[3][3][3];
-		qaws_scalar W[3][3];
-		qaws_scalar inv_w0;
-		qaws_vec3 S00; /* position */
-		qaws_vec3 Su, Sv; /* first partials */
-		qaws_vec3 Suu, Svv, Suv; /* second partials */
 
 		qaws_internal_bspline_basis_derivs(
 			u_ders, impl->u_knots,
@@ -72,127 +212,79 @@ static qaws_status nurbs_surface_eval(
 		qaws_internal_bspline_basis_derivs(
 			v_ders, impl->v_knots,
 			impl->v_knot_count, vd, v_span, v, max_v_deriv);
+		return nurbs_surface_sum(impl, ud, vd, u_span, v_span, u_ders, 1, v_ders, 1, max_u_deriv, max_v_deriv, eval_flags, out_result);
+	}
+}
 
-		memset(A, 0, sizeof(A));
-		memset(W, 0, sizeof(W));
-
-		for (ku = 0; ku <= max_u_deriv; ku++)
+/* the batch of qaws_surface_evaluate_batch on a NURBS surface of degrees 1 to 5: the u and v basis functions of a SIMD
+   register's worth of points at once, each result as qaws_surface_evaluate makes it, bit for bit (the first failing
+   status) */
+qaws_status qaws_internal_nurbs_surface_eval_batch(
+	qaws_surface_eval_result* out_results,
+	qaws_surface const* surface,
+	qaws_scalar const* u_params,
+	qaws_scalar const* v_params,
+	unsigned int count,
+	unsigned int eval_flags)
+{
+	qaws_surface_nurbs_impl const* impl = (qaws_surface_nurbs_impl const*)surface->impl;
+	unsigned int const ud = surface->u_degree, vd = surface->v_degree, lanes = qaws_internal_bspline_basis_lanes(ud);
+	unsigned int max_u_deriv = 0, max_v_deriv = 0, i0, l, uk = 0, vk = 0;
+	int have = 0;
+	qaws_status first = QAWS_STATUS_OK;
+	QAWS_SIMD_ALIGN qaws_scalar u_ders[3 * 6 * QAWS_INTERNAL_BASIS_LANES_MAX], v_ders[3 * 6 * QAWS_INTERNAL_BASIS_LANES_MAX];
+	QAWS_SIMD_ALIGN qaws_scalar u[QAWS_INTERNAL_BASIS_LANES_MAX], v[QAWS_INTERNAL_BASIS_LANES_MAX];
+	unsigned int u_span[QAWS_INTERNAL_BASIS_LANES_MAX], v_span[QAWS_INTERNAL_BASIS_LANES_MAX];
+	if (!lanes || qaws_internal_bspline_basis_lanes(vd) != lanes || surface->kind != QAWS_SURFACE_KIND_NURBS
+		|| !surface->vtable || surface->vtable->eval_3d != nurbs_surface_eval)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	/* the flags and orders as qaws_surface_evaluate and nurbs_surface_eval set them */
+	if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
+		eval_flags |= QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV;
+	if (eval_flags & (QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DUU))
+		max_u_deriv = (eval_flags & QAWS_SURFACE_EVAL_DUU) ? 2 : 1;
+	if (eval_flags & (QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_DVV))
+		max_v_deriv = (eval_flags & QAWS_SURFACE_EVAL_DVV) ? 2 : 1;
+	if (eval_flags & QAWS_SURFACE_EVAL_DUV)
+	{
+		if (max_u_deriv < 1) max_u_deriv = 1;
+		if (max_v_deriv < 1) max_v_deriv = 1;
+	}
+	if (max_u_deriv > ud) max_u_deriv = ud;
+	if (max_v_deriv > vd) max_v_deriv = vd;
+	for (i0 = 0; i0 < count; i0 += lanes)
+	{
+		unsigned int const n = count - i0 < lanes ? count - i0 : lanes;
+		for (l = 0; l < lanes; l++)
 		{
-			for (kv = 0; kv <= max_v_deriv; kv++)
-			{
-				/* the quotient's terms read the sums of order 1 or less always, each second-order one only for
-				   its own flag (each sum has its own accumulators) */
-				if (ku + kv > 1 && !(ku == 2 && kv == 0 && (eval_flags & QAWS_SURFACE_EVAL_DUU))
-					&& !(ku == 0 && kv == 2 && (eval_flags & QAWS_SURFACE_EVAL_DVV))
-					&& !(ku == 1 && kv == 1 && (eval_flags & QAWS_SURFACE_EVAL_DUV)))
-					continue;
-				for (i = 0; i < u_order; i++)
-				{
-					unsigned int ci = u_span - ud + i;
-					qaws_scalar Nu = u_ders[ku * u_order + i];
-					for (j = 0; j < v_order; j++)
-					{
-						unsigned int cj = v_span - vd + j;
-						qaws_scalar Nv = v_ders[kv * v_order + j];
-						qaws_scalar w = wt[ci * vc + cj];
-						qaws_scalar Nw = Nu * Nv * w;
-						unsigned int cp_idx = (ci * vc + cj) * 3;
-						W[ku][kv] += Nw;
-						A[ku][kv][0] += Nw * cp[cp_idx + 0];
-						A[ku][kv][1] += Nw * cp[cp_idx + 1];
-						A[ku][kv][2] += Nw * cp[cp_idx + 2];
-					}
-				}
-			}
+			unsigned int const i = i0 + (l < n ? l : n - 1);
+			qaws_scalar a = u_params[i], b = v_params[i];
+			if (a < surface->u_range.min_value) a = surface->u_range.min_value;
+			if (a > surface->u_range.max_value) a = surface->u_range.max_value;
+			if (b < surface->v_range.min_value) b = surface->v_range.min_value;
+			if (b > surface->v_range.max_value) b = surface->v_range.max_value;
+			u[l] = a, v[l] = b;
+			if (!(have && a > impl->u_knots[ud] && a < impl->u_knots[impl->u_count] && impl->u_knots[uk] <= a && a < impl->u_knots[uk + 1]))
+				uk = qaws_internal_find_knot_span(impl->u_knots, impl->u_knot_count, ud, impl->u_count, a);
+			if (!(have && b > impl->v_knots[vd] && b < impl->v_knots[impl->v_count] && impl->v_knots[vk] <= b && b < impl->v_knots[vk + 1]))
+				vk = qaws_internal_find_knot_span(impl->v_knots, impl->v_knot_count, vd, impl->v_count, b);
+			u_span[l] = uk, v_span[l] = vk;
+			have = 1;
 		}
-
-		/* Check for degenerate weight */
-		if (W[0][0] < QAWS_LITERAL(1e-15) && W[0][0] > -QAWS_LITERAL(1e-15))
-			return QAWS_STATUS_DEGENERATE_CURVE;
-
-		inv_w0 = QAWS_ONE / W[0][0];
-
-		/* Position: S = A[0][0] / W[0][0] */
-		S00.x = A[0][0][0] * inv_w0;
-		S00.y = A[0][0][1] * inv_w0;
-		S00.z = A[0][0][2] * inv_w0;
-
-		if (eval_flags & QAWS_SURFACE_EVAL_POSITION)
+		qaws_internal_bspline_basis_derivs_lanes(u_ders, impl->u_knots, u_span, u, ud, max_u_deriv);
+		qaws_internal_bspline_basis_derivs_lanes(v_ders, impl->v_knots, v_span, v, vd, max_v_deriv);
+		for (l = 0; l < n; l++)
 		{
-			out_result->position = S00;
-			out_result->valid_flags |= QAWS_SURFACE_EVAL_POSITION;
-		}
-
-		/* First partial du: Su = (A[1][0] - S * W[1][0]) / W[0][0] */
-		Su.x = Su.y = Su.z = 0;
-		if (max_u_deriv >= 1)
-		{
-			Su.x = (A[1][0][0] - S00.x * W[1][0]) * inv_w0;
-			Su.y = (A[1][0][1] - S00.y * W[1][0]) * inv_w0;
-			Su.z = (A[1][0][2] - S00.z * W[1][0]) * inv_w0;
-		}
-		if (eval_flags & QAWS_SURFACE_EVAL_DU)
-		{
-			out_result->du = Su;
-			out_result->valid_flags |= QAWS_SURFACE_EVAL_DU;
-		}
-
-		/* First partial dv: Sv = (A[0][1] - S * W[0][1]) / W[0][0] */
-		Sv.x = Sv.y = Sv.z = 0;
-		if (max_v_deriv >= 1)
-		{
-			Sv.x = (A[0][1][0] - S00.x * W[0][1]) * inv_w0;
-			Sv.y = (A[0][1][1] - S00.y * W[0][1]) * inv_w0;
-			Sv.z = (A[0][1][2] - S00.z * W[0][1]) * inv_w0;
-		}
-		if (eval_flags & QAWS_SURFACE_EVAL_DV)
-		{
-			out_result->dv = Sv;
-			out_result->valid_flags |= QAWS_SURFACE_EVAL_DV;
-		}
-
-		/* Second partial duu: Suu = (A[2][0] - 2*Su*W[1][0] - S*W[2][0]) / W[0][0] */
-		Suu.x = Suu.y = Suu.z = 0;
-		if (eval_flags & QAWS_SURFACE_EVAL_DUU)
-		{
-			Suu.x = (A[2][0][0] - QAWS_LITERAL(2.0) * Su.x * W[1][0] - S00.x * W[2][0]) * inv_w0;
-			Suu.y = (A[2][0][1] - QAWS_LITERAL(2.0) * Su.y * W[1][0] - S00.y * W[2][0]) * inv_w0;
-			Suu.z = (A[2][0][2] - QAWS_LITERAL(2.0) * Su.z * W[1][0] - S00.z * W[2][0]) * inv_w0;
-			out_result->duu = Suu;
-			out_result->valid_flags |= QAWS_SURFACE_EVAL_DUU;
-		}
-
-		/* Second partial dvv: Svv = (A[0][2] - 2*Sv*W[0][1] - S*W[0][2]) / W[0][0] */
-		Svv.x = Svv.y = Svv.z = 0;
-		if (eval_flags & QAWS_SURFACE_EVAL_DVV)
-		{
-			Svv.x = (A[0][2][0] - QAWS_LITERAL(2.0) * Sv.x * W[0][1] - S00.x * W[0][2]) * inv_w0;
-			Svv.y = (A[0][2][1] - QAWS_LITERAL(2.0) * Sv.y * W[0][1] - S00.y * W[0][2]) * inv_w0;
-			Svv.z = (A[0][2][2] - QAWS_LITERAL(2.0) * Sv.z * W[0][1] - S00.z * W[0][2]) * inv_w0;
-			out_result->dvv = Svv;
-			out_result->valid_flags |= QAWS_SURFACE_EVAL_DVV;
-		}
-
-		/* Mixed partial duv: Suv = (A[1][1] - Su*W[0][1] - Sv*W[1][0] - S*W[1][1]) / W[0][0] */
-		Suv.x = Suv.y = Suv.z = 0;
-		if ((eval_flags & QAWS_SURFACE_EVAL_DUV) && max_u_deriv >= 1 && max_v_deriv >= 1)
-		{
-			Suv.x = (A[1][1][0] - Su.x * W[0][1] - Sv.x * W[1][0] - S00.x * W[1][1]) * inv_w0;
-			Suv.y = (A[1][1][1] - Su.y * W[0][1] - Sv.y * W[1][0] - S00.y * W[1][1]) * inv_w0;
-			Suv.z = (A[1][1][2] - Su.z * W[0][1] - Sv.z * W[1][0] - S00.z * W[1][1]) * inv_w0;
-			out_result->duv = Suv;
-			out_result->valid_flags |= QAWS_SURFACE_EVAL_DUV;
-		}
-
-		/* Normal */
-		if (eval_flags & QAWS_SURFACE_EVAL_NORMAL)
-		{
-			qaws_internal_surface_normal(&out_result->normal, out_result->du, out_result->dv);
-			out_result->valid_flags |= QAWS_SURFACE_EVAL_NORMAL;
+			qaws_surface_eval_result* r = out_results + i0 + l;
+			qaws_status st;
+			memset(r, 0, sizeof(*r));
+			st = nurbs_surface_sum(impl, ud, vd, u_span[l], v_span[l], u_ders + l, QAWS_INTERNAL_BASIS_LANES_MAX,
+				v_ders + l, QAWS_INTERNAL_BASIS_LANES_MAX, max_u_deriv, max_v_deriv, eval_flags, r);
+			if (st != QAWS_STATUS_OK && first == QAWS_STATUS_OK)
+				first = st;
 		}
 	}
-
-	return QAWS_STATUS_OK;
+	return first;
 }
 
 static void nurbs_surface_destroy(void* impl, qaws_allocator const* allocator)

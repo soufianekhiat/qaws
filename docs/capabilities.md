@@ -172,4 +172,5 @@ operations publish no scratch-size bound.
   differences.
 - **SIMD kernels.** `src/qaws/batch/` has no public header; no public entry
   point and no test calls it. The curve batches use `src/qaws/simd` directly
-  (B-spline basis functions a register of parameters at once).
+  (B-spline and NURBS basis functions a register of parameters at once, curves
+  and surfaces).

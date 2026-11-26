@@ -587,18 +587,22 @@ static void test_surface_records(void)
 	qaws_surface_destroy(nu);
 }
 
-/* The batches equal the one-point evaluations bit for bit: B-splines of degree 1 to 5 (the SIMD lanes' path), 2D and 3D,
-   every derivative, the parameters unsorted, on knots, at and past the ends, repeated (the spans the batch reuses). */
+/* The batches equal the one-point evaluations bit for bit: B-splines and NURBS of degree 1 to 5 (the SIMD lanes' path),
+   2D and 3D, every derivative, the parameters unsorted, on knots, at and past the ends, repeated (the spans the batch
+   reuses). */
 static void test_batch_lanes(void)
 {
-	unsigned int dim, p, i, bad = 0, cases = 0;
-	char msg[160];
+	unsigned int dim, p, i, rational, bad = 0, cases = 0;
+	char msg[200];
+	for (rational = 0; rational <= 1; rational++)
 	for (dim = 2; dim <= 3; dim++)
 		for (p = 1; p <= 5; p++)
 		{
-			qaws_scalar cp[3 * 12], par[203];
+			qaws_scalar cp[3 * 12], par[203], w[12], kn[12 + 6];
 			qaws_bspline_desc d;
+			qaws_nurbs_desc nd;
 			qaws_curve* c = NULL;
+			qaws_status st;
 			qaws_range r;
 			unsigned int const n = 12, flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3;
 			for (i = 0; i < dim * n; i++)
@@ -606,7 +610,15 @@ static void test_batch_lanes(void)
 			memset(&d, 0, sizeof d);
 			d.dimension = dim == 2 ? QAWS_DIMENSION_2D : QAWS_DIMENSION_3D, d.degree = p, d.control_points = cp;
 			d.control_point_count = n, d.is_uniform = 1;
-			if (qaws_curve_create_bspline(&c, &d) != QAWS_STATUS_OK)
+			for (i = 0; i < n; i++)
+				w[i] = (qaws_scalar)(1.25 + 0.75 * cos(2.3 * i));
+			for (i = 0; i < n + p + 1; i++)
+				kn[i] = (qaws_scalar)(i <= p ? 0 : i >= n ? n - p : i - p);
+			memset(&nd, 0, sizeof nd);
+			nd.dimension = d.dimension, nd.degree = p, nd.control_points = cp, nd.control_point_count = n;
+			nd.knots = kn, nd.knot_count = n + p + 1, nd.weights = w, nd.weight_count = n;
+			st = rational ? qaws_curve_create_nurbs(&c, &nd) : qaws_curve_create_bspline(&c, &d);
+			if (st != QAWS_STATUS_OK)
 			{
 				bad++;
 				continue;
@@ -648,8 +660,76 @@ static void test_batch_lanes(void)
 			cases += 203;
 			qaws_curve_destroy(c);
 		}
-	sprintf(msg, "B-spline batches (degrees 1-5, 2D and 3D, every derivative) equal one-point evaluations bit for bit: %u of %u differ", bad, cases);
-	TEST_ASSERT(bad == 0 && cases == 2 * 5 * 203, msg);
+	sprintf(msg, "B-spline and NURBS batches (degrees 1-5, 2D and 3D, every derivative) equal one-point evaluations bit for bit: %u of %u differ", bad, cases);
+	TEST_ASSERT(bad == 0 && cases == 2 * 2 * 5 * 203, msg);
+}
+
+/* Surface batches equal qaws_surface_evaluate bit for bit: B-spline and NURBS surfaces of degrees 1 to 5 (the SIMD lanes'
+   path), every derivative and the normal, points on a grid, on knot lines, past the domain, repeated. */
+static void test_surface_batch_lanes(void)
+{
+	static unsigned int const degs[5][2] = { {1, 1}, {2, 3}, {3, 3}, {5, 4}, {4, 5} };
+	unsigned int c, rational, i, bad = 0, cases = 0;
+	unsigned int const flags = QAWS_SURFACE_EVAL_POSITION | QAWS_SURFACE_EVAL_DU | QAWS_SURFACE_EVAL_DV | QAWS_SURFACE_EVAL_NORMAL
+		| QAWS_SURFACE_EVAL_DUU | QAWS_SURFACE_EVAL_DUV | QAWS_SURFACE_EVAL_DVV;
+	char msg[200];
+	for (rational = 0; rational <= 1; rational++)
+		for (c = 0; c < 5; c++)
+		{
+			qaws_vec3 cp[8 * 7];
+			qaws_scalar w[8 * 7], u[150], v[150];
+			qaws_surface* srf = NULL;
+			qaws_surface_eval_result b[150], o;
+			qaws_range ur, vr;
+			qaws_status st;
+			for (i = 0; i < 8 * 7; i++)
+			{
+				cp[i].x = (qaws_scalar)(i / 7), cp[i].y = (qaws_scalar)(i % 7);
+				cp[i].z = (qaws_scalar)(sin(0.9 * i) + 0.3 * cos(2.1 * i));
+				w[i] = (qaws_scalar)(1.25 + 0.75 * sin(1.3 * i));
+			}
+			if (rational)
+			{
+				qaws_surface_nurbs_desc d;
+				memset(&d, 0, sizeof d);
+				d.u_degree = degs[c][0], d.v_degree = degs[c][1], d.control_points = cp, d.u_point_count = 8, d.v_point_count = 7, d.weights = w;
+				st = qaws_surface_create_nurbs(&srf, &d);
+			}
+			else
+			{
+				qaws_surface_bspline_desc d;
+				memset(&d, 0, sizeof d);
+				d.u_degree = degs[c][0], d.v_degree = degs[c][1], d.control_points = cp, d.u_point_count = 8, d.v_point_count = 7;
+				st = qaws_surface_create_bspline(&srf, &d);
+			}
+			if (st != QAWS_STATUS_OK)
+			{
+				bad++;
+				continue;
+			}
+			ur = qaws_surface_get_u_range(srf), vr = qaws_surface_get_v_range(srf);
+			for (i = 0; i < 150; i++)
+			{
+				double a = i < 100 ? (i % 10) / 9.0 : (i * 0.6180339887498949) - floor(i * 0.6180339887498949);
+				double e = i < 100 ? (i / 10) / 9.0 : (i * 0.7548776662466927) - floor(i * 0.7548776662466927);
+				if (i >= 140)
+					a = i < 145 ? -0.25 : 1.5, e = i < 145 ? 1.25 : -0.5;   /* (past the domain: clamped) */
+				u[i] = ur.min_value + (ur.max_value - ur.min_value) * (qaws_scalar)a;
+				v[i] = vr.min_value + (vr.max_value - vr.min_value) * (qaws_scalar)e;
+			}
+			u[130] = u[131] = u[132] = u[129], v[130] = v[131] = v[132] = v[129];
+			qaws_surface_evaluate_batch(b, srf, u, v, 150, flags);
+			for (i = 0; i < 150; i++)
+			{
+				memset(&o, 0, sizeof o);
+				qaws_surface_evaluate(&o, srf, u[i], v[i], flags);
+				bad += memcmp(&o, &b[i], sizeof o) != 0;
+			}
+			cases += 150;
+			qaws_surface_destroy(srf);
+		}
+	sprintf(msg, "B-spline and NURBS surface batches (degrees 1-5, every derivative, the normal) equal qaws_surface_evaluate bit for bit: %u of %u differ", bad, cases);
+	TEST_ASSERT(bad == 0 && cases == 2 * 5 * 150, msg);
 }
 
 int test_144_eval_consistency_main(void)
@@ -665,6 +745,7 @@ int test_144_eval_consistency_main(void)
 	test_curve_records();
 	test_surface_records();
 	test_batch_lanes();
+	test_surface_batch_lanes();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

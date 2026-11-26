@@ -10,6 +10,8 @@
 #include <string.h>
 #include "qaws_platform.h"
 #include "core/qaws_nurbs_eval_core.h"
+#include "internal/qaws_internal_span.h"
+#include "simd/qaws_simd.h"
 
 /* ---------------------------------------------------------------------------
  * Helpers
@@ -57,23 +59,19 @@ static int nurbs_compute_span_boundaries(
  * Vtable: eval_span_2d
  * ------------------------------------------------------------------------- */
 
-static qaws_status nurbs_eval_span_2d(
-	qaws_curve const *curve,
-	unsigned int span_index,
-	qaws_scalar local_t,
-	unsigned int eval_flags,
+/* the sums of a span and the quotient: the basis functions and derivatives ders ((max_deriv + 1) rows of degree + 1,
+   es scalars apart) times the weighted control points of knot span knot_span */
+static qaws_status nurbs_sum_2d(
+	qaws_nurbs_impl const *impl,
+	unsigned int degree,
+	unsigned int knot_span,
+	qaws_scalar const *ders,
+	unsigned int es,
+	unsigned int max_deriv,
 	qaws_eval_result_2d *out_result)
 {
 	unsigned int const dim_count = 2;
-	qaws_nurbs_impl *impl = (qaws_nurbs_impl *)curve->impl;
-	unsigned int degree = curve->degree;
 	unsigned int order = degree + 1;
-	qaws_scalar span_start;
-	qaws_scalar span_end;
-	qaws_scalar t;
-	unsigned int knot_span;
-	unsigned int max_deriv;
-	qaws_scalar ders[4 * 64]; /* (max_deriv+1) * order, generous upper bound */
 	qaws_scalar W_deriv[4] = {0, 0, 0, 0};
 	qaws_scalar A_deriv[4][2] = {{0}};
 	unsigned int k, j, idx, d;
@@ -83,34 +81,13 @@ static qaws_status nurbs_eval_span_2d(
 	qaws_scalar C1[2] = {0, 0};
 	qaws_scalar C2[2] = {0, 0};
 
-	memset(out_result, 0, sizeof(*out_result));
-
-	/* Map local_t [0,1] to global parameter t */
-	span_start = curve->span_boundaries[span_index];
-	span_end = curve->span_boundaries[span_index + 1];
-	t = span_start + local_t * (span_end - span_start);
-
-	/* Find knot span */
-	knot_span = qaws_internal_find_knot_span(
-		impl->knots, impl->knot_count, degree, impl->control_point_count, t);
-
-	/* Determine max derivative order needed */
-	max_deriv = 0;
-	if (eval_flags & QAWS_EVAL_FLAG_D1) max_deriv = 1;
-	if (eval_flags & QAWS_EVAL_FLAG_D2) max_deriv = 2;
-	if (eval_flags & QAWS_EVAL_FLAG_D3) max_deriv = 3;
-
-	/* Compute basis function derivatives */
-	qaws_internal_bspline_basis_derivs(
-		ders, impl->knots, impl->knot_count, degree, knot_span, t, max_deriv);
-
 	/* Compute A^(k) and W^(k) for k = 0..max_deriv */
 	for (k = 0; k <= max_deriv; ++k)
 	{
 		for (j = 0; j < order; ++j)
 		{
 			idx = knot_span - degree + j;
-			Nkj = ders[k * order + j];
+			Nkj = ders[(k * order + j) * es];
 			w = impl->weights[idx];
 			Nw = Nkj * w;
 			W_deriv[k] += Nw;
@@ -170,35 +147,21 @@ static qaws_status nurbs_eval_span_2d(
 	return QAWS_STATUS_OK;
 }
 
-/* ---------------------------------------------------------------------------
- * Vtable: eval_span_3d
- * ------------------------------------------------------------------------- */
-
-static qaws_status nurbs_eval_span_3d(
+static qaws_status nurbs_eval_span_2d(
 	qaws_curve const *curve,
 	unsigned int span_index,
 	qaws_scalar local_t,
 	unsigned int eval_flags,
-	qaws_eval_result_3d *out_result)
+	qaws_eval_result_2d *out_result)
 {
-	unsigned int const dim_count = 3;
-	qaws_nurbs_impl *impl = (qaws_nurbs_impl *)curve->impl;
+	qaws_nurbs_impl const *impl = (qaws_nurbs_impl const *)curve->impl;
 	unsigned int degree = curve->degree;
-	unsigned int order = degree + 1;
 	qaws_scalar span_start;
 	qaws_scalar span_end;
 	qaws_scalar t;
 	unsigned int knot_span;
 	unsigned int max_deriv;
-	qaws_scalar ders[4 * 64];
-	qaws_scalar W_deriv[4] = {0, 0, 0, 0};
-	qaws_scalar A_deriv[4][3] = {{0}};
-	unsigned int k, j, idx, d;
-	qaws_scalar Nkj, w, Nw;
-	qaws_scalar inv_w0;
-	qaws_scalar C[3];
-	qaws_scalar C1[3] = {0, 0, 0};
-	qaws_scalar C2[3] = {0, 0, 0};
+	qaws_scalar ders[4 * 64]; /* (max_deriv+1) * order, generous upper bound */
 
 	memset(out_result, 0, sizeof(*out_result));
 
@@ -221,13 +184,42 @@ static qaws_status nurbs_eval_span_3d(
 	qaws_internal_bspline_basis_derivs(
 		ders, impl->knots, impl->knot_count, degree, knot_span, t, max_deriv);
 
+	return nurbs_sum_2d(impl, degree, knot_span, ders, 1, max_deriv, out_result);
+}
+
+/* ---------------------------------------------------------------------------
+ * Vtable: eval_span_3d
+ * ------------------------------------------------------------------------- */
+
+/* the sums of a span and the quotient: the basis functions and derivatives ders ((max_deriv + 1) rows of degree + 1,
+   es scalars apart) times the weighted control points of knot span knot_span */
+static qaws_status nurbs_sum_3d(
+	qaws_nurbs_impl const *impl,
+	unsigned int degree,
+	unsigned int knot_span,
+	qaws_scalar const *ders,
+	unsigned int es,
+	unsigned int max_deriv,
+	qaws_eval_result_3d *out_result)
+{
+	unsigned int const dim_count = 3;
+	unsigned int order = degree + 1;
+	qaws_scalar W_deriv[4] = {0, 0, 0, 0};
+	qaws_scalar A_deriv[4][3] = {{0}};
+	unsigned int k, j, idx, d;
+	qaws_scalar Nkj, w, Nw;
+	qaws_scalar inv_w0;
+	qaws_scalar C[3];
+	qaws_scalar C1[3] = {0, 0, 0};
+	qaws_scalar C2[3] = {0, 0, 0};
+
 	/* Compute A^(k) and W^(k) for k = 0..max_deriv */
 	for (k = 0; k <= max_deriv; ++k)
 	{
 		for (j = 0; j < order; ++j)
 		{
 			idx = knot_span - degree + j;
-			Nkj = ders[k * order + j];
+			Nkj = ders[(k * order + j) * es];
 			w = impl->weights[idx];
 			Nw = Nkj * w;
 			W_deriv[k] += Nw;
@@ -292,6 +284,121 @@ static qaws_status nurbs_eval_span_3d(
 	}
 
 	return QAWS_STATUS_OK;
+}
+
+static qaws_status nurbs_eval_span_3d(
+	qaws_curve const *curve,
+	unsigned int span_index,
+	qaws_scalar local_t,
+	unsigned int eval_flags,
+	qaws_eval_result_3d *out_result)
+{
+	qaws_nurbs_impl const *impl = (qaws_nurbs_impl const *)curve->impl;
+	unsigned int degree = curve->degree;
+	qaws_scalar span_start;
+	qaws_scalar span_end;
+	qaws_scalar t;
+	unsigned int knot_span;
+	unsigned int max_deriv;
+	qaws_scalar ders[4 * 64];
+
+	memset(out_result, 0, sizeof(*out_result));
+
+	/* Map local_t [0,1] to global parameter t */
+	span_start = curve->span_boundaries[span_index];
+	span_end = curve->span_boundaries[span_index + 1];
+	t = span_start + local_t * (span_end - span_start);
+
+	/* Find knot span */
+	knot_span = qaws_internal_find_knot_span(
+		impl->knots, impl->knot_count, degree, impl->control_point_count, t);
+
+	/* Determine max derivative order needed */
+	max_deriv = 0;
+	if (eval_flags & QAWS_EVAL_FLAG_D1) max_deriv = 1;
+	if (eval_flags & QAWS_EVAL_FLAG_D2) max_deriv = 2;
+	if (eval_flags & QAWS_EVAL_FLAG_D3) max_deriv = 3;
+
+	/* Compute basis function derivatives */
+	qaws_internal_bspline_basis_derivs(
+		ders, impl->knots, impl->knot_count, degree, knot_span, t, max_deriv);
+
+	return nurbs_sum_3d(impl, degree, knot_span, ders, 1, max_deriv, out_result);
+}
+
+/* ---------------------------------------------------------------------------
+ * Batches: the basis functions a SIMD register's worth of parameters at once
+ * ------------------------------------------------------------------------- */
+
+qaws_status qaws_internal_nurbs_eval_batch(
+	void *out_results,
+	qaws_curve const *curve,
+	qaws_scalar const *parameters,
+	unsigned int count,
+	unsigned int eval_flags)
+{
+	qaws_nurbs_impl const *impl = (qaws_nurbs_impl const *)curve->impl;
+	unsigned int const degree = curve->degree, lanes = qaws_internal_bspline_basis_lanes(degree);
+	unsigned int max_deriv = 0, i0, l, span_index = 0, ks = 0;
+	int have = 0;
+	qaws_status first = QAWS_STATUS_OK;
+	QAWS_SIMD_ALIGN qaws_scalar ders[4 * 6 * QAWS_INTERNAL_BASIS_LANES_MAX];
+	QAWS_SIMD_ALIGN qaws_scalar t[QAWS_INTERNAL_BASIS_LANES_MAX];
+	unsigned int knot_span[QAWS_INTERNAL_BASIS_LANES_MAX];
+	if (!lanes || curve->kind != QAWS_CURVE_KIND_NURBS)
+		return QAWS_STATUS_UNSUPPORTED_OPERATION;
+	if (eval_flags & QAWS_EVAL_FLAG_D1) max_deriv = 1;
+	if (eval_flags & QAWS_EVAL_FLAG_D2) max_deriv = 2;
+	if (eval_flags & QAWS_EVAL_FLAG_D3) max_deriv = 3;
+	for (i0 = 0; i0 < count; i0 += lanes)
+	{
+		unsigned int const n = count - i0 < lanes ? count - i0 : lanes;
+		for (l = 0; l < lanes; l++)
+		{
+			qaws_scalar const x = parameters[i0 + (l < n ? l : n - 1)];
+			qaws_scalar const *bd = curve->span_boundaries;
+			qaws_scalar local_t, span_start, span_end;
+			/* the span and knot span reused strictly inside them (as qaws_internal_bspline_eval_batch) */
+			if (have && x > bd[0] && x < bd[curve->span_count] && bd[span_index] <= x && x < bd[span_index + 1])
+			{
+				qaws_scalar const span_len = bd[span_index + 1] - bd[span_index];
+				local_t = span_len < (qaws_scalar)1e-10 ? (qaws_scalar)0 : (x - bd[span_index]) / span_len;
+				if (local_t < (qaws_scalar)0) local_t = (qaws_scalar)0;
+				else if (local_t > (qaws_scalar)1) local_t = (qaws_scalar)1;
+			}
+			else
+				span_index = qaws_internal_find_span(&local_t, curve, x);
+			span_start = bd[span_index];
+			span_end = bd[span_index + 1];
+			t[l] = span_start + local_t * (span_end - span_start);
+			if (!(have && t[l] > impl->knots[degree] && t[l] < impl->knots[impl->control_point_count]
+				&& impl->knots[ks] <= t[l] && t[l] < impl->knots[ks + 1]))
+				ks = qaws_internal_find_knot_span(
+					impl->knots, impl->knot_count, degree, impl->control_point_count, t[l]);
+			knot_span[l] = ks;
+			have = 1;
+		}
+		qaws_internal_bspline_basis_derivs_lanes(ders, impl->knots, knot_span, t, degree, max_deriv);
+		for (l = 0; l < n; l++)
+		{
+			qaws_status st;
+			if (curve->dimension == QAWS_DIMENSION_2D)
+			{
+				qaws_eval_result_2d *r = (qaws_eval_result_2d *)out_results + i0 + l;
+				memset(r, 0, sizeof(*r));
+				st = nurbs_sum_2d(impl, degree, knot_span[l], ders + l, QAWS_INTERNAL_BASIS_LANES_MAX, max_deriv, r);
+			}
+			else
+			{
+				qaws_eval_result_3d *r = (qaws_eval_result_3d *)out_results + i0 + l;
+				memset(r, 0, sizeof(*r));
+				st = nurbs_sum_3d(impl, degree, knot_span[l], ders + l, QAWS_INTERNAL_BASIS_LANES_MAX, max_deriv, r);
+			}
+			if (st != QAWS_STATUS_OK && first == QAWS_STATUS_OK)
+				first = st;
+		}
+	}
+	return first;
 }
 
 /* ---------------------------------------------------------------------------
