@@ -13,6 +13,8 @@ typedef __m128d qaws_simdd;
 #define qaws_simd_sub_f(a, b)     _mm_sub_ps(a, b)
 #define qaws_simd_mul_f(a, b)     _mm_mul_ps(a, b)
 #define qaws_simd_fmadd_f(a, b, c) _mm_add_ps(_mm_mul_ps(a, b), c)
+#define qaws_simd_div_f(a, b)     _mm_div_ps(a, b)
+#define qaws_simd_neg_f(a)        _mm_xor_ps(a, _mm_set1_ps(-0.0f))
 
 #define qaws_simd_set1_d(v)       _mm_set1_pd(v)
 #define qaws_simd_load_d(ptr)     _mm_load_pd(ptr)
@@ -21,5 +23,7 @@ typedef __m128d qaws_simdd;
 #define qaws_simd_sub_d(a, b)     _mm_sub_pd(a, b)
 #define qaws_simd_mul_d(a, b)     _mm_mul_pd(a, b)
 #define qaws_simd_fmadd_d(a, b, c) _mm_add_pd(_mm_mul_pd(a, b), c)
+#define qaws_simd_div_d(a, b)     _mm_div_pd(a, b)
+#define qaws_simd_neg_d(a)        _mm_xor_pd(a, _mm_set1_pd(-0.0))
 
 #endif /* QAWS_SIMD_SSE2_H */

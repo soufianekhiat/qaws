@@ -14,6 +14,23 @@ typedef double qaws_simdd;
 #define qaws_simd_sub_f(a, b)     vsubq_f32(a, b)
 #define qaws_simd_mul_f(a, b)     vmulq_f32(a, b)
 #define qaws_simd_fmadd_f(a, b, c) vmlaq_f32(c, a, b)
+#define qaws_simd_neg_f(a)        vnegq_f32(a)
+#if defined(__aarch64__) || defined(_M_ARM64)
+# define qaws_simd_div_f(a, b)    vdivq_f32(a, b)
+#else
+/* ARMv7 has no vector division: lane by lane, correctly rounded (a reciprocal estimate refined is not) */
+static inline float32x4_t qaws_simd_neon_div_f(float32x4_t a, float32x4_t b)
+{
+	float x[4], y[4];
+	int i;
+	vst1q_f32(x, a);
+	vst1q_f32(y, b);
+	for (i = 0; i < 4; i++)
+		x[i] /= y[i];
+	return vld1q_f32(x);
+}
+# define qaws_simd_div_f(a, b)    qaws_simd_neon_div_f(a, b)
+#endif
 
 #define qaws_simd_set1_d(v)       (v)
 #define qaws_simd_load_d(ptr)     (*(ptr))
@@ -22,5 +39,7 @@ typedef double qaws_simdd;
 #define qaws_simd_sub_d(a, b)     ((a) - (b))
 #define qaws_simd_mul_d(a, b)     ((a) * (b))
 #define qaws_simd_fmadd_d(a, b, c) ((a) * (b) + (c))
+#define qaws_simd_div_d(a, b)     ((a) / (b))
+#define qaws_simd_neg_d(a)        (-(a))
 
 #endif /* QAWS_SIMD_NEON_H */

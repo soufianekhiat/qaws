@@ -171,4 +171,5 @@ operations publish no scratch-size bound.
   through their sections' jets; sections without jets fall back to
   differences.
 - **SIMD kernels.** `src/qaws/batch/` has no public header; no public entry
-  point and no test calls it.
+  point and no test calls it. The curve batches use `src/qaws/simd` directly
+  (B-spline basis functions a register of parameters at once).

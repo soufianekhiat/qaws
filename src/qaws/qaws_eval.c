@@ -2,6 +2,8 @@
 #include "qaws_surface.h"
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_span.h"
+#include "internal/qaws_internal_curve.h"
+#include "internal/qaws_internal_kinds.h"
 #include <string.h>
 
 qaws_status qaws_curve_evaluate_2d(
@@ -97,6 +99,13 @@ qaws_status qaws_curve_evaluate_batch_2d(
 	if (curve->dimension != QAWS_DIMENSION_2D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
+	if (curve->kind == QAWS_CURVE_KIND_BSPLINE)
+	{
+		qaws_status const s = qaws_internal_bspline_eval_batch(out_results, curve, parameters, count, eval_flags);
+		if (s != QAWS_STATUS_UNSUPPORTED_OPERATION)
+			return s;
+	}
+
 	for (i = 0; i < count; i++)
 	{
 		qaws_scalar local_t;
@@ -126,6 +135,13 @@ qaws_status qaws_curve_evaluate_batch_3d(
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	if (curve->dimension != QAWS_DIMENSION_3D)
 		return QAWS_STATUS_INVALID_DIMENSION;
+
+	if (curve->kind == QAWS_CURVE_KIND_BSPLINE)
+	{
+		qaws_status const s = qaws_internal_bspline_eval_batch(out_results, curve, parameters, count, eval_flags);
+		if (s != QAWS_STATUS_UNSUPPORTED_OPERATION)
+			return s;
+	}
 
 	for (i = 0; i < count; i++)
 	{

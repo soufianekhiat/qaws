@@ -78,4 +78,19 @@ unsigned int qaws_internal_find_knot_span(
 	unsigned int num_control_points,
 	qaws_scalar t);
 
+/* The basis functions and derivatives of qaws_internal_bspline_basis_derivs for several parameters at once, one per
+   SIMD lane: lane i at t[i] in knot span span[i], up to order k (at most 3), with the same operations in the same order
+   (each lane equal to the one-parameter call bit for bit). qaws_internal_bspline_basis_lanes(degree): the lanes filled,
+   0 where this does not apply (a degree past 5, no SIMD for the precision). t holds that many parameters, 32-byte
+   aligned; out_ders[(d * (degree + 1) + j) * QAWS_INTERNAL_BASIS_LANES_MAX + i], 32-byte aligned. */
+#define QAWS_INTERNAL_BASIS_LANES_MAX 8
+unsigned int qaws_internal_bspline_basis_lanes(unsigned int degree);
+void qaws_internal_bspline_basis_derivs_lanes(
+	qaws_scalar* out_ders,
+	qaws_scalar const* knots,
+	unsigned int const* span,
+	qaws_scalar const* t,
+	unsigned int degree,
+	unsigned int k);
+
 #endif /* QAWS_INTERNAL_BASIS_H */

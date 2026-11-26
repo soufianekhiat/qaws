@@ -587,6 +587,71 @@ static void test_surface_records(void)
 	qaws_surface_destroy(nu);
 }
 
+/* The batches equal the one-point evaluations bit for bit: B-splines of degree 1 to 5 (the SIMD lanes' path), 2D and 3D,
+   every derivative, the parameters unsorted, on knots, at and past the ends, repeated (the spans the batch reuses). */
+static void test_batch_lanes(void)
+{
+	unsigned int dim, p, i, bad = 0, cases = 0;
+	char msg[160];
+	for (dim = 2; dim <= 3; dim++)
+		for (p = 1; p <= 5; p++)
+		{
+			qaws_scalar cp[3 * 12], par[203];
+			qaws_bspline_desc d;
+			qaws_curve* c = NULL;
+			qaws_range r;
+			unsigned int const n = 12, flags = QAWS_EVAL_FLAG_POSITION | QAWS_EVAL_FLAG_D1 | QAWS_EVAL_FLAG_D2 | QAWS_EVAL_FLAG_D3;
+			for (i = 0; i < dim * n; i++)
+				cp[i] = (qaws_scalar)(sin(1.7 * i + p) + 0.1 * i);
+			memset(&d, 0, sizeof d);
+			d.dimension = dim == 2 ? QAWS_DIMENSION_2D : QAWS_DIMENSION_3D, d.degree = p, d.control_points = cp;
+			d.control_point_count = n, d.is_uniform = 1;
+			if (qaws_curve_create_bspline(&c, &d) != QAWS_STATUS_OK)
+			{
+				bad++;
+				continue;
+			}
+			r = qaws_curve_get_parameter_range(c);
+			for (i = 0; i < 160; i++)
+			{
+				double u = (i < 80 ? i / 79.0 : (i * 0.6180339887498949) - floor(i * 0.6180339887498949));
+				par[i] = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)u;
+			}
+			/* the span ends (equally spaced: a uniform B-spline) */
+			for (i = 0; i <= qaws_curve_get_span_count(c) && 160 + i < 200; i++)
+				par[160 + i] = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (qaws_scalar)qaws_curve_get_span_count(c);
+			for (i = 160 + qaws_curve_get_span_count(c) + 1; i < 200; i++)
+				par[i] = par[i - 1];
+			par[200] = r.min_value - 1, par[201] = r.max_value + 1, par[202] = r.min_value;
+			if (dim == 2)
+			{
+				qaws_eval_result_2d b[203], o;
+				qaws_curve_evaluate_batch_2d(b, c, par, 203, flags);
+				for (i = 0; i < 203; i++)
+				{
+					memset(&o, 0, sizeof o);
+					qaws_curve_evaluate_2d(&o, c, par[i], flags);
+					bad += memcmp(&o, &b[i], sizeof o) != 0;
+				}
+			}
+			else
+			{
+				qaws_eval_result_3d b[203], o;
+				qaws_curve_evaluate_batch_3d(b, c, par, 203, flags);
+				for (i = 0; i < 203; i++)
+				{
+					memset(&o, 0, sizeof o);
+					qaws_curve_evaluate_3d(&o, c, par[i], flags);
+					bad += memcmp(&o, &b[i], sizeof o) != 0;
+				}
+			}
+			cases += 203;
+			qaws_curve_destroy(c);
+		}
+	sprintf(msg, "B-spline batches (degrees 1-5, 2D and 3D, every derivative) equal one-point evaluations bit for bit: %u of %u differ", bad, cases);
+	TEST_ASSERT(bad == 0 && cases == 2 * 5 * 203, msg);
+}
+
 int test_144_eval_consistency_main(void)
 {
 	g_pass = 0;
@@ -599,6 +664,7 @@ int test_144_eval_consistency_main(void)
 	test_spline_cores();
 	test_curve_records();
 	test_surface_records();
+	test_batch_lanes();
 	printf("  Results: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail;
 }

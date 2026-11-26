@@ -53,6 +53,12 @@ All notable changes to Qaws are documented here.
   miss an extreme between them; 12 times faster on a 64-point cubic. Test 17.
 - `qaws_curve_compute_parameter_at_arc_length` integrates only up to the
   span the length ends in, not the whole curve first (2.8 times faster).
+- `qaws_curve_evaluate_batch_2d/3d` on B-splines of degree 1 to 5: the
+  basis functions of a SIMD register's worth of parameters at once, spans
+  reused across sorted parameters; each result equal to the one-point
+  evaluation bit for bit (1.6-2.3 times faster, SSE2 to AVX2). The SIMD
+  layer (`src/qaws/simd`) gains correctly rounded division and negation.
+  Test 144.
 - `qaws_polyline_simplify_2d` takes the nearest point from a heap (100k
   points: 28.9 s to 44 ms) and `qaws_surface_tessellate` finds its vertices
   and edge vertices through a table and sorted orders (15 times faster):

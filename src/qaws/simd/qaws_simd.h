@@ -30,4 +30,13 @@
 
 #include "qaws_simd_types.h"
 
+/* a buffer aligned for the widest register's aligned loads and stores */
+#if defined(_MSC_VER)
+# define QAWS_SIMD_ALIGN __declspec(align(32))
+#elif defined(__GNUC__) || defined(__clang__)
+# define QAWS_SIMD_ALIGN __attribute__((aligned(32)))
+#else
+# define QAWS_SIMD_ALIGN
+#endif
+
 #endif /* QAWS_SIMD_H */

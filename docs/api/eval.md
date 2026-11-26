@@ -87,6 +87,9 @@ Evaluates `curve` at `count` global parameters.
 - Returns `QAWS_STATUS_OK` if all evaluations succeed. On partial failure every entry is still attempted and the
   first error status is returned; `out_results[i].valid_flags == 0` marks a failed entry.
 - `QAWS_STATUS_INVALID_ARGUMENT` for a null pointer, `QAWS_STATUS_INVALID_DIMENSION` for a dimension mismatch.
+- B-splines of degree 1 to 5 compute the basis functions of several parameters at once, one per SIMD lane (2 or 4
+  in f64, 4 or 8 in f32, SSE2 or AVX2; NEON f32), and reuse a span while the parameters stay inside it: each result
+  equals the one-point evaluation bit for bit. Sorted parameters are the fastest.
 
 ---
 

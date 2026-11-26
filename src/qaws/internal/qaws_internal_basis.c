@@ -263,3 +263,149 @@ void qaws_internal_bspline_basis_derivs(
 	}
 }
 
+/* ---- several parameters at once: one per SIMD lane ---- */
+
+#include "../simd/qaws_simd.h"
+
+#if QAWS_SCALAR_IS_FLOAT
+# define QB_W QAWS_SIMD_WIDTH_F32
+# define QB_V qaws_simdf
+# define QB_SET1 qaws_simd_set1_f
+# define QB_LOAD qaws_simd_load_f
+# define QB_STORE qaws_simd_store_f
+# define QB_ADD qaws_simd_add_f
+# define QB_SUB qaws_simd_sub_f
+# define QB_MUL qaws_simd_mul_f
+# define QB_DIV qaws_simd_div_f
+# define QB_NEG qaws_simd_neg_f
+#else
+# define QB_W QAWS_SIMD_WIDTH_F64
+# define QB_V qaws_simdd
+# define QB_SET1 qaws_simd_set1_d
+# define QB_LOAD qaws_simd_load_d
+# define QB_STORE qaws_simd_store_d
+# define QB_ADD qaws_simd_add_d
+# define QB_SUB qaws_simd_sub_d
+# define QB_MUL qaws_simd_mul_d
+# define QB_DIV qaws_simd_div_d
+# define QB_NEG qaws_simd_neg_d
+#endif
+
+unsigned int qaws_internal_bspline_basis_lanes(unsigned int degree)
+{
+	return QB_W > 1 && QB_W <= QAWS_INTERNAL_BASIS_LANES_MAX && degree >= 1 && degree <= 5 ? QB_W : 0;
+}
+
+#if QB_W > 1
+/* qb_basis_derivs with a lane per parameter: the knots each lane reads gathered, every operation the scalar one */
+QB_ALWAYS_INLINE void qb_basis_derivs_lanes(qaws_scalar* out, qaws_scalar const* knots, unsigned int p, unsigned int const* span,
+	qaws_scalar const* t, unsigned int k)
+{
+	unsigned int const order = p + 1;
+	QB_V ndu[36], left_arr[6], right_arr[6], a[2][6];
+	QB_V const one = QB_SET1(QAWS_ONE), zero = QB_SET1(QAWS_ZERO), tv = QB_LOAD(t);
+	QAWS_SIMD_ALIGN qaws_scalar g[QB_W];
+	unsigned int i;
+
+	ndu[0] = one;
+
+	for (unsigned int j = 1; j <= p; j++) {
+		for (i = 0; i < QB_W; i++)
+			g[i] = knots[span[i] + 1 - j];
+		left_arr[j] = QB_SUB(tv, QB_LOAD(g));
+		for (i = 0; i < QB_W; i++)
+			g[i] = knots[span[i] + j];
+		right_arr[j] = QB_SUB(QB_LOAD(g), tv);
+		QB_V saved = zero;
+
+		for (unsigned int r = 0; r < j; r++) {
+			ndu[j * order + r] = QB_ADD(right_arr[r + 1], left_arr[j - r]);
+			QB_V temp = QB_DIV(ndu[r * order + (j - 1)], ndu[j * order + r]);
+
+			ndu[r * order + j] = QB_ADD(saved, QB_MUL(right_arr[r + 1], temp));
+			saved = QB_MUL(left_arr[j - r], temp);
+		}
+
+		ndu[j * order + j] = saved;
+	}
+
+	for (unsigned int j = 0; j <= p; j++)
+		QB_STORE(&out[(0 * order + j) * QAWS_INTERNAL_BASIS_LANES_MAX], ndu[j * order + p]);
+
+	for (unsigned int r = 0; r <= p; r++) {
+		int s1 = 0;
+		int s2 = 1;
+		a[0][0] = one;
+
+		for (unsigned int d = 1; d <= k; d++) {
+			QB_V dd = zero;
+			int rj = (int)r - (int)d;
+			int pk = (int)p - (int)d;
+
+			if (rj >= 0) {
+				a[s2][0] = QB_DIV(a[s1][0], ndu[(pk + 1) * order + rj]);
+				dd = QB_MUL(a[s2][0], ndu[rj * order + pk]);
+			}
+
+			int j1 = (rj >= -1) ? 1 : (-(int)rj);
+			int j2 = ((int)r - 1 <= pk) ? ((int)d - 1) : ((int)p - (int)r);
+
+			for (int j = j1; j <= j2; j++) {
+				a[s2][j] = QB_DIV(QB_SUB(a[s1][j], a[s1][j - 1]), ndu[(pk + 1) * order + (rj + j)]);
+				dd = QB_ADD(dd, QB_MUL(a[s2][j], ndu[(rj + j) * order + pk]));
+			}
+
+			if ((int)r <= pk) {
+				a[s2][d] = QB_DIV(QB_NEG(a[s1][d - 1]), ndu[(pk + 1) * order + r]);
+				dd = QB_ADD(dd, QB_MUL(a[s2][d], ndu[r * order + pk]));
+			}
+
+			QB_STORE(&out[(d * order + r) * QAWS_INTERNAL_BASIS_LANES_MAX], dd);
+
+			{ int tmp = s1; s1 = s2; s2 = tmp; }
+		}
+	}
+
+	qaws_scalar factor = (qaws_scalar)p;
+	for (unsigned int d = 1; d <= k; d++) {
+		QB_V const f = QB_SET1(factor);
+		for (unsigned int j = 0; j <= p; j++) {
+			qaws_scalar* o = &out[(d * order + j) * QAWS_INTERNAL_BASIS_LANES_MAX];
+			QB_STORE(o, QB_MUL(QB_LOAD(o), f));
+		}
+		factor *= (qaws_scalar)(p - d);
+	}
+}
+#endif
+
+void qaws_internal_bspline_basis_derivs_lanes(
+	qaws_scalar* out_ders,
+	qaws_scalar const* knots,
+	unsigned int const* span,
+	qaws_scalar const* t,
+	unsigned int degree,
+	unsigned int k)
+{
+#if QB_W > 1
+	switch (degree) {
+	case 1: qb_basis_derivs_lanes(out_ders, knots, 1, span, t, k); return;
+	case 2: qb_basis_derivs_lanes(out_ders, knots, 2, span, t, k); return;
+	case 3: qb_basis_derivs_lanes(out_ders, knots, 3, span, t, k); return;
+	case 4: qb_basis_derivs_lanes(out_ders, knots, 4, span, t, k); return;
+	case 5: qb_basis_derivs_lanes(out_ders, knots, 5, span, t, k); return;
+	default: break;
+	}
+#endif
+	(void)out_ders, (void)knots, (void)span, (void)t, (void)degree, (void)k;
+}
+
+#undef QB_W
+#undef QB_V
+#undef QB_SET1
+#undef QB_LOAD
+#undef QB_STORE
+#undef QB_ADD
+#undef QB_SUB
+#undef QB_MUL
+#undef QB_DIV
+#undef QB_NEG

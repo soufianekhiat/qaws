@@ -15,6 +15,8 @@
  *   qaws_simd_sub_f(a, b)  — sub
  *   qaws_simd_mul_f(a, b)  — mul
  *   qaws_simd_fmadd_f(a, b, c) — fused multiply-add: a*b + c
+ *   qaws_simd_div_f(a, b)  - division, correctly rounded (each lane as the scalar a / b)
+ *   qaws_simd_neg_f(a)     - negation (the sign flipped, zeros included)
  *
  * Scalar type selection based on QAWS_SCALAR_IS_FLOAT:
  */
