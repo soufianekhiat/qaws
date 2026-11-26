@@ -99,9 +99,11 @@ qaws_status qaws_surface_compute_bounds(
     qaws_surface const* surface);
 ```
 
-Axis-aligned boxes by sampling: curves at 64 samples per span (at least 64) uniformly over the domain, surfaces on a
-32 x 32 grid. A sampled box can be slightly smaller than the true one; for guaranteed ranges use
-`qaws_curve_enclose` / `qaws_surface_enclose` below. Returns `QAWS_STATUS_INVALID_ARGUMENT`,
+Axis-aligned boxes. Curves with Bezier spans (Bezier, rational Bezier, B-spline, NURBS, views over whole spans): the
+true box, from each span's ends and the points where a coordinate's derivative vanishes (the roots of the derivative's
+Bernstein polynomial, `X'` or `X' W - X W'`, evaluated on the curve). Other curves: 64 samples per span (at least 64)
+uniformly over the domain; surfaces on a 32 x 32 grid. A sampled box can be slightly smaller than the true one; for
+ranges guaranteed through rounding use `qaws_curve_enclose` / `qaws_surface_enclose` below. Returns `QAWS_STATUS_INVALID_ARGUMENT`,
 `QAWS_STATUS_INVALID_DIMENSION` (curves), or an evaluation status.
 
 ---

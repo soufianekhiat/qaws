@@ -41,9 +41,14 @@ uses safeguarded Newton on the same measure; it returns
 
 ## Bounds
 
-`qaws_curve_compute_bounds_2d/3d` sample the curve (64 points per span, at
-least 64) and return the box of the samples. For guaranteed ranges use the
-enclosures below. `qaws_surface_compute_bounds` gives a surface's box.
+`qaws_curve_compute_bounds_2d/3d` return the curve's true box for the
+families with Bezier spans (Bezier, rational Bezier, B-spline, NURBS, views
+over whole spans): each span's ends and the points where a coordinate's
+derivative vanishes, found as the roots of that derivative's Bernstein
+polynomial and evaluated on the curve (exact up to rounding). The other
+families sample 64 points per span (at least 64) and return the samples'
+box. For ranges guaranteed through rounding use the enclosures below.
+`qaws_surface_compute_bounds` gives a surface's box.
 
 ## Closest points
 

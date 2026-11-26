@@ -45,6 +45,9 @@ qaws_status qaws_curve_compute_parameter_at_arc_length(
 	qaws_scalar parameter_min,
 	qaws_scalar length);
 
+/* The box of the curve: for Bezier, rational Bezier, B-spline, NURBS and views over whole spans its true extremes (the
+   span ends and the roots of each coordinate's derivative, evaluated on the curve); for the other families the box of 64
+   samples per span. */
 qaws_status qaws_curve_compute_bounds_2d(
 	qaws_vec2* out_min,
 	qaws_vec2* out_max,
