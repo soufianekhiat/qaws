@@ -213,41 +213,61 @@ qaws_scalar qaws_internal_parameter_to_distance(
 	return table_distances[low] + alpha * (table_distances[high] - table_distances[low]);
 }
 
-/* rtsafe-style: a Newton step on s(t) - length with s' = |C'|, a bisection when the step leaves the bracket or does
-   not halve the previous one; s(t) carried incrementally from the last iterate. */
+/* The spans from t_start, whole, until the one the length ends in; there rtsafe-style: a Newton step on s(t) - length
+   with s' = |C'|, a bisection when the step leaves the bracket or does not halve the previous one, s(t) carried
+   incrementally from the last iterate; to QAWS_EPSILON of the length walked to the span's end. */
 qaws_status qaws_internal_parameter_at_arc_length(
 	qaws_scalar* out_parameter,
 	qaws_curve const* curve,
 	qaws_scalar t_start,
 	qaws_scalar length)
 {
-	qaws_scalar t_end, total, piece;
-	double lo, hi, t, s, step_old, step;
-	unsigned int it;
+	qaws_scalar t_end, piece;
+	double acc = 0.0, a, span_len = 0.0, lo, hi, t, s, step_old, step, scale;
+	unsigned int it, k;
 
 	if (!curve || !out_parameter)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	t_end = curve->parameter_range.max_value;
 	if (!(t_start >= curve->parameter_range.min_value && t_start <= t_end) || !(length >= (qaws_scalar)0))
 		return QAWS_STATUS_OUT_OF_RANGE;
-	qaws_internal_arc_length(&total, curve, t_start, t_end);
-	if (length > total * (1 + 4 * QAWS_EPSILON))
-		return QAWS_STATUS_OUT_OF_RANGE;
-	if (length >= total || length == (qaws_scalar)0) {
-		*out_parameter = length == (qaws_scalar)0 ? t_start : t_end;
+	if (length == (qaws_scalar)0) {
+		*out_parameter = t_start;
 		return QAWS_STATUS_OK;
 	}
 
-	lo = t_start;
-	hi = t_end;
-	t = lo + (hi - lo) * ((double)length / (double)total);
-	qaws_internal_arc_length(&piece, curve, t_start, (qaws_scalar)t);
-	s = piece;
+	a = t_start;
+	for (k = 0; k < curve->span_count; k++) {
+		double b = curve->span_boundaries[k + 1];
+		if (b <= t_start)
+			continue;
+		if (b > (double)t_end)
+			b = t_end;
+		span_len = arc_length_segment(curve, (qaws_scalar)a, (qaws_scalar)b);
+		if (acc + span_len >= (double)length)
+			break;
+		acc += span_len;
+		a = b;
+	}
+	if (k == curve->span_count) {
+		/* past the last span: the end, or out of range past rounding */
+		if ((double)length > acc * (1 + 4 * (double)QAWS_EPSILON))
+			return QAWS_STATUS_OUT_OF_RANGE;
+		*out_parameter = t_end;
+		return QAWS_STATUS_OK;
+	}
+
+	lo = a;
+	hi = curve->span_boundaries[k + 1] < t_end ? (double)curve->span_boundaries[k + 1] : (double)t_end;
+	scale = acc + span_len;
+	t = span_len > 0 ? lo + (hi - lo) * (((double)length - acc) / span_len) : lo;
+	qaws_internal_arc_length(&piece, curve, (qaws_scalar)lo, (qaws_scalar)t);
+	s = acc + piece;
 	step_old = hi - lo;
 	step = step_old;
 	for (it = 0; it < 100; it++) {
 		double f = s - (double)length, v, t_next;
-		if (fabs(f) <= (double)QAWS_EPSILON * (double)total)
+		if (fabs(f) <= (double)QAWS_EPSILON * scale)
 			break;
 		if (f < 0)
 			lo = t;
