@@ -542,6 +542,7 @@
 #define qaws_internal_curve_fit_cubic QAWS_SFX(qaws_internal_curve_fit_cubic)
 #define qaws_internal_curve_free QAWS_SFX(qaws_internal_curve_free)
 #define qaws_internal_curve_point QAWS_SFX(qaws_internal_curve_point)
+#define qaws_internal_curve_span_bezier QAWS_SFX(qaws_internal_curve_span_bezier)
 #define qaws_internal_curve_tangent_any QAWS_SFX(qaws_internal_curve_tangent_any)
 #define qaws_internal_curve_view_copy QAWS_SFX(qaws_internal_curve_view_copy)
 #define qaws_internal_curve_window QAWS_SFX(qaws_internal_curve_window)

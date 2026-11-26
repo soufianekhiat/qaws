@@ -979,6 +979,124 @@ static void test_winding_number(void)
 	}
 }
 
+/* The box of a curve: its true extremes, interior ones included - a quadratic Bezier's top (4/3 at t = 2/3), a rational
+   arc's right end (x = 1 at its middle) - and, on a noisy cubic B-spline and a NURBS, every one of 20000 samples
+   inside it with the sampled extremes within a step's sag of its sides. */
+static void bounds_check(qaws_curve const* c, unsigned int dim, char const* name)
+{
+	qaws_vec3 lo3, hi3;
+	qaws_vec2 lo2, hi2;
+	double lo[3], hi[3], smin[3] = { HUGE_VAL, HUGE_VAL, HUGE_VAL }, smax[3] = { -HUGE_VAL, -HUGE_VAL, -HUGE_VAL };
+	double out = 0, gap = 0, size = 0, tol = QAWS_SCALAR_IS_FLOAT ? 1e-5 : 1e-12;
+	qaws_range r = qaws_curve_get_parameter_range(c);
+	unsigned int i, k, n = 20000;
+	qaws_status st;
+	char msg[200];
+	if (dim == 2)
+	{
+		st = qaws_curve_compute_bounds_2d(&lo2, &hi2, c);
+		lo[0] = lo2.x, lo[1] = lo2.y, hi[0] = hi2.x, hi[1] = hi2.y;
+	}
+	else
+	{
+		st = qaws_curve_compute_bounds_3d(&lo3, &hi3, c);
+		lo[0] = lo3.x, lo[1] = lo3.y, lo[2] = lo3.z, hi[0] = hi3.x, hi[1] = hi3.y, hi[2] = hi3.z;
+	}
+	TEST_ASSERT_STATUS(st);
+	for (i = 0; i <= n; i++)
+	{
+		qaws_scalar t = r.min_value + (r.max_value - r.min_value) * (qaws_scalar)i / (qaws_scalar)n;
+		double x[3];
+		if (dim == 2)
+		{
+			qaws_eval_result_2d e;
+			qaws_curve_evaluate_2d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
+			x[0] = e.position.x, x[1] = e.position.y;
+		}
+		else
+		{
+			qaws_eval_result_3d e;
+			qaws_curve_evaluate_3d(&e, c, t, QAWS_EVAL_FLAG_POSITION);
+			x[0] = e.position.x, x[1] = e.position.y, x[2] = e.position.z;
+		}
+		for (k = 0; k < dim; k++)
+		{
+			smin[k] = fmin(smin[k], x[k]), smax[k] = fmax(smax[k], x[k]);
+			out = fmax(out, fmax(lo[k] - x[k], x[k] - hi[k]));
+		}
+	}
+	for (k = 0; k < dim; k++)
+	{
+		size = fmax(size, smax[k] - smin[k]);
+		gap = fmax(gap, fmax(smin[k] - lo[k], hi[k] - smax[k]));
+	}
+	sprintf(msg, "%s: every sample inside the box (past it by %.3g), its sides within %.3g of the sampled extremes", name, out, gap);
+	TEST_ASSERT(out <= tol * (1 + size) && gap <= 1e-6 * (1 + size), msg);
+}
+
+static void test_bounds_exact(void)
+{
+	qaws_curve* c = NULL;
+	qaws_vec2 lo, hi;
+	qaws_status st;
+	double tol = QAWS_SCALAR_IS_FLOAT ? 1e-5 : 1e-12;
+	char msg[200];
+	printf("test_bounds_exact\n");
+	{
+		qaws_vec2 pts[] = { {0, 0}, {1, 2}, {3, 1} };
+		qaws_bezier_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = QAWS_DIMENSION_2D, d.degree = 2, d.control_points = pts, d.control_point_count = 3;
+		qaws_curve_create_bezier(&c, &d);
+		st = qaws_curve_compute_bounds_2d(&lo, &hi, c);
+		sprintf(msg, "quadratic Bezier: box [%.17g, %.17g] x [%.17g, %.17g], its top 4/3 at t = 2/3", (double)lo.x, (double)hi.x, (double)lo.y, (double)hi.y);
+		TEST_ASSERT(st == QAWS_STATUS_OK && fabs(hi.y - 4.0 / 3.0) <= tol && lo.x == 0 && lo.y == 0 && fabs(hi.x - 3) <= tol, msg);
+		bounds_check(c, 2, "quadratic Bezier");
+		qaws_curve_destroy(c);
+	}
+	{
+		/* 120 degrees of the unit circle: ends at -60 and 60 degrees, the middle point where the tangents meet, weight cos 60 */
+		qaws_scalar pts[] = { (qaws_scalar)0.5, (qaws_scalar)-0.8660254037844386, 2, 0, (qaws_scalar)0.5, (qaws_scalar)0.8660254037844386 };
+		qaws_scalar w[] = { 1, (qaws_scalar)0.5, 1 };
+		qaws_rational_bezier_desc d;
+		memset(&d, 0, sizeof d);
+		d.dimension = QAWS_DIMENSION_2D, d.degree = 2, d.control_points = pts, d.control_point_count = 3, d.weights = w, d.weight_count = 3;
+		qaws_curve_create_rational_bezier(&c, &d);
+		st = qaws_curve_compute_bounds_2d(&lo, &hi, c);
+		sprintf(msg, "rational arc: box x [%.17g, %.17g], its right side 1 at the arc's middle", (double)lo.x, (double)hi.x);
+		TEST_ASSERT(st == QAWS_STATUS_OK && fabs(hi.x - 1) <= tol && fabs(lo.x - 0.5) <= tol, msg);
+		bounds_check(c, 2, "rational arc");
+		qaws_curve_destroy(c);
+	}
+	{
+		qaws_vec3 p[24];
+		qaws_scalar w[24], knots[28];
+		qaws_bspline_desc bd;
+		qaws_nurbs_desc nd;
+		unsigned int i;
+		for (i = 0; i < 24; i++)
+		{
+			p[i].x = (qaws_scalar)(cos(0.5 * i) + 0.3 * sin(7.0 * i));
+			p[i].y = (qaws_scalar)(sin(0.5 * i) + 0.3 * cos(5.0 * i));
+			p[i].z = (qaws_scalar)(0.1 * i + 0.4 * sin(3.0 * i));
+			w[i] = (qaws_scalar)(1.25 + 0.75 * sin(2.0 * i));
+		}
+		memset(&bd, 0, sizeof bd);
+		bd.dimension = QAWS_DIMENSION_3D, bd.degree = 3, bd.control_points = p, bd.control_point_count = 24, bd.is_uniform = 1;
+		qaws_curve_create_bspline(&c, &bd);
+		bounds_check(c, 3, "noisy cubic B-spline");
+		qaws_curve_destroy(c);
+		for (i = 0; i < 28; i++)
+			knots[i] = (qaws_scalar)(i < 4 ? 0 : i >= 24 ? 21 : i - 3);
+		memset(&nd, 0, sizeof nd);
+		nd.dimension = QAWS_DIMENSION_3D, nd.degree = 3, nd.control_points = p, nd.control_point_count = 24;
+		nd.knots = knots, nd.knot_count = 28, nd.weights = w, nd.weight_count = 24;
+		qaws_curve_create_nurbs(&c, &nd);
+		bounds_check(c, 3, "NURBS, weights 0.5 to 2");
+		qaws_curve_destroy(c);
+	}
+}
+
 int test_17_inspection_main(void)
 {
 	g_pass = 0; g_fail = 0;
@@ -993,6 +1111,7 @@ int test_17_inspection_main(void)
 	test_extrema();
 	test_curvature_comb();
 	test_winding_number();
+	test_bounds_exact();
 
 	printf("17_inspection: %d passed, %d failed\n", g_pass, g_fail);
 	return g_fail > 0 ? 1 : 0;

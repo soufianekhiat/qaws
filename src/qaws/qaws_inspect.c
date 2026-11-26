@@ -7,6 +7,7 @@
 #include "internal/qaws_internal_types.h"
 #include "internal/qaws_internal_arc_length.h"
 #include "internal/qaws_internal_closest.h"
+#include "internal/qaws_internal_basis.h"
 #include "internal/qaws_internal_solver.h"
 #include "internal/qaws_internal_fit.h"
 #include <stdlib.h>
@@ -112,6 +113,187 @@ qaws_status qaws_curve_compute_parameter_at_arc_length(
 		out_parameter, curve, parameter_min, length);
 }
 
+/* ---- bounds: the span ends and the points where a coordinate's derivative vanishes ---- */
+
+#define BN_MAX (2 * (QAWS_INTERNAL_BASIS_MAX_DEGREE + 1))
+
+/* the polynomial of Bernstein coefficients b[0..m] on [0, 1] at u (de Casteljau) */
+static double bn_eval(double const* b, unsigned int m, double u)
+{
+	double t[BN_MAX];
+	unsigned int r, j;
+	memcpy(t, b, sizeof(double) * (m + 1));
+	for (r = 1; r <= m; r++)
+		for (j = 0; j + r <= m; j++)
+			t[j] += u * (t[j + 1] - t[j]);
+	return t[0];
+}
+
+/* sign changes of b[0..m], zeros skipped: a bound on the roots inside (Descartes' rule in the Bernstein basis) */
+static unsigned int bn_changes(double const* b, unsigned int m)
+{
+	unsigned int i, n = 0;
+	int last = 0;
+	for (i = 0; i <= m; i++)
+	{
+		int sg = b[i] > 0 ? 1 : b[i] < 0 ? -1 : 0;
+		if (sg)
+		{
+			if (last && sg != last)
+				n++;
+			last = sg;
+		}
+	}
+	return n;
+}
+
+/* the roots in (a, b) of g (degree m on [0, 1]) whose coefficients over [a, b] are c, appended to u (cap entries): none
+   without a sign change, bisected on g where the ends differ and one change is all, else the halves (past depth 40 the
+   middle) */
+static void bn_roots(double const* g, double const* c, unsigned int m, double a, double b, unsigned int depth,
+	double* u, unsigned int* n, unsigned int cap)
+{
+	unsigned int v = bn_changes(c, m);
+	if (!v || *n >= cap)
+		return;
+	if (v == 1 && ((c[0] < 0 && c[m] > 0) || (c[0] > 0 && c[m] < 0)))
+	{
+		double lo = a, hi = b;
+		int const below = c[0] < 0;
+		unsigned int it;
+		for (it = 0; it < 80; it++)
+		{
+			double mid = 0.5 * (lo + hi), f;
+			if (!(mid > lo && mid < hi))
+				break;
+			f = bn_eval(g, m, mid);
+			if (f == 0)
+			{
+				lo = hi = mid;
+				break;
+			}
+			if ((f < 0) == below)
+				lo = mid;
+			else
+				hi = mid;
+		}
+		u[(*n)++] = 0.5 * (lo + hi);
+		return;
+	}
+	if (depth >= 40 || !(b - a > 1e-14))
+	{
+		u[(*n)++] = 0.5 * (a + b);
+		return;
+	}
+	{
+		double t[BN_MAX], left[BN_MAX], right[BN_MAX];
+		unsigned int r, j;
+		memcpy(t, c, sizeof(double) * (m + 1));
+		left[0] = t[0];
+		right[m] = t[m];
+		for (r = 1; r <= m; r++)
+		{
+			for (j = 0; j + r <= m; j++)
+				t[j] = 0.5 * (t[j] + t[j + 1]);
+			left[r] = t[0];
+			right[m - r] = t[m - r];
+		}
+		bn_roots(g, left, m, a, 0.5 * (a + b), depth + 1, u, n, cap);
+		bn_roots(g, right, m, 0.5 * (a + b), b, depth + 1, u, n, cap);
+	}
+}
+
+static double bn_binom(unsigned int n, unsigned int k)
+{
+	double r = 1;
+	unsigned int i;
+	for (i = 1; i <= k; i++)
+		r = r * (double)(n - k + i) / (double)i;
+	return r;
+}
+
+/* The box of a curve with Bezier windows: per span its ends and the points where a coordinate's derivative vanishes -
+   the roots of that derivative's Bernstein polynomial (of X' for a polynomial span, of X' W - X W' for a rational one),
+   isolated by sign changes and bisected to rounding - each evaluated on the curve. QAWS_STATUS_UNSUPPORTED_OPERATION
+   for a curve with a span without a window over that very span (the caller samples). */
+static qaws_status bn_curve_bounds(qaws_curve const* c, unsigned int dim, double* lo, double* hi)
+{
+	unsigned int const h = dim + 1;
+	unsigned int sp, k, i, j, p;
+	for (k = 0; k < dim; k++)
+		lo[k] = HUGE_VAL, hi[k] = -HUGE_VAL;
+	for (sp = 0; sp < c->span_count; sp++)
+	{
+		double bez[(QAWS_INTERNAL_BASIS_MAX_DEGREE + 1) * 4], u[3 * BN_MAX + 2], t0, t1;
+		unsigned int nu = 0, q;
+		int poly = 1;
+		if (!(c->span_boundaries[sp + 1] > c->span_boundaries[sp]))
+			continue;
+		if (!qaws_internal_curve_span_bezier(&p, bez, &t0, &t1, c, sp) || (p
+			&& (t0 != (double)c->span_boundaries[sp] || t1 != (double)c->span_boundaries[sp + 1])))
+			return QAWS_STATUS_UNSUPPORTED_OPERATION;
+		for (i = 0; i <= p; i++)
+			poly = poly && bez[i * h + dim] == 1.0;
+		u[nu++] = 0;
+		u[nu++] = 1;
+		for (k = 0; p && k < dim; k++)
+		{
+			double g[BN_MAX];
+			unsigned int m;
+			if (poly)
+			{
+				m = p - 1;
+				for (i = 0; i < p; i++)
+					g[i] = bez[(i + 1) * h + k] - bez[i * h + k];
+			}
+			else
+			{
+				/* X' W - X W' over degree 2p - 1: the products of Bernstein polynomials of degrees p - 1 and p */
+				double ba[BN_MAX], bb[BN_MAX], bm[BN_MAX];
+				m = 2 * p - 1;
+				for (i = 0; i <= m; i++)
+					g[i] = 0, bm[i] = bn_binom(m, i);
+				for (i = 0; i <= p; i++)
+					ba[i] = i < p ? bn_binom(p - 1, i) : 0, bb[i] = bn_binom(p, i);
+				for (i = 0; i < p; i++)
+				{
+					double const dx = bez[(i + 1) * h + k] - bez[i * h + k], dw = bez[(i + 1) * h + dim] - bez[i * h + dim];
+					for (j = 0; j <= p; j++)
+						g[i + j] += ba[i] * bb[j] / bm[i + j] * (dx * bez[j * h + dim] - dw * bez[j * h + k]);
+				}
+			}
+			bn_roots(g, g, m, 0, 1, 0, u, &nu, sizeof u / sizeof u[0]);
+		}
+		for (q = 0; q < nu; q++)
+		{
+			double x[3];
+			qaws_status st;
+			if (dim == 2)
+			{
+				qaws_eval_result_2d e;
+				st = qaws_curve_evaluate_span_2d(&e, c, sp, (qaws_scalar)u[q], QAWS_EVAL_FLAG_POSITION);
+				x[0] = e.position.x, x[1] = e.position.y;
+			}
+			else
+			{
+				qaws_eval_result_3d e;
+				st = qaws_curve_evaluate_span_3d(&e, c, sp, (qaws_scalar)u[q], QAWS_EVAL_FLAG_POSITION);
+				x[0] = e.position.x, x[1] = e.position.y, x[2] = e.position.z;
+			}
+			if (st != QAWS_STATUS_OK)
+				return st;
+			for (k = 0; k < dim; k++)
+			{
+				if (x[k] < lo[k])
+					lo[k] = x[k];
+				if (x[k] > hi[k])
+					hi[k] = x[k];
+			}
+		}
+	}
+	return lo[0] <= hi[0] ? QAWS_STATUS_OK : QAWS_STATUS_UNSUPPORTED_OPERATION;
+}
+
 qaws_status qaws_curve_compute_bounds_2d(
 	qaws_vec2 *out_min,
 	qaws_vec2 *out_max,
@@ -131,6 +313,20 @@ qaws_status qaws_curve_compute_bounds_2d(
 	if (curve->dimension != QAWS_DIMENSION_2D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
+	{
+		double lo[3], hi[3];
+		status = bn_curve_bounds(curve, 2, lo, hi);
+		if (status == QAWS_STATUS_OK)
+		{
+			out_min->x = (qaws_scalar)lo[0], out_min->y = (qaws_scalar)lo[1];
+			out_max->x = (qaws_scalar)hi[0], out_max->y = (qaws_scalar)hi[1];
+			return QAWS_STATUS_OK;
+		}
+		if (status != QAWS_STATUS_UNSUPPORTED_OPERATION)
+			return status;
+	}
+
+	/* the other families: 64 samples per span */
 	sample_count = 64 * curve->span_count;
 	if (sample_count < 64)
 		sample_count = 64;
@@ -191,6 +387,20 @@ qaws_status qaws_curve_compute_bounds_3d(
 	if (curve->dimension != QAWS_DIMENSION_3D)
 		return QAWS_STATUS_INVALID_DIMENSION;
 
+	{
+		double lo[3], hi[3];
+		status = bn_curve_bounds(curve, 3, lo, hi);
+		if (status == QAWS_STATUS_OK)
+		{
+			out_min->x = (qaws_scalar)lo[0], out_min->y = (qaws_scalar)lo[1], out_min->z = (qaws_scalar)lo[2];
+			out_max->x = (qaws_scalar)hi[0], out_max->y = (qaws_scalar)hi[1], out_max->z = (qaws_scalar)hi[2];
+			return QAWS_STATUS_OK;
+		}
+		if (status != QAWS_STATUS_UNSUPPORTED_OPERATION)
+			return status;
+	}
+
+	/* the other families: 64 samples per span */
 	sample_count = 64 * curve->span_count;
 	if (sample_count < 64)
 		sample_count = 64;

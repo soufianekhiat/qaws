@@ -97,6 +97,17 @@ static void cl_bezier(double const* win, double const* uk, unsigned int p, unsig
 	}
 }
 
+int qaws_internal_curve_span_bezier(unsigned int* p, double* bez, double* t0, double* t1, qaws_curve const* c, unsigned int s)
+{
+	double win[CL_MAX * 4], uk[2 * CL_MAX];
+	if (!cl_window(c, s, p, win, uk))
+		return 0;
+	cl_bezier(win, uk, *p, (unsigned int)c->dimension + 1, bez);
+	*t0 = *p ? uk[*p - 1] : (double)c->span_boundaries[s];
+	*t1 = *p ? uk[*p] : (double)c->span_boundaries[s + 1];
+	return 1;
+}
+
 /* de Casteljau at u in place: keeps the right part (or the left) */
 static void cl_split(double* b, unsigned int p, unsigned int h, double u, int right)
 {

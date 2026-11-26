@@ -11,6 +11,10 @@ int qaws_internal_view_span_window(unsigned int* degree, double* window, double*
 /* The same for a curve with Bezier spans (Bezier, rational Bezier, B-spline, NURBS, borrowed splines): span s's window,
    its degree and knots; 0 for the other families. */
 int qaws_internal_curve_window(qaws_curve const* c, unsigned int s, unsigned int* p, double* win, double* uk);
+/* span s of curve c with a window (as qaws_internal_curve_window) as its Bezier points over the window's knot span
+   [t0, t1]: degree + 1 homogeneous points, dim + 1 doubles each, the weight last (QAWS_INTERNAL_BASIS_MAX_DEGREE + 1
+   points at most); 0 for the curves without one. [t0, t1] is the span itself but for a view's partial end spans. */
+int qaws_internal_curve_span_bezier(unsigned int* p, double* bez, double* t0, double* t1, qaws_curve const* c, unsigned int s);
 
 /* Certifies a closest point on a curve with Bezier spans (Bezier, rational Bezier, B-spline, NURBS, borrowed splines):
    branch and bound from the parameter *io_t, which it replaces when it finds a closer point. The global minimum distance
