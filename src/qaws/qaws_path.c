@@ -23,6 +23,7 @@
 #include "internal/qaws_internal_kinds.h"
 #include "internal/qaws_internal_flatten.h"
 #include "internal/qaws_internal_path.h"
+#include "internal/qaws_internal_parallel.h"
 #if defined(QAWS_ENABLE_EXACT) && QAWS_ENABLE_EXACT
 #include "qaws_exact.h"
 #endif
@@ -903,21 +904,43 @@ static int pt_wind(pt_segs* q, unsigned int from, unsigned int to, double const*
 	return 1;
 }
 
-qaws_status qaws_region_locate_point_2d(qaws_point_location* out_location, qaws_path_2d const* paths, unsigned int path_count,
-	qaws_fill_rule fill_rule, qaws_vec2 point, qaws_scalar tolerance)
+/* a region's flattening, its paths' closed flags, its fill rule and ON tolerance */
+struct qaws_region_2d
 {
 	pt_segs q;
-	double ext = 0.0, tol, pt[2], lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
-	int winding = 0;
-	unsigned int i, start = 0;
+	int* closed;
+	unsigned int path_count;
+	qaws_fill_rule fill_rule;
+	double tol;
+};
+
+qaws_status qaws_region_create_2d(qaws_region_2d** out_region, qaws_path_2d const* paths, unsigned int path_count,
+	qaws_fill_rule fill_rule, qaws_scalar tolerance)
+{
+	qaws_region_2d* r;
+	double ext = 0.0, lo[2] = { 1e300, 1e300 }, hi[2] = { -1e300, -1e300 };
+	unsigned int i;
 	qaws_status s;
-	if ((!paths && path_count) || !out_location)
+	if (out_region)
+		*out_region = NULL;
+	if ((!paths && path_count) || !out_region)
 		return QAWS_STATUS_INVALID_ARGUMENT;
 	for (i = 0; i < path_count; i++)
 		if (!pt_check_path(&paths[i]))
 			return QAWS_STATUS_INVALID_ARGUMENT;
-	*out_location = QAWS_POINT_OUTSIDE;
-	memset(&q, 0, sizeof(q));
+	r = (qaws_region_2d*)qaws_internal_zalloc(1, sizeof(qaws_region_2d));
+	if (!r)
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	r->closed = path_count ? (int*)qaws_internal_malloc(qaws_internal_mul2(sizeof(int), path_count)) : NULL;
+	if (path_count && !r->closed)
+	{
+		qaws_internal_free(r);
+		return QAWS_STATUS_ALLOCATION_FAILURE;
+	}
+	for (i = 0; i < path_count; i++)
+		r->closed[i] = paths[i].closed;
+	r->path_count = path_count;
+	r->fill_rule = fill_rule;
 	/* extent from a first coarse flattening */
 	for (i = 0; i < path_count; i++)
 	{
@@ -933,38 +956,113 @@ qaws_status qaws_region_locate_point_2d(qaws_point_location* out_location, qaws_
 	if (hi[0] >= lo[0])
 		ext = hypot(hi[0] - lo[0], hi[1] - lo[1]);
 	if (!(ext > 0)) ext = 1.0;
-	tol = tolerance > 0 ? (double)tolerance : ext * PT_ON_REL;
+	r->tol = tolerance > 0 ? (double)tolerance : ext * PT_ON_REL;
+	s = pt_flatten(paths, path_count, ext / 1024, &r->q);
+	if (s != QAWS_STATUS_OK)
+	{
+		qaws_region_destroy_2d(r);
+		return s;
+	}
+	*out_region = r;
+	return QAWS_STATUS_OK;
+}
+
+void qaws_region_destroy_2d(qaws_region_2d* region)
+{
+	if (!region)
+		return;
+	qaws_internal_free(region->q.s);
+	qaws_internal_free(region->closed);
+	qaws_internal_free(region);
+}
+
+/* where point lies in a prepared region (reads it only: safe from any thread) */
+static qaws_point_location pt_locate(qaws_region_2d const* r, qaws_vec2 point)
+{
+	pt_segs* q = (pt_segs*)&r->q;   /* (pt_wind reads the segments only) */
+	double pt[2];
+	int winding = 0;
+	unsigned int i, start = 0;
 	pt[0] = point.x; pt[1] = point.y;
-	s = pt_flatten(paths, path_count, ext / 1024, &q);
-	if (s != QAWS_STATUS_OK) { qaws_internal_free(q.s); return s; }
 	/* on a boundary? */
-	for (i = 0; i < q.n; i++)
-		if (pt_seg_dist(pt, q.s[i].p0, q.s[i].p1) <= q.s[i].r + tol && pt_true_dist(&q.s[i], pt) <= tol)
-		{
-			*out_location = QAWS_POINT_ON;
-			qaws_internal_free(q.s);
-			return QAWS_STATUS_OK;
-		}
+	for (i = 0; i < q->n; i++)
+		if (pt_seg_dist(pt, q->s[i].p0, q->s[i].p1) <= q->s[i].r + r->tol && pt_true_dist(&q->s[i], pt) <= r->tol)
+			return QAWS_POINT_ON;
 	/* winding, path by path: a path's segments are contiguous */
-	for (i = 0; i < path_count; i++)
+	for (i = 0; i < r->path_count; i++)
 	{
 		unsigned int n = 0;
 		double angle = 0.0;
-		while (start + n < q.n && q.s[start + n].path == i)
+		while (start + n < q->n && q->s[start + n].path == i)
 			n++;
-		pt_wind(&q, start, start + n, pt, &angle);
+		pt_wind(q, start, start + n, pt, &angle);
 		/* an open path is closed by its chord back to the start */
-		if (!paths[i].closed && n)
+		if (!r->closed[i] && n)
 		{
-			double ax = q.s[start + n - 1].p1[0] - pt[0], ay = q.s[start + n - 1].p1[1] - pt[1];
-			double bx = q.s[start].p0[0] - pt[0], by = q.s[start].p0[1] - pt[1];
+			double ax = q->s[start + n - 1].p1[0] - pt[0], ay = q->s[start + n - 1].p1[1] - pt[1];
+			double bx = q->s[start].p0[0] - pt[0], by = q->s[start].p0[1] - pt[1];
 			angle += atan2(ax * by - ay * bx, ax * bx + ay * by);
 		}
 		winding += (int)floor(angle / (2 * PT_PI) + 0.5);
 		start += n;
 	}
-	qaws_internal_free(q.s);
-	*out_location = qaws_fill_rule_inside(fill_rule, winding) ? QAWS_POINT_INSIDE : QAWS_POINT_OUTSIDE;
+	return qaws_fill_rule_inside(r->fill_rule, winding) ? QAWS_POINT_INSIDE : QAWS_POINT_OUTSIDE;
+}
+
+typedef struct pt_locate_job
+{
+	qaws_point_location* out;
+	qaws_region_2d const* r;
+	qaws_vec2 const* p;
+} pt_locate_job;
+
+static qaws_status pt_locate_chunk(void* user, unsigned int chunk, unsigned int begin, unsigned int end)
+{
+	pt_locate_job const* j = (pt_locate_job const*)user;
+	unsigned int i;
+	(void)chunk;
+	for (i = begin; i < end; i++)
+		j->out[i] = pt_locate(j->r, j->p[i]);
+	return QAWS_STATUS_OK;
+}
+
+static char const* const pt_locate_stages[] = { "locate" };
+
+qaws_status qaws_region_locate_points_2d(qaws_point_location* out_locations, qaws_region_2d const* region, qaws_progress const* progress,
+	qaws_vec2 const* points, unsigned int point_count, qaws_batch_executor const* executor)
+{
+	pt_locate_job j;
+	qaws_pg g;
+	qaws_status s;
+	if (!region || (point_count && (!points || !out_locations)))
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	j.out = out_locations, j.r = region, j.p = points;
+	qaws_pg_init(&g, progress, pt_locate_stages, 1);
+	if (qaws_pg_stage(&g, 0, point_count))
+		return QAWS_STATUS_CANCELLED;
+	s = qaws_internal_parallel_pg(point_count, 64, pt_locate_chunk, &j, executor, &g);
+	if (s == QAWS_STATUS_OK)
+		qaws_pg_end(&g);
+	return s;
+}
+
+qaws_status qaws_region_locate_point_2d(qaws_point_location* out_location, qaws_path_2d const* paths, unsigned int path_count,
+	qaws_fill_rule fill_rule, qaws_vec2 point, qaws_scalar tolerance)
+{
+	qaws_region_2d* r = NULL;
+	qaws_status s;
+	unsigned int i;
+	if ((!paths && path_count) || !out_location)
+		return QAWS_STATUS_INVALID_ARGUMENT;
+	for (i = 0; i < path_count; i++)
+		if (!pt_check_path(&paths[i]))
+			return QAWS_STATUS_INVALID_ARGUMENT;
+	*out_location = QAWS_POINT_OUTSIDE;
+	s = qaws_region_create_2d(&r, paths, path_count, fill_rule, tolerance);
+	if (s != QAWS_STATUS_OK)
+		return s;
+	*out_location = pt_locate(r, point);
+	qaws_region_destroy_2d(r);
 	return QAWS_STATUS_OK;
 }
 

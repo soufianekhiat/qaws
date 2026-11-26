@@ -16,6 +16,7 @@
 
 #include "qaws_types.h"
 #include "qaws_status.h"
+#include "qaws_batch_executor.h"
 
 /*
  * 2D paths and regions of curves.
@@ -130,6 +131,30 @@ qaws_status qaws_region_locate_point_2d(
 	qaws_fill_rule fill_rule,
 	qaws_vec2 point,
 	qaws_scalar tolerance);
+
+/* A region prepared for many points: its extent and flattening made once, each point then located as
+   qaws_region_locate_point_2d locates it (the same answer). It keeps pointers to the curves: they must outlive it and
+   stay unchanged. */
+typedef struct qaws_region_2d qaws_region_2d;
+
+qaws_status qaws_region_create_2d(
+	qaws_region_2d** out_region,
+	qaws_path_2d const* paths,
+	unsigned int path_count,
+	qaws_fill_rule fill_rule,
+	qaws_scalar tolerance);
+void qaws_region_destroy_2d(qaws_region_2d* region);
+
+/* point_count points located, out_locations[i] for points[i]; progress (may be NULL) reports the points done and polls
+   its cancel on this thread (QAWS_STATUS_CANCELLED: the locations of the chunks not run unset); through the executor when
+   one is given (NULL: on this thread). */
+qaws_status qaws_region_locate_points_2d(
+	qaws_point_location* out_locations,
+	qaws_region_2d const* region,
+	qaws_progress const* progress,
+	qaws_vec2 const* points,
+	unsigned int point_count,
+	qaws_batch_executor const* executor);
 
 /* ------------------------------------------------------------------------ */
 /*  Polylines (Clipper2's path utilities on point arrays)                   */

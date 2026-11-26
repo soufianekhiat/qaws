@@ -6,6 +6,14 @@ All notable changes to Qaws are documented here.
 
 ### Added
 
+- `qaws_region_create_2d`, `qaws_region_locate_points_2d`,
+  `qaws_region_destroy_2d` (`qaws_path.h`): a region prepared once (extent
+  and flattening) for many point locations, each answer the one
+  `qaws_region_locate_point_2d` gives; an executor and a progress with
+  cancel for the batch. Test 180, test 182.
+- Test 182: synthetic stress of the hot calls, timed, with a hash of every
+  output bit (`QAWS_STRESS=k`, `QAWS_STRESS_ONLY=case`).
+
 - `qaws_surface_seams_*` and `qaws_surface_shatter_*` (`qaws_shatter.h`): seams
   and shatter of curved surfaces, as Houdini's Boolean "Seam" and "Shatter".
   Seams: the curves where a surface of A crosses one of B (or two of one
@@ -38,6 +46,17 @@ All notable changes to Qaws are documented here.
   spans lines. Test 84.
 
 ### Fixed
+
+- `qaws_curve_compute_bounds_2d/3d` on Bezier, rational Bezier, B-spline,
+  NURBS and views over whole spans: the true box (each span's ends and the
+  roots of each coordinate's derivative), where 64 samples per span could
+  miss an extreme between them; 12 times faster on a 64-point cubic. Test 17.
+- `qaws_curve_compute_parameter_at_arc_length` integrates only up to the
+  span the length ends in, not the whole curve first (2.8 times faster).
+- `qaws_polyline_simplify_2d` takes the nearest point from a heap (100k
+  points: 28.9 s to 44 ms) and `qaws_surface_tessellate` finds its vertices
+  and edge vertices through a table and sorted orders (15 times faster):
+  both were quadratic. Same results.
 
 - `qaws_curve_extract` on Hermite, Catmull-Rom, trajectory and subdivision
   curves: a cut within rounding of a span boundary (a few ulps short of it)

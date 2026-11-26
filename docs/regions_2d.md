@@ -48,7 +48,8 @@ All of these work on the true curves, not on a polygon approximation.
   of a coordinate vanishes.
 - **Winding number.** `qaws_path_compute_winding_2d` returns the winding number of a closed path around a point, or
   `INVALID_ARGUMENT` when the point lies on the path.
-- **Point location.** `qaws_region_locate_point_2d` returns `ON` when the point is within `tolerance` of a boundary.
+- **Point location.** `qaws_region_locate_point_2d` returns `ON` when the point is within `tolerance` of a boundary;
+  `qaws_region_create_2d` + `qaws_region_locate_points_2d` give the same answers for many points, the region prepared once.
   The default tolerance is 1e-10 of the region's extent (1e-5 in float builds). Otherwise it returns `INSIDE` or
   `OUTSIDE`, by the fill rule applied to the total winding number.
 

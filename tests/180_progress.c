@@ -445,7 +445,7 @@ static void test_surface_batch(void)
 	free(S.out);
 }
 
-/* ---- 2D seams and shatter ---- */
+/* ---- 2D regions: seams, shatter, points located ---- */
 
 typedef struct pg_regions
 {
@@ -454,6 +454,10 @@ typedef struct pg_regions
 	qaws_curve const* l1[1];
 	qaws_path_2d a, b;
 	qaws_batch_executor const* ex;
+	qaws_vec2* pts;                  /* the points the prepared region locates, ref the single calls' answers */
+	unsigned int npts;
+	qaws_point_location* ref;
+	qaws_point_location* out;
 } pg_regions;
 
 static void pg_region_desc(pg_regions* R, qaws_region_seam_desc* d, qaws_progress const* g)
@@ -500,6 +504,25 @@ static qaws_status pg_region_shatter(void* ctx, qaws_progress const* g)
 	return st;
 }
 
+/* the two disks as one region (non-zero): every point located as qaws_region_locate_point_2d does */
+static qaws_status pg_region_locate(void* ctx, qaws_progress const* g)
+{
+	pg_regions* R = (pg_regions*)ctx;
+	qaws_path_2d both[2];
+	qaws_region_2d* r = NULL;
+	qaws_status st;
+	both[0] = R->a, both[1] = R->b;
+	st = qaws_region_create_2d(&r, both, 2, QAWS_FILL_NON_ZERO, 0);
+	if (st != QAWS_STATUS_OK)
+		return QAWS_STATUS_INTERNAL_ERROR;
+	memset(R->out, 0xFF, sizeof *R->out * R->npts);
+	st = qaws_region_locate_points_2d(R->out, r, g, R->pts, R->npts, R->ex);
+	qaws_region_destroy_2d(r);
+	if (st == QAWS_STATUS_OK && memcmp(R->out, R->ref, sizeof *R->out * R->npts) != 0)
+		st = QAWS_STATUS_INTERNAL_ERROR;
+	return st;
+}
+
 static void test_regions(void)
 {
 	pg_regions R;
@@ -515,15 +538,41 @@ static void test_regions(void)
 	R.b.curves = R.l1;
 	R.b.curve_count = 1;
 	R.b.closed = 1;
+	{
+		/* a 40 x 25 grid over both disks and the points (1, 0), (0.2, 0), (2.2, 0) on their circles */
+		qaws_path_2d both[2];
+		unsigned int i, on = 0, in = 0;
+		R.npts = 1003;
+		R.pts = (qaws_vec2*)malloc(sizeof *R.pts * R.npts);
+		R.ref = (qaws_point_location*)malloc(sizeof *R.ref * R.npts);
+		R.out = (qaws_point_location*)malloc(sizeof *R.out * R.npts);
+		for (i = 0; i < 1000; i++)
+			R.pts[i].x = (qaws_scalar)(-1.3 + 3.8 * (i % 40) / 39.0), R.pts[i].y = (qaws_scalar)(-1.2 + 2.4 * (i / 40) / 24.0);
+		R.pts[1000].x = 1, R.pts[1000].y = 0;
+		R.pts[1001].x = (qaws_scalar)0.2, R.pts[1001].y = 0;
+		R.pts[1002].x = (qaws_scalar)2.2, R.pts[1002].y = 0;
+		both[0] = R.a, both[1] = R.b;
+		for (i = 0; i < R.npts; i++)
+		{
+			qaws_region_locate_point_2d(&R.ref[i], both, 2, QAWS_FILL_NON_ZERO, R.pts[i], 0);
+			on += R.ref[i] == QAWS_POINT_ON, in += R.ref[i] == QAWS_POINT_INSIDE;
+		}
+		TEST_ASSERT(on >= 3 && in > 100 && in + on < R.npts, "the region's points: some on its boundary, some inside, some outside");
+	}
 	pg_sweep("2D seams", pg_region_seams, &R);
 	pg_sweep("2D shatter", pg_region_shatter, &R);
+	pg_sweep("2D region, points located", pg_region_locate, &R);
 	ex.parallel_for = pg_serial_for;
 	ex.user = NULL;
 	R.ex = &ex;
 	pg_sweep("2D seams, executor", pg_region_seams, &R);
 	pg_sweep("2D shatter, executor", pg_region_shatter, &R);
+	pg_sweep("2D region, points located, executor", pg_region_locate, &R);
 	qaws_curve_destroy(R.c[0]);
 	qaws_curve_destroy(R.c[1]);
+	free(R.pts);
+	free(R.ref);
+	free(R.out);
 }
 
 int test_180_progress_main(void)

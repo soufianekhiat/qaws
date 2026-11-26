@@ -569,6 +569,30 @@ static void st_paths(st_inputs const* in)
 		}
 		st_report("region locate", n, t0, h, ok);
 	}
+	if (st_want("region prepared"))
+	{
+		/* the same points through a prepared region: the same hash as "region locate" */
+		qaws_path_2d path;
+		qaws_region_2d* r = NULL;
+		qaws_vec2* pts;
+		qaws_point_location* loc;
+		path.curves = (qaws_curve const* const*)in->chain2, path.curve_count = 16, path.closed = 1;
+		n = st_count(20000);
+		pts = (qaws_vec2*)malloc(sizeof *pts * n);
+		loc = (qaws_point_location*)malloc(sizeof *loc * n);
+		ok = pts && loc, h = 14695981039346656037ull, g_rng = 31;
+		for (i = 0; ok && i < n; i++)
+			pts[i].x = (qaws_scalar)(2.4 * st_rand() - 1.2), pts[i].y = (qaws_scalar)(2.4 * st_rand() - 1.2);
+		t0 = st_now();
+		ok = ok && qaws_region_create_2d(&r, &path, 1, QAWS_FILL_NON_ZERO, 0) == QAWS_STATUS_OK;
+		ok = ok && qaws_region_locate_points_2d(loc, r, NULL, pts, n, NULL) == QAWS_STATUS_OK;
+		for (i = 0; ok && i < n; i++)
+			h = st_hash(h, &loc[i], sizeof loc[i]);
+		st_report("region prepared", n, t0, h, ok);
+		qaws_region_destroy_2d(r);
+		free(pts);
+		free(loc);
+	}
 	if (st_want("polyline simplify"))
 	{
 		unsigned int m = 20000;

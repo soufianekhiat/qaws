@@ -124,6 +124,31 @@ point to pass on the wrong side of it is split until it cannot, so the
 angle the chords sweep around the point is the angle the curves sweep. An
 open path is closed by its chord back to the start.
 
+### Prepared regions
+
+```c
+typedef struct qaws_region_2d qaws_region_2d;
+
+qaws_status qaws_region_create_2d(qaws_region_2d** out_region, qaws_path_2d const* paths,
+	unsigned int path_count, qaws_fill_rule fill_rule, qaws_scalar tolerance);
+void qaws_region_destroy_2d(qaws_region_2d* region);
+qaws_status qaws_region_locate_points_2d(qaws_point_location* out_locations, qaws_region_2d const* region,
+	qaws_progress const* progress, qaws_vec2 const* points, unsigned int point_count,
+	qaws_batch_executor const* executor);
+```
+
+`qaws_region_locate_point_2d` finds the region's extent and flattens it on
+every call. For many points, `qaws_region_create_2d` does that once and
+`qaws_region_locate_points_2d` locates each point exactly as
+`qaws_region_locate_point_2d` would (the same answer), about 25 times
+faster per point on a 16-curve region. The region keeps pointers to the
+curves: they must outlive it and stay unchanged. The points run in chunks
+through the executor when one is given (NULL: on the calling thread);
+`progress` (may be NULL) reports the points done and polls its cancel on
+the calling thread (`QAWS_STATUS_CANCELLED`: the chunks not run leave their
+locations unset). A prepared region is read-only: any number of threads may
+locate points in it at once.
+
 ## Polylines
 
 Clipper2's path utilities on arrays of 2D points. Each takes `count` points
